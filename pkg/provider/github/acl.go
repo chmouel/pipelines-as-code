@@ -65,9 +65,56 @@ func (v *Provider) aclAllowedOkToTestFromAnOwner(ctx context.Context, event *inf
 	return false, nil
 }
 
+// checkUsersInAllowedTeams check if the user is in the allowed team
+func (v *Provider) checkUserInAllowedTeams(ctx context.Context, action string, rev *info.Event, allowedTeams []string) (bool, error) {
+	for _, team := range allowedTeams {
+		// TODO: caching (critical)
+		teamMembership, resp, err := v.Client.Teams.GetTeamMembershipBySlug(ctx, rev.Organization, team, rev.Sender)
+		if resp.StatusCode == http.StatusNotFound {
+			v.Logger.Infof("policy check: %s, team: %s is not found in the organization: %s or user: %s is not part of it", action, team, rev.Organization, rev.Sender)
+			continue
+		}
+		if err != nil {
+			// probably a 500 or another api error, no need to try again and again with other teams
+			return false, err
+		}
+
+		// TODO: maybe a setting to filter the roles and only allow certain role
+		// of a team
+		if teamMembership.GetState() == "active" {
+			v.Logger.Infof("policy check: %s, allowing user: %s as a member of the team: %s", action, rev.Sender, team)
+			return true, nil
+		}
+	}
+
+	v.Logger.Infof("policy check: %s, user: %s is not a member of any of the allowed teams: %v", rev.Sender, action)
+	return false, nil
+}
+
 // aclCheck check if we are allowed to run the pipeline on that PR
 func (v *Provider) aclCheckAll(ctx context.Context, rev *info.Event) (bool, error) {
 	if rev.Organization == rev.Sender {
+		return true, nil
+	}
+
+	// If the user who has submitted the pr is a member of the organization then allow
+	// the CI to be run.
+	isUserMemberOrg, err := v.checkSenderOrgMembership(ctx, rev)
+	if err != nil {
+		return false, err
+	}
+	if isUserMemberOrg {
+		v.Logger.Infof("allowing user: %s as a member of the organization: %s", rev.Sender, rev.Organization)
+		return true, nil
+	}
+
+	// If the user is a member of the repository then allow it.
+	checkSenderRepoMembership, err := v.checkSenderRepoMembership(ctx, rev)
+	if err != nil {
+		return false, err
+	}
+	if checkSenderRepoMembership {
+		v.Logger.Infof("allowing user: %s as a member of the repository", rev.Sender)
 		return true, nil
 	}
 
@@ -75,7 +122,7 @@ func (v *Provider) aclCheckAll(ctx context.Context, rev *info.Event) (bool, erro
 	// but has permission to push to branches then allow the CI to be run.
 	// This can only happen with GithubApp and Bots.
 	// Ex: dependabot, bots
-	if rev.PullRequestNumber != 0 {
+	if rev.PullRequestNumber > 0 {
 		isSameCloneURL, err := v.checkPullRequestForSameURL(ctx, rev)
 		if err != nil {
 			return false, err
@@ -85,36 +132,32 @@ func (v *Provider) aclCheckAll(ctx context.Context, rev *info.Event) (bool, erro
 		}
 	}
 
-	// If the user who has submitted the pr is a owner on the repo then allows
-	// the CI to be run.
-	isUserMemberRepo, err := v.checkSenderOrgMembership(ctx, rev)
-	if err != nil {
-		return false, err
-	}
-	if isUserMemberRepo {
-		return true, nil
-	}
+	// finally try the OWNERS file on the default branch
+	return v.checkSenderInOwnerFile(ctx, rev)
+}
 
-	checkSenderRepoMembership, err := v.checkSenderRepoMembership(ctx, rev)
-	if err != nil {
-		return false, err
-	}
-	if checkSenderRepoMembership {
-		return true, nil
-	}
-
+// checkSenderInOwnerFile check if the sender is in the OWNERS file
+func (v *Provider) checkSenderInOwnerFile(ctx context.Context, rev *info.Event) (bool, error) {
 	// If we have a prow OWNERS file in the defaultBranch (ie: master) then
 	// parse it in approvers and reviewers field and check if sender is in there.
 	ownerContent, err := v.getFileFromDefaultBranch(ctx, "OWNERS", rev)
 	if err != nil {
+		// check if the err is a not found
 		if strings.Contains(err.Error(), "cannot find") {
 			// no owner file, skipping
 			return false, nil
 		}
 		return false, err
 	}
-
-	return acl.UserInOwnerFile(ownerContent, rev.Sender)
+	userInOwnerFile, err := acl.UserInOwnerFile(ownerContent, rev.Sender)
+	if err != nil {
+		return false, err
+	}
+	if userInOwnerFile {
+		v.Logger.Infof("allowing user: %s listed in the OWNERS file on the default branch of the repository", rev.Sender)
+		return true, nil
+	}
+	return false, nil
 }
 
 // checkPullRequestForSameURL checks If PullRequests are for same clone URL and different branches

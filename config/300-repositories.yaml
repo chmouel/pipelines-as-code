@@ -70,6 +70,14 @@ spec:
                   description: Settings relative to the Repository
                   type: object
                   properties:
+                    policy:
+                      type: object
+                      description: Set policy on actions allowing only some teams
+                      ok_to_test:
+                        type: array
+                        items:
+                          description: list of teams allowed to run /ok-to-test
+                          type: string
                     github_app_token_scope_repos:
                       type: array
                       items:

@@ -70,7 +70,7 @@ type TaskInfos struct {
 
 // RepositorySpec is the spec of a repo
 type RepositorySpec struct {
-	ConcurrencyLimit *int         `json:"concurrency_limit,omitempty"`
+	ConcurrencyLimit *int         `json:"concurrency_limit,omitempty"` // move it to settings in further version of the spec
 	URL              string       `json:"url"`
 	GitProvider      *GitProvider `json:"git_provider,omitempty"`
 	Incomings        *[]Incoming  `json:"incoming,omitempty"`
@@ -81,6 +81,15 @@ type RepositorySpec struct {
 type Settings struct {
 	GithubAppTokenScopeRepos []string `json:"github_app_token_scope_repos,omitempty"`
 	PipelineRunProvenance    string   `json:"pipelinerun_provenance,omitempty"`
+	Policy                   *Policy  `json:"policy,omitempty"`
+}
+
+type Policy struct {
+	OkToTest             []string `json:"ok_to_test,omitempty"`
+	RunCIPullRequest     []string `json:"run_ci_pull_request,omitempty"`
+	RunCIPush            []string `json:"run_ci_push,omitempty"`
+	DefinitionFromCommit []string `json:"definition_from_commit,omitempty"`
+	RemoteAnnotations    []string `json:"remote_annotations,omitempty"`
 }
 
 type Params struct {
