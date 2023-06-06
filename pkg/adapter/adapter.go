@@ -77,6 +77,9 @@ func (l *listener) Start(ctx context.Context) error {
 		_, _ = fmt.Fprint(w, "ok")
 	})
 
+	if err := l.run.UpdatePACInfo(ctx, true); err != nil {
+		log.Fatal("failed to update pac info : ", err)
+	}
 	mux.HandleFunc("/", l.handleEvent(ctx))
 
 	//nolint: gosec

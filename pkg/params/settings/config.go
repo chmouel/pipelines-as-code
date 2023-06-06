@@ -38,7 +38,8 @@ const (
 	PACApplicationNameDefaultValue          = "Pipelines as Code CI"
 	HubURLDefaultValue                      = "https://api.hub.tekton.dev/v1"
 	hubCatalogNameDefaultValue              = "tekton"
-	AutoConfigureNewGitHubRepoDefaultValue  = "false"
+
+	autoConfigureNewGitHubRepoDefaultValue = "false"
 
 	ErrorLogSnippetKey   = "error-log-snippet"
 	errorLogSnippetValue = "true"
@@ -83,7 +84,7 @@ type Settings struct {
 	CustomConsolePRTaskLog string
 }
 
-func ConfigToSettings(logger *zap.SugaredLogger, setting *Settings, config map[string]string) error {
+func ConfigToSettings(logger *zap.SugaredLogger, setting *Settings, config map[string]string, firstStart bool) error {
 	// pass through defaulting
 	SetDefaults(config)
 
@@ -98,13 +99,21 @@ func ConfigToSettings(logger *zap.SugaredLogger, setting *Settings, config map[s
 	}
 
 	secretAutoCreate := StringToBool(config[SecretAutoCreateKey])
-	if setting.SecretAutoCreation != secretAutoCreate {
+	value := setting.SecretAutoCreation
+	if firstStart {
+		value = StringToBool(secretAutoCreateDefaultValue)
+	}
+	if value != secretAutoCreate {
 		logger.Infof("CONFIG: secret auto create set to %v", secretAutoCreate)
 		setting.SecretAutoCreation = secretAutoCreate
 	}
 
 	secretGHAppRepoScoped := StringToBool(config[SecretGhAppTokenRepoScopedKey])
-	if setting.SecretGHAppRepoScoped != secretGHAppRepoScoped {
+	value = setting.SecretGHAppRepoScoped
+	if firstStart {
+		value = StringToBool(secretGhAppTokenRepoScopedDefaultValue)
+	}
+	if value != secretGHAppRepoScoped {
 		logger.Infof("CONFIG: not scoping the token generated from gh %v", secretGHAppRepoScoped)
 		setting.SecretGHAppRepoScoped = secretGHAppRepoScoped
 	}
@@ -119,12 +128,18 @@ func ConfigToSettings(logger *zap.SugaredLogger, setting *Settings, config map[s
 		logger.Infof("CONFIG: hub URL set to %v", config[HubURLKey])
 		setting.HubURL = config[HubURLKey]
 	}
-	if setting.HubCatalogName != config[HubCatalogNameKey] {
+
+	if hubCatalogNameDefaultValue != config[HubCatalogNameKey] {
 		logger.Infof("CONFIG: hub catalog name set to %v", config[HubCatalogNameKey])
 		setting.HubCatalogName = config[HubCatalogNameKey]
 	}
+
 	remoteTask := StringToBool(config[RemoteTasksKey])
-	if setting.RemoteTasks != remoteTask {
+	value = setting.RemoteTasks
+	if firstStart {
+		value = StringToBool(remoteTasksDefaultValue)
+	}
+	if value != remoteTask {
 		logger.Infof("CONFIG: remote tasks setting set to %v", remoteTask)
 		setting.RemoteTasks = remoteTask
 	}
@@ -138,8 +153,13 @@ func ConfigToSettings(logger *zap.SugaredLogger, setting *Settings, config map[s
 		logger.Infof("CONFIG: default keep runs set to %v", defaultMaxKeepRun)
 		setting.DefaultMaxKeepRuns = defaultMaxKeepRun
 	}
+
 	check := StringToBool(config[BitbucketCloudCheckSourceIPKey])
-	if setting.BitbucketCloudCheckSourceIP != check {
+	value = setting.BitbucketCloudCheckSourceIP
+	if firstStart {
+		value = StringToBool(bitbucketCloudCheckSourceIPDefaultValue)
+	}
+	if value != check {
 		logger.Infof("CONFIG: bitbucket cloud check source ip setting set to %v", check)
 		setting.BitbucketCloudCheckSourceIP = check
 	}
@@ -151,8 +171,13 @@ func ConfigToSettings(logger *zap.SugaredLogger, setting *Settings, config map[s
 		logger.Infof("CONFIG: tekton dashboard url set to %v", config[TektonDashboardURLKey])
 		setting.TektonDashboardURL = config[TektonDashboardURLKey]
 	}
+
 	autoConfigure := StringToBool(config[AutoConfigureNewGitHubRepoKey])
-	if setting.AutoConfigureNewGitHubRepo != autoConfigure {
+	value = setting.AutoConfigureNewGitHubRepo
+	if firstStart {
+		value = StringToBool(autoConfigureNewGitHubRepoDefaultValue)
+	}
+	if value != autoConfigure {
 		logger.Infof("CONFIG: auto configure GitHub repo setting set to %v", autoConfigure)
 		setting.AutoConfigureNewGitHubRepo = autoConfigure
 	}
@@ -162,13 +187,21 @@ func ConfigToSettings(logger *zap.SugaredLogger, setting *Settings, config map[s
 	}
 
 	errorLogSnippet := StringToBool(config[ErrorLogSnippetKey])
-	if setting.ErrorLogSnippet != errorLogSnippet {
+	value = setting.ErrorLogSnippet
+	if firstStart {
+		value = StringToBool(errorLogSnippetValue)
+	}
+	if value != errorLogSnippet {
 		logger.Infof("CONFIG: setting log snippet on error to %v", errorLogSnippet)
 		setting.ErrorLogSnippet = errorLogSnippet
 	}
 
 	errorDetection := StringToBool(config[ErrorDetectionKey])
-	if setting.ErrorDetection != errorDetection {
+	value = setting.ErrorDetection
+	if firstStart {
+		value = StringToBool(errorDetectionValue)
+	}
+	if value != errorDetection {
 		logger.Infof("CONFIG: setting error detection to %v", errorDetection)
 		setting.ErrorDetection = errorDetection
 	}

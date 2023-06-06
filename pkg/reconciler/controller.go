@@ -29,6 +29,9 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 		if err != nil {
 			log.Fatal("failed to init clients : ", err)
 		}
+		if err := run.UpdatePACInfo(ctx, true); err != nil {
+			log.Fatal("failed to update pac info : ", err)
+		}
 
 		kinteract, err := kubeinteraction.NewKubernetesInteraction(run)
 		if err != nil {

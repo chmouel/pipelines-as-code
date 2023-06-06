@@ -64,7 +64,7 @@ func (r *Run) getConfigFromConfigMapWatcher(ctx context.Context, eventChannel <-
 		if open {
 			switch event.Type {
 			case watch.Added, watch.Modified:
-				if err := r.UpdatePACInfo(ctx); err != nil {
+				if err := r.UpdatePACInfo(ctx, false); err != nil {
 					r.Clients.Log.Info("failed to update PAC info", err)
 					return err
 				}
@@ -81,7 +81,7 @@ func (r *Run) getConfigFromConfigMapWatcher(ctx context.Context, eventChannel <-
 	}
 }
 
-func (r *Run) UpdatePACInfo(ctx context.Context) error {
+func (r *Run) UpdatePACInfo(ctx context.Context, firstboot bool) error {
 	ns := os.Getenv("SYSTEM_NAMESPACE")
 	if ns == "" {
 		return fmt.Errorf("failed to find pipelines-as-code installation namespace")
@@ -92,20 +92,20 @@ func (r *Run) UpdatePACInfo(ctx context.Context) error {
 		return err
 	}
 
-	if err = settings.ConfigToSettings(r.Clients.Log, r.Info.Pac.Settings, cfg.Data); err != nil {
+	if err = settings.ConfigToSettings(r.Clients.Log, r.Info.Pac.Settings, cfg.Data, firstboot); err != nil {
 		return err
 	}
 
 	if r.Info.Pac.Settings.TektonDashboardURL != "" && r.Info.Pac.Settings.TektonDashboardURL != r.Clients.ConsoleUI.URL() {
-		r.Clients.Log.Infof("updating console url to: %s", r.Info.Pac.Settings.TektonDashboardURL)
+		r.Clients.Log.Infof("CONFIG: updating console url to: %s", r.Info.Pac.Settings.TektonDashboardURL)
 		r.Clients.ConsoleUI = &consoleui.TektonDashboard{BaseURL: r.Info.Pac.Settings.TektonDashboardURL}
 	}
 	if os.Getenv("PAC_TEKTON_DASHBOARD_URL") != "" {
-		r.Clients.Log.Infof("using tekton dashboard url on: %s", os.Getenv("PAC_TEKTON_DASHBOARD_URL"))
+		r.Clients.Log.Infof("CONFIG: using tekton dashboard url on: %s", os.Getenv("PAC_TEKTON_DASHBOARD_URL"))
 		r.Clients.ConsoleUI = &consoleui.TektonDashboard{BaseURL: os.Getenv("PAC_TEKTON_DASHBOARD_URL")}
 	}
 	if r.Info.Pac.Settings.CustomConsoleURL != "" {
-		r.Clients.Log.Infof("updating console url to: %s", r.Info.Pac.Settings.CustomConsoleURL)
+		r.Clients.Log.Infof("CONFIG: updating console url to: %s", r.Info.Pac.Settings.CustomConsoleURL)
 		r.Clients.ConsoleUI = &consoleui.CustomConsole{Info: &r.Info}
 	}
 

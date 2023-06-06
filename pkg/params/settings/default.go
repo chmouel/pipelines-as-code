@@ -32,7 +32,7 @@ func SetDefaults(config map[string]string) {
 	}
 
 	if autoConfigure, ok := config[AutoConfigureNewGitHubRepoKey]; !ok || autoConfigure == "" {
-		config[AutoConfigureNewGitHubRepoKey] = AutoConfigureNewGitHubRepoDefaultValue
+		config[AutoConfigureNewGitHubRepoKey] = autoConfigureNewGitHubRepoDefaultValue
 	}
 
 	if errorLogSnippet, ok := config[ErrorLogSnippetKey]; !ok || errorLogSnippet == "" {

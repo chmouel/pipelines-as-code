@@ -96,14 +96,14 @@ func Command(run *params.Run, streams *cli.IOStreams) *cobra.Command {
 				}
 			} else {
 				// it's OK  if pac is not installed, ignore the error
-				_ = run.UpdatePACInfo(ctx)
+				_ = run.UpdatePACInfo(ctx, true)
 			}
 
 			if len(filenames) == 0 {
 				return fmt.Errorf("you need to at least specify a file with -f")
 			}
 
-			if err := settings.ConfigToSettings(run.Clients.Log, run.Info.Pac.Settings, map[string]string{}); err != nil {
+			if err := settings.ConfigToSettings(run.Clients.Log, run.Info.Pac.Settings, map[string]string{}, true); err != nil {
 				return err
 			}
 

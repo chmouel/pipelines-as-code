@@ -50,6 +50,7 @@ func TestConfigToSettings(t *testing.T) {
 		args            args
 		wantErr         bool
 		wantLogContains string
+		wantFirstTime   bool
 	}{
 		{
 			name: "invalid",
@@ -82,6 +83,17 @@ func TestConfigToSettings(t *testing.T) {
 			wantLogContains: "secret auto create",
 		},
 		{
+			name: "set auto create key first time",
+			args: args{
+				setting: &Settings{},
+				config: map[string]string{
+					SecretAutoCreateKey: "true",
+				},
+			},
+			wantLogContains: "secret auto create",
+			wantFirstTime:   true,
+		},
+		{
 			name: "set hub url",
 			args: args{
 				setting: &Settings{},
@@ -96,7 +108,7 @@ func TestConfigToSettings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			observer, catchlog := zapobserver.New(zap.InfoLevel)
 			logger := zap.New(observer).Sugar()
-			if err := ConfigToSettings(logger, tt.args.setting, tt.args.config); (err != nil) != tt.wantErr {
+			if err := ConfigToSettings(logger, tt.args.setting, tt.args.config, tt.wantFirstTime); (err != nil) != tt.wantErr {
 				t.Errorf("ConfigToSettings() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantLogContains != "" {
