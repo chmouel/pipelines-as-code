@@ -9,6 +9,7 @@ require (
 	github.com/cloudevents/sdk-go/v2 v2.14.0
 	github.com/fvbommel/sortorder v1.1.0
 	github.com/gfleury/go-bitbucket-v1 v0.0.0-20230626192437-8d7be5866751
+	github.com/go-chi/chi/v5 v5.0.10
 	github.com/gobwas/glob v0.2.3
 	github.com/google/cel-go v0.17.1
 	github.com/google/go-cmp v0.5.9

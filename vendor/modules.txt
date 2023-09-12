@@ -127,6 +127,10 @@ github.com/fvbommel/sortorder
 # github.com/gfleury/go-bitbucket-v1 v0.0.0-20230626192437-8d7be5866751
 ## explicit; go 1.14
 github.com/gfleury/go-bitbucket-v1
+# github.com/go-chi/chi/v5 v5.0.10
+## explicit; go 1.14
+github.com/go-chi/chi/v5
+github.com/go-chi/chi/v5/middleware
 # github.com/go-fed/httpsig v1.1.0
 ## explicit; go 1.13
 github.com/go-fed/httpsig

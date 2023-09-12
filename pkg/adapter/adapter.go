@@ -9,9 +9,14 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"go.uber.org/zap"
+	"knative.dev/eventing/pkg/adapter/v2"
+	"knative.dev/pkg/logging"
+
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -22,9 +27,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
-	"go.uber.org/zap"
-	"knative.dev/eventing/pkg/adapter/v2"
-	"knative.dev/pkg/logging"
 )
 
 const globalAdapterPort = "8080"
@@ -69,34 +71,18 @@ func (l *listener) Start(ctx context.Context) error {
 	}
 	l.logger.Infof("Starting Pipelines as Code version: %s", strings.TrimSpace(version.Version))
 
-	mux := http.NewServeMux()
-
-	// for handling probes
-	mux.HandleFunc("/live", func(w http.ResponseWriter, r *http.Request) {
+	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+	r.Get("/live", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		_, _ = fmt.Fprint(w, "ok")
 	})
-
-	mux.HandleFunc("/", l.handleEvent(ctx))
-
-	//nolint: gosec
-	srv := &http.Server{
-		Addr: ":" + adapterPort,
-		Handler: http.TimeoutHandler(mux,
-			10*time.Second, "Listener Timeout!\n"),
-	}
-
-	enabled, tlsCertFile, tlsKeyFile := l.isTLSEnabled()
-	if enabled {
-		if err := srv.ListenAndServeTLS(tlsCertFile, tlsKeyFile); err != nil {
-			return err
-		}
-	} else {
-		if err := srv.ListenAndServe(); err != nil {
-			return err
-		}
-	}
-	return nil
+	r.Post("/", l.handleEvent(ctx))
+	return http.ListenAndServe(fmt.Sprintf(":%s", adapterPort), r)
 }
 
 func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
