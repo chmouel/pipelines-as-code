@@ -112,25 +112,21 @@ func ConfigToSettings(logger *zap.SugaredLogger, setting *Settings, config map[s
 	}
 
 	if setting.ApplicationName != config[ApplicationNameKey] {
-		logger.Infof("CONFIG: application name set to %v", config[ApplicationNameKey])
 		setting.ApplicationName = config[ApplicationNameKey]
 	}
 
 	secretAutoCreate := StringToBool(config[SecretAutoCreateKey])
 	if setting.SecretAutoCreation != secretAutoCreate {
-		logger.Infof("CONFIG: secret auto create set to %v", secretAutoCreate)
 		setting.SecretAutoCreation = secretAutoCreate
 	}
 
 	secretGHAppRepoScoped := StringToBool(config[SecretGhAppTokenRepoScopedKey])
 	if setting.SecretGHAppRepoScoped != secretGHAppRepoScoped {
-		logger.Infof("CONFIG: not scoping the token generated from gh %v", secretGHAppRepoScoped)
 		setting.SecretGHAppRepoScoped = secretGHAppRepoScoped
 	}
 
 	secretGHAppScopedExtraRepos := config[SecretGhAppTokenScopedExtraReposKey]
 	if setting.SecretGhAppTokenScopedExtraRepos != secretGHAppScopedExtraRepos {
-		logger.Infof("CONFIG: adding extra repositories for github app token scope %v", secretGHAppRepoScoped)
 		setting.SecretGhAppTokenScopedExtraRepos = secretGHAppScopedExtraRepos
 	}
 
@@ -138,11 +134,9 @@ func ConfigToSettings(logger *zap.SugaredLogger, setting *Settings, config map[s
 	catalogDefault, ok := value.(HubCatalog)
 	if ok {
 		if catalogDefault.URL != config[HubURLKey] {
-			logger.Infof("CONFIG: hub URL set to %v", config[HubURLKey])
 			catalogDefault.URL = config[HubURLKey]
 		}
 		if catalogDefault.Name != config[HubCatalogNameKey] {
-			logger.Infof("CONFIG: hub catalog name set to %v", config[HubCatalogNameKey])
 			catalogDefault.Name = config[HubCatalogNameKey]
 		}
 	}
@@ -151,89 +145,72 @@ func ConfigToSettings(logger *zap.SugaredLogger, setting *Settings, config map[s
 
 	remoteTask := StringToBool(config[RemoteTasksKey])
 	if setting.RemoteTasks != remoteTask {
-		logger.Infof("CONFIG: remote tasks setting set to %v", remoteTask)
 		setting.RemoteTasks = remoteTask
 	}
 	maxKeepRunUpperLimit, _ := strconv.Atoi(config[MaxKeepRunUpperLimitKey])
 	if setting.MaxKeepRunsUpperLimit != maxKeepRunUpperLimit {
-		logger.Infof("CONFIG: max keep runs upper limit set to %v", maxKeepRunUpperLimit)
 		setting.MaxKeepRunsUpperLimit = maxKeepRunUpperLimit
 	}
 	defaultMaxKeepRun, _ := strconv.Atoi(config[DefaultMaxKeepRunsKey])
 	if setting.DefaultMaxKeepRuns != defaultMaxKeepRun {
-		logger.Infof("CONFIG: default keep runs set to %v", defaultMaxKeepRun)
 		setting.DefaultMaxKeepRuns = defaultMaxKeepRun
 	}
 	check := StringToBool(config[BitbucketCloudCheckSourceIPKey])
 	if setting.BitbucketCloudCheckSourceIP != check {
-		logger.Infof("CONFIG: bitbucket cloud check source ip setting set to %v", check)
 		setting.BitbucketCloudCheckSourceIP = check
 	}
 	if setting.BitbucketCloudAdditionalSourceIP != config[BitbucketCloudAdditionalSourceIPKey] {
-		logger.Infof("CONFIG: bitbucket cloud additional source ip set to %v", config[BitbucketCloudAdditionalSourceIPKey])
 		setting.BitbucketCloudAdditionalSourceIP = config[BitbucketCloudAdditionalSourceIPKey]
 	}
 	if setting.TektonDashboardURL != config[TektonDashboardURLKey] {
-		logger.Infof("CONFIG: tekton dashboard url set to %v", config[TektonDashboardURLKey])
 		setting.TektonDashboardURL = config[TektonDashboardURLKey]
 	}
 	autoConfigure := StringToBool(config[AutoConfigureNewGitHubRepoKey])
 	if setting.AutoConfigureNewGitHubRepo != autoConfigure {
-		logger.Infof("CONFIG: auto configure GitHub repo setting set to %v", autoConfigure)
 		setting.AutoConfigureNewGitHubRepo = autoConfigure
 	}
 	if setting.AutoConfigureRepoNamespaceTemplate != config[AutoConfigureRepoNamespaceTemplateKey] {
-		logger.Infof("CONFIG: auto configure repo namespace template set to %v", config[AutoConfigureRepoNamespaceTemplateKey])
 		setting.AutoConfigureRepoNamespaceTemplate = config[AutoConfigureRepoNamespaceTemplateKey]
 	}
 
 	errorLogSnippet := StringToBool(config[ErrorLogSnippetKey])
 	if setting.ErrorLogSnippet != errorLogSnippet {
-		logger.Infof("CONFIG: setting log snippet on error to %v", errorLogSnippet)
 		setting.ErrorLogSnippet = errorLogSnippet
 	}
 
 	errorDetection := StringToBool(config[ErrorDetectionKey])
 	if setting.ErrorDetection != errorDetection {
-		logger.Infof("CONFIG: setting error detection to %v", errorDetection)
 		setting.ErrorDetection = errorDetection
 	}
 
 	errorDetectNumberOfLines, _ := strconv.Atoi(config[ErrorDetectionNumberOfLinesKey])
 	if setting.ErrorDetection && setting.ErrorDetectionNumberOfLines != errorDetectNumberOfLines {
-		logger.Infof("CONFIG: setting error detection limit of container log to %v", errorDetectNumberOfLines)
 		setting.ErrorDetectionNumberOfLines = errorDetectNumberOfLines
 	}
 
 	if setting.ErrorDetection && setting.ErrorDetectionSimpleRegexp != strings.TrimSpace(config[ErrorDetectionSimpleRegexpKey]) {
 		// replace double backslash with single backslash because kube configmap is giving us things double backslashes
-		logger.Infof("CONFIG: setting error detection regexp to %v", strings.TrimSpace(config[ErrorDetectionSimpleRegexpKey]))
 		setting.ErrorDetectionSimpleRegexp = strings.TrimSpace(config[ErrorDetectionSimpleRegexpKey])
 	}
 
 	if setting.CustomConsoleName != config[CustomConsoleNameKey] {
-		logger.Infof("CONFIG: setting custom console name to %v", config[CustomConsoleNameKey])
 		setting.CustomConsoleName = config[CustomConsoleNameKey]
 	}
 
 	if setting.CustomConsoleURL != config[CustomConsoleURLKey] {
-		logger.Infof("CONFIG: setting custom console url to %v", config[CustomConsoleURLKey])
 		setting.CustomConsoleURL = config[CustomConsoleURLKey]
 	}
 
 	if setting.CustomConsolePRdetail != config[CustomConsolePRDetailKey] {
-		logger.Infof("CONFIG: setting custom console pr detail URL to %v", config[CustomConsolePRDetailKey])
 		setting.CustomConsolePRdetail = config[CustomConsolePRDetailKey]
 	}
 
 	if setting.CustomConsolePRTaskLog != config[CustomConsolePRTaskLogKey] {
-		logger.Infof("CONFIG: setting custom console pr task log URL to %v", config[CustomConsolePRTaskLogKey])
 		setting.CustomConsolePRTaskLog = config[CustomConsolePRTaskLogKey]
 	}
 
 	rememberOKToTest := StringToBool(config[RememberOKToTestKey])
 	if setting.RememberOKToTest != rememberOKToTest {
-		logger.Infof("CONFIG: setting remember ok-to-test to %v", rememberOKToTest)
 		setting.RememberOKToTest = rememberOKToTest
 	}
 

@@ -50,7 +50,7 @@ func applyIncomingParams(req *http.Request, payloadBody []byte, params []string)
 	return payload, nil
 }
 
-func (l *listener) detectIncoming(ctx context.Context, req *http.Request, payloadBody []byte) (bool, *v1alpha1.Repository, error) {
+func (l *Listener) detectIncoming(ctx context.Context, req *http.Request, payloadBody []byte) (bool, *v1alpha1.Repository, error) {
 	repository := req.URL.Query().Get("repository")
 	querySecret := req.URL.Query().Get("secret")
 	pipelineRun := req.URL.Query().Get("pipelinerun")
@@ -142,7 +142,7 @@ func (l *listener) detectIncoming(ctx context.Context, req *http.Request, payloa
 	return true, repo, nil
 }
 
-func (l *listener) processIncoming(targetRepo *v1alpha1.Repository) (provider.Interface, *zap.SugaredLogger, error) {
+func (l *Listener) processIncoming(targetRepo *v1alpha1.Repository) (provider.Interface, *zap.SugaredLogger, error) {
 	// can a git ssh URL be a Repo URL? I don't think this will even ever work
 	org, repo, err := formatting.GetRepoOwnerSplitted(targetRepo.Spec.URL)
 	if err != nil {

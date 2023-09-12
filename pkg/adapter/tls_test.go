@@ -76,7 +76,7 @@ func TestIsTlsEnabled(t *testing.T) {
 					tt.secret,
 				},
 			})
-			l := listener{run: &params.Run{Clients: clients.Clients{Kube: cs.Kube}}}
+			l := Listener{run: &params.Run{Clients: clients.Clients{Kube: cs.Kube}}}
 			got, cert, key := l.isTLSEnabled()
 			assert.Equal(t, got, tt.want)
 			if got {

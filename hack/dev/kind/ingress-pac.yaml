@@ -19,3 +19,13 @@ spec:
               number: 8080
         path: /
         pathType: Prefix
+  - host: "c8mkj575-80.uks1.devtunnels.ms"
+    http:
+      paths:
+      - backend:
+          service:
+            name: "%SERVICE_NAME%"
+            port:
+              number: 8080
+        path: /
+        pathType: Prefix

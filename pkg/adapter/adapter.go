@@ -10,7 +10,6 @@ import (
 	"os"
 	"strings"
 
-	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"go.uber.org/zap"
@@ -39,7 +38,7 @@ func NewEnvConfig() adapter.EnvConfigAccessor {
 	return &envConfig{}
 }
 
-type listener struct {
+type Listener struct {
 	run    *params.Run
 	kint   kubeinteraction.Interface
 	logger *zap.SugaredLogger
@@ -51,19 +50,19 @@ type Response struct {
 	Message string `json:"message"`
 }
 
-var _ adapter.Adapter = (*listener)(nil)
+var _ adapter.Adapter = (*Listener)(nil)
 
-func New(run *params.Run, k *kubeinteraction.Interaction) adapter.AdapterConstructor {
-	return func(ctx context.Context, processed adapter.EnvConfigAccessor, ceClient cloudevents.Client) adapter.Adapter {
-		return &listener{
-			logger: logging.FromContext(ctx),
-			run:    run,
-			kint:   k,
-		}
+func New(run *params.Run, k *kubeinteraction.Interaction) *Listener {
+	ctx := context.Background()
+	return &Listener{
+		logger: logging.FromContext(ctx),
+		run:    run,
+		kint:   k,
 	}
+	// }
 }
 
-func (l *listener) Start(ctx context.Context) error {
+func (l *Listener) Start(ctx context.Context) error {
 	adapterPort := globalAdapterPort
 	envAdapterPort := os.Getenv("PAC_CONTROLLER_PORT")
 	if envAdapterPort != "" {
@@ -85,8 +84,9 @@ func (l *listener) Start(ctx context.Context) error {
 	return http.ListenAndServe(fmt.Sprintf(":%s", adapterPort), r)
 }
 
-func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
+func (l Listener) handleEvent(ctx context.Context) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
+		l.logger.Info("Handling Event for Gitlab UID: %+v", request.Header["X-Gitlab-Webhook-Uuid"])
 		c := make(chan struct{})
 		go func() {
 			c <- struct{}{}
@@ -183,7 +183,7 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 	}
 }
 
-func (l listener) processRes(processEvent bool, provider provider.Interface, logger *zap.SugaredLogger, skipReason string, err error) (provider.Interface, *zap.SugaredLogger, error) {
+func (l Listener) processRes(processEvent bool, provider provider.Interface, logger *zap.SugaredLogger, skipReason string, err error) (provider.Interface, *zap.SugaredLogger, error) {
 	if processEvent {
 		provider.SetLogger(logger)
 		return provider, logger, nil
@@ -200,7 +200,7 @@ func (l listener) processRes(processEvent bool, provider provider.Interface, log
 	return nil, logger, fmt.Errorf("skipping event")
 }
 
-func (l listener) detectProvider(req *http.Request, reqBody string) (provider.Interface, *zap.SugaredLogger, error) {
+func (l Listener) detectProvider(req *http.Request, reqBody string) (provider.Interface, *zap.SugaredLogger, error) {
 	log := *l.logger
 
 	// payload validation
@@ -242,7 +242,7 @@ func (l listener) detectProvider(req *http.Request, reqBody string) (provider.In
 	return l.processRes(false, nil, logger, "", fmt.Errorf("no supported Git provider has been detected"))
 }
 
-func (l listener) writeResponse(response http.ResponseWriter, statusCode int, message string) {
+func (l Listener) writeResponse(response http.ResponseWriter, statusCode int, message string) {
 	response.WriteHeader(statusCode)
 	response.Header().Set("Content-Type", "application/json")
 	body := Response{

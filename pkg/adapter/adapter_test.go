@@ -25,7 +25,7 @@ func TestHandleEvent(t *testing.T) {
 	logger, _ := logger.GetLogger()
 
 	t.Setenv("SYSTEM_NAMESPACE", "test")
-	l := listener{
+	l := Listener{
 		run: &params.Run{
 			Clients: clients.Clients{
 				PipelineAsCode: cs.PipelineAsCode,
@@ -126,7 +126,7 @@ func TestHandleEvent(t *testing.T) {
 
 func TestWhichProvider(t *testing.T) {
 	logger, _ := logger.GetLogger()
-	l := listener{
+	l := Listener{
 		logger: logger,
 	}
 	tests := []struct {

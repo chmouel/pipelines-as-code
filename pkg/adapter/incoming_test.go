@@ -668,7 +668,7 @@ func Test_listener_detectIncoming(t *testing.T) {
 				GetSecretResult: tt.args.secretResult,
 			}
 
-			l := &listener{
+			l := &Listener{
 				run:    client,
 				logger: logger,
 				kint:   kint,
@@ -838,7 +838,7 @@ func Test_listener_processIncoming(t *testing.T) {
 			kint := &kubernetestint.KinterfaceTest{}
 			observer, _ := zapobserver.New(zap.InfoLevel)
 			logger := zap.New(observer).Sugar()
-			l := &listener{
+			l := &Listener{
 				run: client, kint: kint, logger: logger, event: info.NewEvent(),
 			}
 			pintf, _, err := l.processIncoming(tt.targetRepo)
