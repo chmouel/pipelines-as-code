@@ -116,11 +116,11 @@ entire suite of checks once again.
 
 ### GitOps command on pull or merge request
 
-If you are targeting a push, pull or merge request you can use `GitOps` comment
+If you are targeting a push or a  pull request you can use a `GitOps` comment
 inside your pull request, to restart all or specific Pipelines.
 
-For example, you want to restart all your pipeline you can add a comment starting
-with `/retest` and all PipelineRun attached to that pull or merge request will be
+For example, if you want to restart all your pipelines you can add a comment starting
+with `/retest` and all PipelineRuns attached to that pull or merge request will be
 restarted :
 
 Example :
@@ -147,42 +147,41 @@ To trigger GitOps commands in response to a push request, you can include `GitOp
 comments within your commit messages. These comments can be used to restart
 either all pipelines or specific ones. Here's how it works:
 
-For restarting all pipeline runs:
+To restart all pipelineruns:
 
-1. Use `/retest` or `/test` within your commit message.
+- Use `/retest` or `/test` within your commit message.
 
-For restarting a specific pipeline run:
-2. Use `/retest <pipelinerun-name>` or `/test <pipelinerun-name>` within your
+To restart a specific pipelinerun:
+
+- Use `/retest <pipelinerun-name>` or `/test <pipelinerun-name>` within your
 commit message. Replace `<pipelinerun-name>` with the specific name of the
 pipeline run you want to restart.
 
 **Note:**
 
-When executing `GitOps` commands on a commit that exists in multiple branches
-within a push request, the branch with the latest commit will be used.
+When executing a `GitOps` command on a `push` request in a commit that exists in multiple branches the branch with the latest commit will be used.
 
-This means:
+Here is the details on how this works :
 
 1. If a user specifies commands like `/retest` or `/test` without any argument
-in a comment on a branch, the test will automatically be performed on the **main** branch.
+in a comment on a branch, the testing will be only performed on the **main** branch.
 
-   Examples :
+   Some examples:
    1. `/retest`
    2. `/test`
    3. `/retest <pipelinerun-name>`
    4. `/test <pipelinerun-name>`
 
-2. If the user includes a branch specification such as `/retest branch:test` or
-`/test branch:test`, the test will be executed on the commit where the comment is
-located, with the context of the **test** branch.
+2. If the user includes an argument with the branch name such as `/retest
+   branch:test` or `/test branch:test`, the test will be executed on the commit in the branch referenced (test) in the argument:
 
-   Examples :
+   Some examples :
    1. `/retest branch:test`
    2. `/test branch:test`
    3. `/retest <pipelinerun-name> branch:test`
    4. `/test <pipelinerun-name> branch:test`
 
-To add `GitOps` comments to a push request, follow these steps:
+To add a `GitOps` comment for a push request, follow these steps:
 
 1. Go to your repository.
 2. Click on the **Commits** section.
@@ -191,7 +190,7 @@ To add `GitOps` comments to a push request, follow these steps:
 
 ![GitOps Commits For Comments](/images/gitops-comments-on-commit.png)
 
-Please note that this feature is supported for the GitHub provider only.
+Please note that this feature is only supported for the GitHub provider.
 
 ## Cancelling the PipelineRun
 
@@ -235,13 +234,13 @@ Example :
 
 **Note:**
 
-When executing `GitOps` comments on a commit that exists in multiple branches
+When executing a `GitOps` comment on a commit that exists in multiple branches
 within a push request, the branch with the latest commit will be used.
 
 This means:
 
 1. If a user specifies commands like `/cancel`
-without any argument in a comment on a branch,
+without any arguments in a comment on a branch,
 it will automatically target the **main** branch.
 
    Examples :
@@ -259,4 +258,4 @@ In the GitHub App, the status of the Pipeline will be set to `cancelled`.
 
 ![GitOps Commits For Comments For PipelineRun Canceled](/images/gitops-comments-on-commit-cancel.png)
 
-Please note that this feature is supported for the GitHub provider only.
+Please note that this feature is supported only for the GitHub provider.
