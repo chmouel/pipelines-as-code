@@ -28,8 +28,9 @@ if [[ -n ${MODE} && ${MODE} == ko ]]; then
 
 	files="${tmpfile}"
 elif [[ -n ${MODE} && ${MODE} == newcontroller ]]; then
-	for f in 100-namespace 200-role 201-controller-role \
-		301-config-logging 302-pac-configmap 303-pac-info-configmap 303-pac-info-configmap \
+	# 201-controller-role \
+	for f in 100-namespace 200-role \
+		301-config-logging 302-pac-configmap 303-pac-info-configmap \
 		305-config-observability 400-controller 401-controller-service; do
 		ko resolve -f config/${f}.yaml >>${tmpfile2}
 	done

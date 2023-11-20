@@ -523,7 +523,7 @@ func (v *Provider) CreateToken(ctx context.Context, repository []string, event *
 		}
 		v.RepositoryIDs = uniqueRepositoryID(v.RepositoryIDs, infoData.GetID())
 	}
-  ns := info.GetNS(ctx)
+	ns := info.GetNS(ctx)
 	token, err := v.GetAppToken(ctx, v.Run.Clients.Kube, event.Provider.URL, event.InstallationID, ns)
 	if err != nil {
 		return "", err
