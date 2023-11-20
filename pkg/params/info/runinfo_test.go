@@ -13,8 +13,11 @@ func TestRunInfoContext(t *testing.T) {
 	info := &Info{
 		Pac: &PacOpts{
 			Settings: &settings.Settings{
-				ApplicationName: "App for ns1",
+				ApplicationName: "App for " + ns1,
 			},
+		},
+		Kube: &KubeOpts{
+			Namespace: ns1,
 		},
 	}
 	ctx := context.TODO()
@@ -24,18 +27,23 @@ func TestRunInfoContext(t *testing.T) {
 	info2 := &Info{
 		Pac: &PacOpts{
 			Settings: &settings.Settings{
-				ApplicationName: "App for ns2",
+				ApplicationName: "App for " + ns2,
 			},
+		},
+		Kube: &KubeOpts{
+			Namespace: ns2,
 		},
 	}
 	ctx = Store(ctx, ns2, info2)
 
 	t.Run("Get", func(t *testing.T) {
-		pac1 := Get(ctx, ns1)
-		assert.Assert(t, pac1 != nil)
-		assert.Assert(t, pac1.Settings.ApplicationName == "App for ns1")
-		pac2 := Get(ctx, ns2)
-		assert.Assert(t, pac2 != nil)
-		assert.Assert(t, pac2.Settings.ApplicationName == "App for ns2")
+		rinfo1 := Get(ctx, ns1)
+		assert.Assert(t, rinfo1 != nil)
+		assert.Assert(t, rinfo1.Pac.Settings.ApplicationName == "App for "+ns1)
+		assert.Assert(t, rinfo1.Kube.Namespace == ns1)
+		rinfo2 := Get(ctx, ns2)
+		assert.Assert(t, rinfo2 != nil)
+		assert.Assert(t, rinfo2.Pac.Settings.ApplicationName == "App for "+ns2)
+		assert.Assert(t, rinfo2.Kube.Namespace == ns2)
 	})
 }
