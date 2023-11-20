@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 	"knative.dev/eventing/pkg/adapter/v2"
 	"knative.dev/pkg/logging"
+	"knative.dev/pkg/system"
 )
 
 const globalAdapterPort = "8080"
@@ -67,12 +68,11 @@ func (l *listener) Start(ctx context.Context) error {
 	if envAdapterPort != "" {
 		adapterPort = envAdapterPort
 	}
-	l.logger.Infof("Starting Pipelines as Code version: %s", strings.TrimSpace(version.Version))
-
+	l.logger.Infof("Starting Pipelines as Code version: %s on namespace: %s", strings.TrimSpace(version.Version), system.Namespace())
 	mux := http.NewServeMux()
 
 	// for handling probes
-	mux.HandleFunc("/live", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/live", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(200)
 		_, _ = fmt.Fprint(w, "ok")
 	})
