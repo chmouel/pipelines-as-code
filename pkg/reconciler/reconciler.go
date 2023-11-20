@@ -62,6 +62,18 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 		}
 	}
 
+	// if we don't have the configuration for the target namespace then start to store it
+	if ns, ok := pr.GetLabels()[keys.ControllerNamespace]; ok {
+		ctx = info.StoreNS(ctx, ns)
+		ninfo := info.GetInfo(ctx, ns)
+		if ninfo == nil {
+			if err := r.run.UpdatePACInfo(ctx); err != nil {
+				return fmt.Errorf("failed to get information from ns %s: %w", ns, err)
+			}
+			ctx = info.StoreInfo(ctx, ns, &r.run.Info)
+		}
+	}
+
 	// queue pipelines which are in queued state and pending status
 	// if status is not pending, it could be canceled so let it be reported, even if state is queued
 	if state == kubeinteraction.StateQueued && pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {

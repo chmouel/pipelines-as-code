@@ -141,8 +141,7 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 	// Only apply for GitHub provider since we do fancy token creation at payload parsing
 	v.Run = run
 	event := info.NewEvent()
-	// TODO: we should not have getenv in code only in main
-	systemNS := os.Getenv("SYSTEM_NAMESPACE")
+	systemNS := info.GetNS(ctx)
 	if err := v.parseEventType(request, event); err != nil {
 		return nil, err
 	}

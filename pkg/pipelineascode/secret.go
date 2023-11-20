@@ -3,7 +3,6 @@ package pipelineascode
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -91,10 +90,11 @@ func SecretFromRepository(ctx context.Context, cs *params.Run, k8int kubeinterac
 	return nil
 }
 
-// GetCurrentNSWebhookSecret get secret from current namespace if it exists
+// GetCurrentNSWebhookSecret get secret from namespace as store on context
 func GetCurrentNSWebhookSecret(ctx context.Context, k8int kubeinteraction.Interface) (string, error) {
+	ns := info.GetNS(ctx)
 	s, err := k8int.GetSecret(ctx, ktypes.GetSecretOpt{
-		Namespace: os.Getenv("SYSTEM_NAMESPACE"),
+		Namespace: ns,
 		Name:      DefaultPipelinesAscodeSecretName,
 		Key:       defaultPipelinesAscodeSecretWebhookSecretKey,
 	})
