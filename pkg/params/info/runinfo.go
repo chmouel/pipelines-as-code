@@ -7,17 +7,23 @@ type Info struct {
 	Kube *KubeOpts
 }
 
-type contextKey struct{}
+type (
+	_infoContextKey struct{}
+	_nsContextKey   struct{}
+)
 
-var infoContextKey = contextKey{}
+var (
+	infoContextKey = _infoContextKey{}
+	nsContextKey   = _nsContextKey{}
+)
 
 type CtxInfo struct {
 	Pac  map[string]*PacOpts
 	Kube map[string]*KubeOpts
 }
 
-// Get Pac Settings for namespace
-func Get(ctx context.Context, ns string) *Info {
+// GetInfo Pac Settings for namespace
+func GetInfo(ctx context.Context, ns string) *Info {
 	if val := ctx.Value(infoContextKey); val != nil {
 		if ctxInfo, ok := val.(CtxInfo); ok {
 			ret := &Info{}
@@ -33,15 +39,17 @@ func Get(ctx context.Context, ns string) *Info {
 	return nil
 }
 
-// Store Pac Settings for that namespace configuration in context
-func Store(ctx context.Context, ns string, info *Info) context.Context {
+// StoreInfo Pac Settings for that namespace configuration in context
+func StoreInfo(ctx context.Context, ns string, info *Info) context.Context {
 	if val := ctx.Value(infoContextKey); val != nil {
 		if ctxInfo, ok := val.(CtxInfo); ok {
 			if ctxInfo.Pac == nil {
 				ctxInfo.Pac = map[string]*PacOpts{}
 			}
 			if ctxInfo.Kube == nil {
-				ctxInfo.Kube = map[string]*KubeOpts{}
+				ctxInfo.Kube = map[string]*KubeOpts{
+					ns: {Namespace: ns},
+				}
 			}
 			ctxInfo.Pac[ns] = info.Pac
 			ctxInfo.Kube[ns] = info.Kube
@@ -56,4 +64,19 @@ func Store(ctx context.Context, ns string, info *Info) context.Context {
 			ns: info.Kube,
 		},
 	})
+}
+
+// StoreNS stores namespace in context
+func StoreNS(ctx context.Context, ns string) context.Context {
+	return context.WithValue(ctx, nsContextKey, ns)
+}
+
+// GetNS gets namespace from context
+func GetNS(ctx context.Context) string {
+	if val := ctx.Value(nsContextKey); val != nil {
+		if ns, ok := val.(string); ok {
+			return ns
+		}
+	}
+	return ""
 }

@@ -21,7 +21,7 @@ func TestRunInfoContext(t *testing.T) {
 		},
 	}
 	ctx := context.TODO()
-	ctx = Store(ctx, ns1, info)
+	ctx = StoreInfo(ctx, ns1, info)
 
 	ns2 := "ns2"
 	info2 := &Info{
@@ -34,14 +34,14 @@ func TestRunInfoContext(t *testing.T) {
 			Namespace: ns2,
 		},
 	}
-	ctx = Store(ctx, ns2, info2)
+	ctx = StoreInfo(ctx, ns2, info2)
 
 	t.Run("Get", func(t *testing.T) {
-		rinfo1 := Get(ctx, ns1)
+		rinfo1 := GetInfo(ctx, ns1)
 		assert.Assert(t, rinfo1 != nil)
 		assert.Assert(t, rinfo1.Pac.Settings.ApplicationName == "App for "+ns1)
 		assert.Assert(t, rinfo1.Kube.Namespace == ns1)
-		rinfo2 := Get(ctx, ns2)
+		rinfo2 := GetInfo(ctx, ns2)
 		assert.Assert(t, rinfo2 != nil)
 		assert.Assert(t, rinfo2.Pac.Settings.ApplicationName == "App for "+ns2)
 		assert.Assert(t, rinfo2.Kube.Namespace == ns2)
