@@ -46,7 +46,6 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 		}
 
 		pipelineRunInformer := tektonPipelineRunInformerv1.Get(ctx)
-
 		metrics, err := metrics.NewRecorder()
 		if err != nil {
 			log.Fatalf("Failed to create pipeline as code metrics recorder %v", err)

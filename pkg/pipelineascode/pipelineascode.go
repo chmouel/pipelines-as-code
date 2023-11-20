@@ -146,7 +146,7 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 	}
 
 	// Add labels and annotations to pipelinerun
-	kubeinteraction.AddLabelsAndAnnotations(p.event, match.PipelineRun, match.Repo, p.vcx.GetConfig())
+	kubeinteraction.AddLabelsAndAnnotations(ctx, p.event, match.PipelineRun, match.Repo, p.vcx.GetConfig())
 
 	// if concurrency is defined then start the pipelineRun in pending state and
 	// state as queued

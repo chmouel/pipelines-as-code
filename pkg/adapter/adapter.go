@@ -101,6 +101,7 @@ func (l *listener) Start(ctx context.Context) error {
 
 func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
+		// we should fix this, this basically reads configmap on every request, is that supposed to be okay?
 		if err := l.run.UpdatePACInfo(ctx); err != nil {
 			log.Fatal("error from WatchConfigMapChanges for controller : ", err)
 		}
