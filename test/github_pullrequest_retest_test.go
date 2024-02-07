@@ -42,7 +42,7 @@ func TestGithubPullRequestRetest(t *testing.T) {
 		PollTimeout:     twait.DefaultTimeout,
 		TargetSHA:       sha,
 	}
-	err = twait.UntilRepositoryUpdated(ctx, runcnx.Clients, waitOpts)
+	_, err = twait.UntilRepositoryUpdated(ctx, runcnx.Clients, waitOpts)
 	assert.NilError(t, err)
 
 	runcnx.Clients.Log.Infof("Check if we have the repository set as succeeded")
@@ -104,7 +104,7 @@ func TestGithubPullRequestGitOpsComments(t *testing.T) {
 			assert.NilError(t, err)
 
 			runcnx.Clients.Log.Info("Waiting for Repository to be updated")
-			err = twait.UntilRepositoryUpdated(ctx, runcnx.Clients, waitOpts)
+			_, err = twait.UntilRepositoryUpdated(ctx, runcnx.Clients, waitOpts)
 			assert.NilError(t, err)
 
 			runcnx.Clients.Log.Infof("Check if we have the repository set as succeeded")

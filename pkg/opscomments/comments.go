@@ -72,6 +72,7 @@ func SetEventTypeAndTargetPR(event *info.Event, comment string) {
 	if testRetestCommentType == CancelCommentSingleEventType {
 		event.TargetCancelPipelineRun = GetPipelineRunFromCancelComment(comment)
 	}
+	event.PullRequestComment = comment
 	event.EventType = testRetestCommentType.String()
 }
 
