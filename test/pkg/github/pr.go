@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	ghprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/options"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
+	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
 	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
@@ -100,13 +102,29 @@ func PRCreate(ctx context.Context, cs *params.Run, ghcnx *ghprovider.Provider, o
 	return pr.GetNumber(), nil
 }
 
-func RunPullRequest(ctx context.Context, t *testing.T, label string, yamlFiles []string, secondcontroller, webhook bool) (*params.Run, *ghprovider.Provider, options.E2E, string, string, int, string) {
+type PRTest struct {
+	Label            string
+	YamlFiles        []string
+	SecondController bool
+	Webhook          bool
+	NoStatusCheck    bool
+
+	Cnx             *params.Run
+	Options         options.E2E
+	Provider        *ghprovider.Provider
+	TargetNamespace string
+	TargetRefName   string
+	PRNumber        int
+	SHA             string
+}
+
+func (g *PRTest) RunPullRequest(ctx context.Context, t *testing.T) {
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
 
-	ctx, runcnx, opts, ghcnx, err := Setup(ctx, secondcontroller, webhook)
+	ctx, runcnx, opts, ghcnx, err := Setup(ctx, g.SecondController, g.Webhook)
 	assert.NilError(t, err)
 
-	logmsg := fmt.Sprintf("Testing %s with Github APPS integration on %s", label, targetNS)
+	logmsg := fmt.Sprintf("Testing %s with Github APPS integration on %s", g.Label, targetNS)
 	runcnx.Clients.Log.Info(logmsg)
 
 	repoinfo, resp, err := ghcnx.Client.Repositories.Get(ctx, opts.Organization, opts.Repo)
@@ -119,7 +137,7 @@ func RunPullRequest(ctx context.Context, t *testing.T, label string, yamlFiles [
 	assert.NilError(t, err)
 
 	yamlEntries := map[string]string{}
-	for _, v := range yamlFiles {
+	for _, v := range g.YamlFiles {
 		yamlEntries[filepath.Join(".tekton", filepath.Base(v))] = v
 	}
 
@@ -138,30 +156,60 @@ func RunPullRequest(ctx context.Context, t *testing.T, label string, yamlFiles [
 		opts.Repo, targetRefName, repoinfo.GetDefaultBranch(), logmsg)
 	assert.NilError(t, err)
 
-	sopt := wait.SuccessOpt{
-		Title:           logmsg,
-		OnEvent:         triggertype.PullRequest.String(),
-		TargetNS:        targetNS,
-		NumberofPRMatch: len(yamlFiles),
-		SHA:             sha,
+	if !g.NoStatusCheck {
+		sopt := wait.SuccessOpt{
+			Title:           logmsg,
+			OnEvent:         triggertype.PullRequest.String(),
+			TargetNS:        targetNS,
+			NumberofPRMatch: len(g.YamlFiles),
+			SHA:             sha,
+		}
+		wait.Succeeded(ctx, t, runcnx, opts, sopt)
 	}
-	wait.Succeeded(ctx, t, runcnx, opts, sopt)
-	return runcnx, ghcnx, opts, targetNS, targetRefName, number, sha
+	g.Cnx = runcnx
+	g.Options = opts
+	g.Provider = ghcnx
+	g.TargetNamespace = targetNS
+	g.TargetRefName = targetRefName
+	g.PRNumber = number
+	g.SHA = sha
 }
 
-func RunPushRequest(ctx context.Context, t *testing.T, label string, yamlFiles []string, onSecondController, onWebhook bool) (*params.Run, *ghprovider.Provider, options.E2E, string, string, int, string) {
+func (g *PRTest) TearDown(ctx context.Context, t *testing.T) {
+	if os.Getenv("TEST_NOCLEANUP") == "true" {
+		g.Cnx.Clients.Log.Infof("Not cleaning up and closing PR since TEST_NOCLEANUP is set")
+		return
+	}
+	logger := g.Provider.Run.Clients.Log
+	logger.Infof("Closing PR %d", g.PRNumber)
+	if g.PRNumber != -1 {
+		state := "closed"
+		_, _, err := g.Provider.Client.PullRequests.Edit(ctx,
+			g.Options.Organization, g.Options.Repo, g.PRNumber,
+			&ghlib.PullRequest{State: &state})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	repository.NSTearDown(ctx, t, g.Cnx, g.TargetNamespace)
+	logger.Infof("Deleting Ref %s", g.TargetRefName)
+	_, err := g.Provider.Client.Git.DeleteRef(ctx, g.Options.Organization, g.Options.Repo, g.TargetRefName)
+	assert.NilError(t, err)
+}
+
+func (g *PRTest) RunPushRequest(ctx context.Context, t *testing.T) {
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-push")
 	targetBranch := targetNS
 	targetEvent := "push"
-	ctx, runcnx, opts, ghcnx, err := Setup(ctx, onSecondController, onWebhook)
+	ctx, runcnx, opts, ghcnx, err := Setup(ctx, g.SecondController, g.Webhook)
 	assert.NilError(t, err)
 
 	var logmsg string
-	if onWebhook {
-		logmsg = fmt.Sprintf("Testing %s with Direct Webhook integration on %s", label, targetNS)
+	if g.Webhook {
+		logmsg = fmt.Sprintf("Testing %s with Direct Webhook integration on %s", g.Label, targetNS)
 		runcnx.Clients.Log.Info(logmsg)
 	} else {
-		logmsg = fmt.Sprintf("Testing %s with Github APPS integration on %s", label, targetNS)
+		logmsg = fmt.Sprintf("Testing %s with Github APPS integration on %s", g.Label, targetNS)
 		runcnx.Clients.Log.Info(logmsg)
 	}
 	repoinfo, resp, err := ghcnx.Client.Repositories.Get(ctx, opts.Organization, opts.Repo)
@@ -173,7 +221,7 @@ func RunPushRequest(ctx context.Context, t *testing.T, label string, yamlFiles [
 	assert.NilError(t, err)
 
 	yamlEntries := map[string]string{}
-	for _, v := range yamlFiles {
+	for _, v := range g.YamlFiles {
 		yamlEntries[filepath.Join(".tekton", filepath.Base(v))] = v
 	}
 
@@ -190,9 +238,16 @@ func RunPushRequest(ctx context.Context, t *testing.T, label string, yamlFiles [
 		Title:           logmsg,
 		OnEvent:         triggertype.Push.String(),
 		TargetNS:        targetNS,
-		NumberofPRMatch: len(yamlFiles),
+		NumberofPRMatch: len(g.YamlFiles),
 		SHA:             sha,
 	}
 	wait.Succeeded(ctx, t, runcnx, opts, sopt)
-	return runcnx, ghcnx, opts, targetNS, targetRefName, -1, sha
+
+	g.Cnx = runcnx
+	g.Options = opts
+	g.Provider = ghcnx
+	g.TargetNamespace = targetNS
+	g.TargetRefName = targetRefName
+	g.PRNumber = -1
+	g.SHA = sha
 }
