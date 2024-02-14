@@ -10,6 +10,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 )
 
+// getSpecificVersion fetches a specific version of a resource from the hub
 func getSpecificVersion(ctx context.Context, cs *params.Run, catalogName, resource, kind string) (string, error) {
 	split := strings.Split(resource, ":")
 	version := split[len(split)-1]
