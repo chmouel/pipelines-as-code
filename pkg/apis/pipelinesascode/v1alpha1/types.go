@@ -83,6 +83,15 @@ type Settings struct {
 	GithubAppTokenScopeRepos []string `json:"github_app_token_scope_repos,omitempty"`
 	PipelineRunProvenance    string   `json:"pipelinerun_provenance,omitempty"`
 	Policy                   *Policy  `json:"policy,omitempty"`
+	AI                       *AI      `json:"ai,omitempty"`
+}
+
+type AI struct {
+	Prompt      string  `json:"prompt,omitempty"`
+	Engine      string  `json:"engine,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
+	SafePrompt  bool    `json:"safe_prompt,omitempty"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
 }
 
 type Policy struct {

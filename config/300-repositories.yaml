@@ -70,6 +70,25 @@ spec:
                   description: Settings relative to the Repository
                   type: object
                   properties:
+                    ai:
+                      type: object
+                      description: AI related settings
+                      properties:
+                        prompt:
+                            type: string
+                            description: The prompt to use for the AI
+                        engine:
+                            type: string
+                            description: The engine to use for the AI
+                        temperature:
+                            type: number
+                            description: The temperature to use for the AI
+                        max_tokens:
+                            type: number
+                            description: Max tokens to reply
+                        safe_prompt:
+                            type: boolean
+                            description: Safe mode
                     policy:
                       type: object
                       description: Set policy on actions allowing only some teams

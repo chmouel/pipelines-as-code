@@ -9,6 +9,7 @@ import (
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/matcher"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/mistral"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
@@ -154,6 +155,16 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 	if msg, needUpdate := p.checkNeedUpdate(rawTemplates); needUpdate {
 		p.eventEmitter.EmitMessage(repo, zap.InfoLevel, "RepositoryNeedUpdate", msg)
 		return nil, fmt.Errorf(msg)
+	}
+
+	if p.event.DiffCommit != "" && repo.Spec.Settings != nil && repo.Spec.Settings.AI != nil {
+		p.annotations, err = mistral.PromptAI(p.logger, p.event, repo)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check security error via mistral AI: %w", err)
+		}
+		if len(p.annotations) > 0 {
+			return nil, fmt.Errorf("🤖 security error detected by mistral AI in this change:")
+		}
 	}
 
 	// This is for bitbucket

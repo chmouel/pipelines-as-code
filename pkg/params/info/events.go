@@ -38,6 +38,7 @@ type Event struct {
 	URL           string // WEB url not the git URL, which would match to the repo.spec
 	SHAURL        string // pretty URL for web browsing for UIs (cli/web)
 	SHATitle      string // commit title for UIs
+	DiffCommit    string // the change compared to the previous commit
 
 	PullRequestNumber int    // Pull or Merge Request number
 	PullRequestTitle  string // Title of the pull Request

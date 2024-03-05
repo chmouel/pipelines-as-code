@@ -226,6 +226,11 @@ func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info
 		if pacopts.ErrorDetection {
 			checkRunOutput.Annotations = v.getFailuresMessageAsAnnotations(ctx, statusOpts.PipelineRun, pacopts)
 		}
+	} else if statusOpts.Annotations != nil {
+		// convert the annotations passed as github annotations
+		for _, a := range statusOpts.Annotations {
+			text += fmt.Sprintf("Error: %s\n", a.Error)
+		}
 	}
 
 	checkRunOutput.Text = github.String(text)

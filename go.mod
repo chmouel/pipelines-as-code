@@ -9,6 +9,7 @@ require (
 	github.com/bradleyfalzon/ghinstallation/v2 v2.9.0
 	github.com/cloudevents/sdk-go/v2 v2.15.1
 	github.com/fvbommel/sortorder v1.1.0
+	github.com/gage-technologies/mistral-go v1.0.0
 	github.com/gfleury/go-bitbucket-v1 v0.0.0-20240131155556-0b41d7863037
 	github.com/gobwas/glob v0.2.3
 	github.com/google/cel-go v0.20.0

@@ -729,6 +729,8 @@ github.com/fogleman/gg v1.3.0/go.mod h1:R/bRT+9gY/C5z7JzPU0zXsXHKM4/ayA+zqcVNZzP
 github.com/fsnotify/fsnotify v1.4.7/go.mod h1:jwhsz4b93w/PPRr/qN1Yymfu8t87LnFCMoQvtojpjFo=
 github.com/fvbommel/sortorder v1.1.0 h1:fUmoe+HLsBTctBDoaBwpQo5N+nrCp8g/BjKb/6ZQmYw=
 github.com/fvbommel/sortorder v1.1.0/go.mod h1:uk88iVf1ovNn1iLfgUVU2F9o5eO30ui720w+kxuqRs0=
+github.com/gage-technologies/mistral-go v1.0.0 h1:Hwk0uJO+Iq4kMX/EwbfGRUq9zkO36w7HZ/g53N4N73A=
+github.com/gage-technologies/mistral-go v1.0.0/go.mod h1:tF++Xt7U975GcLlzhrjSQb8l/x+PrriO9QEdsgm9l28=
 github.com/gfleury/go-bitbucket-v1 v0.0.0-20240131155556-0b41d7863037 h1:F1O6v+jmHAJErLdTevHtDuZwx3Upd3JA0RQLyhdl0wc=
 github.com/gfleury/go-bitbucket-v1 v0.0.0-20240131155556-0b41d7863037/go.mod h1:ZEXoTRQmw7DEoiVE18I3ESWtdbevIr31GjQTv58Ptns=
 github.com/gfleury/go-bitbucket-v1/test/bb-mock-server v0.0.0-20230825095122-9bc1711434ab h1:BeG9dDWckFi/p5Gvqq3wTEDXsUV4G6bdvjEHMOT2B8E=

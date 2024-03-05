@@ -35,6 +35,7 @@ type PacRun struct {
 	logger       *zap.SugaredLogger
 	eventEmitter *events.EventEmitter
 	manager      *ConcurrencyManager
+	annotations  []provider.Annotation
 }
 
 func NewPacs(event *info.Event, vcx provider.Interface, run *params.Run, k8int kubeinteraction.Interface, logger *zap.SugaredLogger) PacRun {
@@ -49,10 +50,11 @@ func (p *PacRun) Run(ctx context.Context) error {
 	matchedPRs, repo, err := p.matchRepoPR(ctx)
 	if err != nil {
 		createStatusErr := p.vcx.CreateStatus(ctx, p.event, provider.StatusOpts{
-			Status:     "completed",
-			Conclusion: "failure",
-			Text:       fmt.Sprintf("There was an issue validating the commit: %q", err),
-			DetailsURL: p.run.Clients.ConsoleUI.URL(),
+			Status:      "completed",
+			Conclusion:  "failure",
+			Text:        fmt.Sprintf("There was an issue validating the commit: %q", err),
+			DetailsURL:  p.run.Clients.ConsoleUI.URL(),
+			Annotations: p.annotations,
 		})
 		p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryCreateStatus", fmt.Sprintf("an error occurred: %s", err))
 		if createStatusErr != nil {

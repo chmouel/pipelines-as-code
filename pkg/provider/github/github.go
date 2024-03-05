@@ -285,6 +285,16 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 			return fmt.Errorf("the webhook secret is not valid: %w", err)
 		}
 	}
+	diff, resp, err := v.Client.Repositories.GetCommitRaw(ctx, event.Organization, event.Repository, event.SHA, github.RawOptions{
+		Type: github.Diff,
+	})
+	if err != nil {
+		return fmt.Errorf("error getting diff from commit: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("error getting diff from commit: %s", resp.Status)
+	}
+	event.DiffCommit = diff
 
 	return nil
 }

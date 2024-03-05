@@ -13,6 +13,15 @@ import (
 	"go.uber.org/zap"
 )
 
+type Annotation struct {
+	ErrorType  string `json:"error_type"`
+	Line       int    `json:"line"`
+	Column     int    `json:"column"`
+	Error      string `json:"error"`
+	Suggestion string `json:"suggestion"`
+	Path       string `json:"path"`
+}
+
 type StatusOpts struct {
 	PipelineRun             *v1.PipelineRun
 	PipelineRunName         string
@@ -23,6 +32,7 @@ type StatusOpts struct {
 	DetailsURL              string
 	Summary                 string
 	Title                   string
+	Annotations             []Annotation
 }
 
 type Interface interface {
