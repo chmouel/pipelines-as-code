@@ -7,7 +7,7 @@ require (
 	code.gitea.io/sdk/gitea v0.16.0
 	github.com/AlecAivazis/survey/v2 v2.3.7
 	github.com/bradleyfalzon/ghinstallation/v2 v2.8.0
-	github.com/cloudevents/sdk-go/v2 v2.14.0
+	github.com/cloudevents/sdk-go/v2 v2.15.2
 	github.com/fvbommel/sortorder v1.1.0
 	github.com/gfleury/go-bitbucket-v1 v0.0.0-20230830121038-6e30c5760c87
 	github.com/gobwas/glob v0.2.3
