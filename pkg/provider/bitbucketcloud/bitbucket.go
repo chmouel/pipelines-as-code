@@ -145,13 +145,7 @@ func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, prov
 
 func (v *Provider) getDir(event *info.Event, path string) ([]bitbucket.RepositoryFile, error) {
 	// default set provenance from the SHA
-	revision := event.SHA
-	if v.provenance == "default_branch" {
-		revision = event.DefaultBranch
-		v.Logger.Infof("Using PipelineRun definition from default_branch: %s", event.DefaultBranch)
-	} else {
-		v.Logger.Infof("Using PipelineRun definition from source pull request SHA: %s", event.SHA)
-	}
+	revision := provider.GetProvenance(event, v.provenance, v.Logger)
 	repoFileOpts := &bitbucket.RepositoryFilesOptions{
 		Owner:    event.Organization,
 		RepoSlug: event.Repository,
@@ -168,7 +162,7 @@ func (v *Provider) getDir(event *info.Event, path string) ([]bitbucket.Repositor
 
 func (v *Provider) GetFileInsideRepo(_ context.Context, event *info.Event, path, _ string) (string, error) {
 	revision := event.SHA
-	if v.provenance == "default_branch" {
+	if v.provenance == provider.DefaultBranchSetting {
 		revision = event.DefaultBranch
 	}
 	return v.getBlob(event, revision, path)
@@ -239,7 +233,7 @@ func (v *Provider) concatAllYamlFiles(objects []bitbucket.RepositoryFile, event 
 	var allTemplates string
 
 	revision := event.SHA
-	if v.provenance == "default_branch" {
+	if v.provenance == provider.DefaultBranchSetting {
 		revision = event.DefaultBranch
 	}
 	for _, value := range objects {

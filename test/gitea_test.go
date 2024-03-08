@@ -27,6 +27,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/cctx"
 	tknpactest "github.com/openshift-pipelines/pipelines-as-code/test/pkg/cli"
 	tgitea "github.com/openshift-pipelines/pipelines-as-code/test/pkg/gitea"
@@ -629,7 +630,7 @@ func TestGiteaProvenance(t *testing.T) {
 	topts := &tgitea.TestOpts{
 		SkipEventsCheck:       true,
 		TargetEvent:           triggertype.PullRequest.String(),
-		Settings:              &v1alpha1.Settings{PipelineRunProvenance: "default_branch"},
+		Settings:              &v1alpha1.Settings{PipelineRunProvenance: provider.DefaultBranchSetting},
 		NoPullRequestCreation: true,
 	}
 	_, f := tgitea.TestPR(t, topts)

@@ -324,7 +324,7 @@ func TestGetTektonDir(t *testing.T) {
 			name:      "list tekton dir on default_branch",
 			prcontent: string(samplePR),
 			args: args{
-				provenance: "default_branch",
+				provenance: provider.DefaultBranchSetting,
 				path:       ".tekton",
 				event: &info.Event{
 					DefaultBranch: "main",
@@ -368,7 +368,7 @@ func TestGetTektonDir(t *testing.T) {
 				client, mux, tearDown := thelp.Setup(t)
 				v.Client = client
 				muxbranch := tt.args.event.HeadBranch
-				if tt.args.provenance == "default_branch" {
+				if tt.args.provenance == provider.DefaultBranchSetting {
 					muxbranch = tt.args.event.DefaultBranch
 				}
 				if tt.args.path != "" && tt.prcontent != "" {

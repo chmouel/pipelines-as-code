@@ -223,20 +223,12 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 	return nil
 }
 
-func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, provenance string) (string, error) {
+func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, rprovenance string) (string, error) {
 	if v.Client == nil {
 		return "", fmt.Errorf("no gitlab client has been initialized, " +
 			"exiting... (hint: did you forget setting a secret on your repo?)")
 	}
-	// default set provenance from head
-	revision := event.HeadBranch
-	if provenance == "default_branch" {
-		revision = event.DefaultBranch
-		v.Logger.Infof("Using PipelineRun definition from default_branch: %s", event.DefaultBranch)
-	} else {
-		v.Logger.Infof("Using PipelineRun definition from source merge request SHA: %s", event.SHA)
-	}
-
+	revision := provider.GetProvenance(event, rprovenance, v.Logger)
 	opt := &gitlab.ListTreeOptions{
 		Path:      gitlab.Ptr(path),
 		Ref:       gitlab.Ptr(revision),

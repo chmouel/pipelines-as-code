@@ -23,6 +23,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
@@ -253,7 +254,7 @@ func TestGetTektonDir(t *testing.T) {
 			},
 			expectedString:       "FROMDEFAULTBRANCH",
 			treepath:             "testdata/tree/defaultbranch",
-			provenance:           "default_branch",
+			provenance:           provider.DefaultBranchSetting,
 			filterMessageSnippet: "Using PipelineRun definition from default_branch: main",
 		},
 		{
@@ -289,7 +290,7 @@ func TestGetTektonDir(t *testing.T) {
 				Client: fakeclient,
 				Logger: fakelogger,
 			}
-			if tt.provenance == "default_branch" {
+			if tt.provenance == provider.DefaultBranchSetting {
 				tt.event.SHA = tt.event.DefaultBranch
 			} else {
 				shaDir := fmt.Sprintf("%x", sha256.Sum256([]byte(tt.treepath)))

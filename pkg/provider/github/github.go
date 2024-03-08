@@ -304,8 +304,13 @@ func (v *Provider) GetTektonDir(ctx context.Context, runevent *info.Event, path,
 	if provenance == "default_branch" {
 		revision = runevent.DefaultBranch
 		v.Logger.Infof("Using PipelineRun definition from default_branch: %s", runevent.DefaultBranch)
-	} else {
+	} else if provenance != "" {
+		revision = provenance
+		v.Logger.Infof("Using PipelineRun definition from source branch %s", provenance)
+	} else if runevent.EventType == triggertype.PullRequest.String() {
 		v.Logger.Infof("Using PipelineRun definition from source pull request %s/%s#%d SHA on %s", runevent.Organization, runevent.Repository, runevent.PullRequestNumber, runevent.SHA)
+	} else {
+		v.Logger.Infof("Using definition from %s/%s SHA: %s", runevent.Organization, runevent.Repository, runevent.SHA)
 	}
 
 	rootobjects, _, err := v.Client.Git.GetTree(ctx, runevent.Organization, runevent.Repository, revision, false)

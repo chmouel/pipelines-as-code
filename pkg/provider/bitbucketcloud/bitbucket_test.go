@@ -46,7 +46,7 @@ func TestGetTektonDir(t *testing.T) {
 			event:                bbcloudtest.MakeEvent(&info.Event{DefaultBranch: "main"}),
 			testDirPath:          "../../pipelineascode/testdata/pull_request/.tekton",
 			contentContains:      "kind: PipelineRun",
-			provenance:           "default_branch",
+			provenance:           provider.DefaultBranchSetting,
 			filterMessageSnippet: "Using PipelineRun definition from default_branch: main",
 		},
 		{
