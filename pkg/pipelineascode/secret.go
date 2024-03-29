@@ -39,12 +39,20 @@ func SecretFromRepository(ctx context.Context, cs *params.Run, k8int kubeinterac
 		gitProviderSecretKey = DefaultGitProviderSecretKey
 	}
 
-	if event.Provider.Token, err = k8int.GetSecret(ctx, ktypes.GetSecretOpt{
+	tokenFromSecret, err := k8int.GetSecret(ctx, ktypes.GetSecretOpt{
 		Namespace: repo.GetNamespace(),
 		Name:      repo.Spec.GitProvider.Secret.Name,
 		Key:       gitProviderSecretKey,
-	}); err != nil {
-		return err
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get secret %s from namespace %s: %v", gitProviderSecretKey, repo.GetNamespace(), err)
+	}
+
+	if tokenFromSecret == "" && repo.Spec.GitProvider.Secret.Name == "" {
+		// there may be a case where the secret is empty but the name is empty too, but generally this may be a mistake so just log it
+		logger.Warn("secret %s referenced in repository %s/%s for webhook secret is empty", gitProviderSecretKey, repo.Namespace, repo.Name)
+	} else if tokenFromSecret != "" {
+		event.Provider.Token = tokenFromSecret
 	}
 
 	// if we don't have a provider token in repo crd we won't be able to do much with it

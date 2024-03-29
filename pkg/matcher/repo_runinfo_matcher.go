@@ -2,6 +2,7 @@ package matcher
 
 import (
 	"context"
+	"regexp"
 	"strings"
 
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -19,8 +20,20 @@ func MatchEventURLRepo(ctx context.Context, cs *params.Run, event *info.Event, n
 		return nil, err
 	}
 	for _, repo := range repositories.Items {
-		repo.Spec.URL = strings.TrimSuffix(repo.Spec.URL, "/")
-		if repo.Spec.URL == event.URL {
+		rurl := strings.TrimSuffix(repo.Spec.URL, "/")
+		repo.Spec.URL = rurl
+
+		if rurl == event.URL {
+			return &repo, nil
+		}
+
+		re, err := regexp.Compile(repo.Spec.URL)
+		if err != nil {
+			cs.Clients.Log.Errorf("Error compiling regex %s: %v", repo.Spec.URL, err)
+			continue
+		}
+		if re.MatchString(event.URL) {
+			repo.Spec.URL = event.URL
 			return &repo, nil
 		}
 	}
