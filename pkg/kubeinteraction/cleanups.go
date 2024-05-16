@@ -32,11 +32,25 @@ func (k Interaction) CleanupPipelines(ctx context.Context, logger *zap.SugaredLo
 		return err
 	}
 
-	for c, prun := range psort.PipelineRunSortByCompletionTime(pruns.Items) {
+	for c, _prun := range psort.PipelineRunSortByCompletionTime(pruns.Items) {
+		prun, err := k.Run.Clients.Tekton.TektonV1().PipelineRuns(repo.GetNamespace()).Get(ctx, _prun.GetName(), metav1.GetOptions{})
+		if err != nil {
+			logger.Errorf("could not get pipelinerun %s for cleanup: %s", _prun.GetName(), err)
+			continue
+		}
 		prReason := prun.GetStatusCondition().GetCondition(apis.ConditionSucceeded).GetReason()
-		if prReason == tektonv1.PipelineRunReasonRunning.String() || prReason == tektonv1.PipelineRunReasonPending.String() {
+		if prReason == tektonv1.PipelineRunReasonRunning.String() ||
+			prReason == tektonv1.PipelineRunReasonPending.String() {
 			logger.Infof("skipping cleaning PipelineRun %s since the conditions.reason is %s", prun.GetName(), prReason)
 			continue
+		}
+
+		if pr.Status.GetCondition(apis.ConditionSucceeded).IsFalse() {
+			logger.Infof("skipping cleaning PipelineRun %s, since condition is unknown", prun.GetName())
+		}
+
+		if pr.Status.GetCondition(apis.ConditionSucceeded).IsUnknown() {
+			logger.Infof("skipping cleaning PipelineRun %s, since condition is false", prun.GetName())
 		}
 
 		if c >= maxKeep {
