@@ -5,10 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/annotations"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/hub"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -165,26 +164,10 @@ func (rt RemoteTasks) getRemote(ctx context.Context, uri string, fromHub bool, k
 	return "", fmt.Errorf(`cannot find "%s" anywhere`, uri)
 }
 
-func grabValuesFromAnnotations(annotations map[string]string, annotationReg string) ([]string, error) {
-	rtareg := regexp.MustCompile(fmt.Sprintf("%s/%s", pipelinesascode.GroupName, annotationReg))
-	var ret []string
-	for annotationK, annotationV := range annotations {
-		if !rtareg.MatchString(annotationK) {
-			continue
-		}
-		items, err := getAnnotationValues(annotationV)
-		if err != nil {
-			return ret, err
-		}
-		ret = append(items, ret...)
-	}
-	return ret, nil
-}
-
 // GetTaskFromAnnotations Get task remotely if they are on Annotations.
-func (rt RemoteTasks) GetTaskFromAnnotations(ctx context.Context, annotations map[string]string) ([]*tektonv1.Task, error) {
+func (rt RemoteTasks) GetTaskFromAnnotations(ctx context.Context, annot map[string]string) ([]*tektonv1.Task, error) {
 	ret := []*tektonv1.Task{}
-	tasks, err := grabValuesFromAnnotations(annotations, taskAnnotationsRegexp)
+	tasks, err := annotations.GrabValuesFromAnnotations(annot, taskAnnotationsRegexp)
 	if err != nil {
 		return nil, err
 	}
@@ -208,9 +191,9 @@ func (rt RemoteTasks) GetTaskFromAnnotations(ctx context.Context, annotations ma
 
 // GetPipelineFromAnnotations Get pipeline remotely if they are on Annotations
 // TODO: merge in a generic between the two.
-func (rt RemoteTasks) GetPipelineFromAnnotations(ctx context.Context, annotations map[string]string) (*tektonv1.Pipeline, error) {
+func (rt RemoteTasks) GetPipelineFromAnnotations(ctx context.Context, annot map[string]string) (*tektonv1.Pipeline, error) {
 	ret := []*tektonv1.Pipeline{}
-	pipelinesAnnotation, err := grabValuesFromAnnotations(annotations, pipelineAnnotationsRegexp)
+	pipelinesAnnotation, err := annotations.GrabValuesFromAnnotations(annot, pipelineAnnotationsRegexp)
 	if err != nil {
 		return nil, err
 	}

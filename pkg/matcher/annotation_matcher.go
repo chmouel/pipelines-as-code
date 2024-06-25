@@ -8,6 +8,7 @@ import (
 
 	"github.com/gobwas/glob"
 	"github.com/google/cel-go/common/types"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/annotations"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -18,12 +19,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
-)
-
-const (
-	// regex allows array of string or a single string
-	// eg. ["foo", "bar"], ["foo"] or "foo".
-	reValidateTag = `^\[(.*)\]$|^[^[\]\s]*$`
 )
 
 // prunBranch is value from annotations and baseBranch is event.Base value from event.
@@ -58,33 +53,6 @@ func branchMatch(prunBranch, baseBranch string) bool {
 	// Match the prunRef pattern with the baseBranch
 	// this will cover the scenarios of match globs like refs/tags/0.* and any other if any
 	return matchGlob(prunBranch, baseBranch)
-}
-
-// TODO: move to another file since it's common to all annotations_* files.
-func getAnnotationValues(annotation string) ([]string, error) {
-	re := regexp.MustCompile(reValidateTag)
-	annotation = strings.TrimSpace(annotation)
-	match := re.MatchString(annotation)
-	if !match {
-		return nil, fmt.Errorf("annotations in pipeline are in wrong format: %s", annotation)
-	}
-
-	// if it's not an array then it would be a single string
-	if !strings.HasPrefix(annotation, "[") {
-		return []string{annotation}, nil
-	}
-
-	// Split all tasks by comma and make sure to trim spaces in there
-	split := strings.Split(re.FindStringSubmatch(annotation)[1], ",")
-	for i := range split {
-		split[i] = strings.TrimSpace(split[i])
-	}
-
-	if split[0] == "" {
-		return nil, fmt.Errorf("annotation \"%s\" has empty values", annotation)
-	}
-
-	return split, nil
 }
 
 func getTargetBranch(prun *tektonv1.PipelineRun, event *info.Event) (bool, string, string, error) {
@@ -266,8 +234,8 @@ func buildAvailableMatchingAnnotationErr(event *info.Event, pruns []*tektonv1.Pi
 	return errmsg
 }
 
-func matchOnAnnotation(annotations string, eventType []string, branchMatching bool) (bool, error) {
-	targets, err := getAnnotationValues(annotations)
+func matchOnAnnotation(annot string, eventType []string, branchMatching bool) (bool, error) {
+	targets, err := annotations.GetAnnotationValues(annot)
 	if err != nil {
 		return false, err
 	}

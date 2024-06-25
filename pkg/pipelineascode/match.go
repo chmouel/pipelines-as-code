@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/matcher"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
@@ -270,6 +270,12 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 	if err != nil {
 		return nil, err
 	}
+
+	err = addStepCaching(pipelineRuns)
+	if err != nil {
+		return nil, err
+	}
+
 	// if we are doing explicit /test command then we only want to run the one that has matched the /test
 	if p.event.TargetTestPipelineRun != "" {
 		p.eventEmitter.EmitMessage(repo, zap.InfoLevel, "RepositoryMatchedPipelineRun", fmt.Sprintf("explicit testing via /test of PipelineRun %s", p.event.TargetTestPipelineRun))
@@ -292,7 +298,7 @@ func (p *PacRun) getPipelineRunsFromRepo(ctx context.Context, repo *v1alpha1.Rep
 
 func filterRunningPipelineRunOnTargetTest(testPipeline string, prs []*tektonv1.PipelineRun) *tektonv1.PipelineRun {
 	for _, pr := range prs {
-		if prName, ok := pr.GetAnnotations()[apipac.OriginalPRName]; ok {
+		if prName, ok := pr.GetAnnotations()[keys.OriginalPRName]; ok {
 			if prName == testPipeline {
 				return pr
 			}
@@ -325,7 +331,7 @@ func changeSecret(prs []*tektonv1.PipelineRun) error {
 		if np.Annotations == nil {
 			np.Annotations = map[string]string{}
 		}
-		np.Annotations[apipac.GitAuthSecret] = name
+		np.Annotations[keys.GitAuthSecret] = name
 		prs[k] = np
 	}
 	return nil
