@@ -9,6 +9,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/customparams"
+	pacDb "github.com/openshift-pipelines/pipelines-as-code/pkg/db"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
@@ -41,15 +42,17 @@ type PacRun struct {
 	logger       *zap.SugaredLogger
 	eventEmitter *events.EventEmitter
 	manager      *ConcurrencyManager
+	db           *pacDb.DB
 	pacInfo      *info.PacOpts
 	globalRepo   *v1alpha1.Repository
 }
 
-func NewPacs(event *info.Event, vcx provider.Interface, run *params.Run, pacInfo *info.PacOpts, k8int kubeinteraction.Interface, logger *zap.SugaredLogger, globalRepo *v1alpha1.Repository) PacRun {
+func NewPacs(event *info.Event, vcx provider.Interface, run *params.Run, pacInfo *info.PacOpts, k8int kubeinteraction.Interface, logger *zap.SugaredLogger, globalRepo *v1alpha1.Repository, db *pacDb.DB) PacRun {
 	return PacRun{
 		event: event, run: run, vcx: vcx, k8int: k8int, pacInfo: pacInfo, logger: logger, globalRepo: globalRepo,
 		eventEmitter: events.NewEventEmitter(run.Clients.Kube, logger),
 		manager:      NewConcurrencyManager(),
+		db:           db,
 	}
 }
 
@@ -114,6 +117,9 @@ func (p *PacRun) Run(ctx context.Context) error {
 				if createStatusErr != nil {
 					p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryCreateStatus", fmt.Sprintf("Cannot create status: %s: %s", err, createStatusErr))
 				}
+			}
+			if err := p.db.AddPipelineRun(pr); err != nil {
+				p.logger.Errorf("Failed to add PipelineRun %s to the database: %s", pr.GetName(), err)
 			}
 			p.manager.AddPipelineRun(pr)
 		}(match, i)

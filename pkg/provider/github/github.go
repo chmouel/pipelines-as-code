@@ -15,6 +15,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
+	pacdb "github.com/openshift-pipelines/pipelines-as-code/pkg/db"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -53,6 +54,7 @@ type Provider struct {
 	repo          *v1alpha1.Repository
 	eventEmitter  *events.EventEmitter
 	PaginedNumber int
+	DB            *pacdb.DB
 	skippedRun
 }
 

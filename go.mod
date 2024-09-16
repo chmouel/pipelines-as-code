@@ -38,6 +38,8 @@ require (
 	golang.org/x/sync v0.8.0
 	golang.org/x/text v0.17.0
 	gopkg.in/yaml.v2 v2.4.0
+	gorm.io/driver/sqlite v1.5.6
+	gorm.io/gorm v1.25.12
 	gotest.tools/v3 v3.5.1
 	k8s.io/api v0.31.0
 	k8s.io/apimachinery v0.31.0
@@ -51,7 +53,14 @@ require (
 require (
 	github.com/coreos/go-oidc/v3 v3.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
+	github.com/jackc/pgx/v5 v5.5.5 // indirect
+	github.com/jackc/puddle/v2 v2.2.1 // indirect
+	github.com/jinzhu/inflection v1.0.0 // indirect
+	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
+	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 )
@@ -138,6 +147,7 @@ require (
 	google.golang.org/protobuf v1.34.2
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gorm.io/driver/postgres v1.5.9
 	k8s.io/apiextensions-apiserver v0.31.0 // indirect
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kube-openapi v0.0.0-20240903163716-9e1beecbcb38 // indirect

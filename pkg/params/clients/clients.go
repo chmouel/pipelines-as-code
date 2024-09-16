@@ -177,7 +177,7 @@ func (c *Clients) NewClients(ctx context.Context, info *info.Info) error {
 
 	c.Dynamic, err = c.dynamicClient(config)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Failed to create dynamic client")
 	}
 
 	c.SetConsoleUI(c.consoleUIClient(ctx, c.Dynamic, info))

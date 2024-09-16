@@ -89,6 +89,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: POSGRESQL_URI
+              value: "host=jojo.lan database=paac user=paac"
             - name: K_METRICS_CONFIG
               value: '{"Domain":"pipelinesascode.tekton.dev/controller","Component":"pac_controller","PrometheusPort":9090,"ConfigMap":{"name":"pipelines-as-code-config-observability"}}'
             - name: K_TRACING_CONFIG
@@ -106,7 +108,7 @@ spec:
               readOnly: true
               name: tls
       volumes:
-      - name: tls
-        secret:
-          secretName: pipelines-as-code-tls-secret
-          optional: true
+        - name: tls
+          secret:
+            secretName: pipelines-as-code-tls-secret
+            optional: true

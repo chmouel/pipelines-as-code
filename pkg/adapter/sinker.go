@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	pacDb "github.com/openshift-pipelines/pipelines-as-code/pkg/db"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -23,6 +24,7 @@ type sinker struct {
 	payload    []byte
 	pacInfo    *info.PacOpts
 	globalRepo *v1alpha1.Repository
+	db         *pacDb.DB
 }
 
 func (s *sinker) processEventPayload(ctx context.Context, request *http.Request) error {
@@ -56,6 +58,6 @@ func (s *sinker) processEvent(ctx context.Context, request *http.Request) error 
 		}
 	}
 
-	p := pipelineascode.NewPacs(s.event, s.vcx, s.run, s.pacInfo, s.kint, s.logger, s.globalRepo)
+	p := pipelineascode.NewPacs(s.event, s.vcx, s.run, s.pacInfo, s.kint, s.logger, s.globalRepo, s.db)
 	return p.Run(ctx)
 }
