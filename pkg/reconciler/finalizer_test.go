@@ -5,7 +5,6 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -35,7 +34,7 @@ var (
 
 func getTestPR(name, state string) *tektonv1.PipelineRun {
 	var status tektonv1.PipelineRunSpecStatus
-	if state == kubeinteraction.StateQueued {
+	if state == keys.StateQueued {
 		status = tektonv1.PipelineRunSpecStatusPending
 	}
 	return &tektonv1.PipelineRun{
@@ -68,27 +67,27 @@ func TestReconciler_FinalizeKind(t *testing.T) {
 			pipelinerun: &tektonv1.PipelineRun{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						keys.State: kubeinteraction.StateCompleted,
+						keys.State: keys.StateCompleted,
 					},
 				},
 			},
 		},
 		{
 			name:        "queued pipelinerun",
-			pipelinerun: getTestPR("pr3", kubeinteraction.StateQueued),
+			pipelinerun: getTestPR("pr3", keys.StateQueued),
 			addToQueue: []*tektonv1.PipelineRun{
-				getTestPR("pr1", kubeinteraction.StateQueued),
-				getTestPR("pr2", kubeinteraction.StateQueued),
-				getTestPR("pr3", kubeinteraction.StateQueued),
+				getTestPR("pr1", keys.StateQueued),
+				getTestPR("pr2", keys.StateQueued),
+				getTestPR("pr3", keys.StateQueued),
 			},
 		},
 		{
 			name:        "repo was deleted",
-			pipelinerun: getTestPR("pr3", kubeinteraction.StateQueued),
+			pipelinerun: getTestPR("pr3", keys.StateQueued),
 			addToQueue: []*tektonv1.PipelineRun{
-				getTestPR("pr1", kubeinteraction.StateStarted),
-				getTestPR("pr2", kubeinteraction.StateQueued),
-				getTestPR("pr3", kubeinteraction.StateQueued),
+				getTestPR("pr1", keys.StateStarted),
+				getTestPR("pr2", keys.StateQueued),
+				getTestPR("pr3", keys.StateQueued),
 			},
 			skipAddingRepo: true,
 		},

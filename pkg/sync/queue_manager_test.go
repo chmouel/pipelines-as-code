@@ -10,7 +10,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
@@ -182,21 +181,21 @@ func TestQueueManager_InitQueues(t *testing.T) {
 	cw := clockwork.NewFakeClock()
 
 	startedLabel := map[string]string{
-		keys.State: kubeinteraction.StateStarted,
+		keys.State: keys.StateStarted,
 	}
 	queuedLabel := map[string]string{
-		keys.State: kubeinteraction.StateQueued,
+		keys.State: keys.StateQueued,
 	}
 
 	repo := newTestRepo(1)
 
 	queuedAnnotations := map[string]string{
 		keys.ExecutionOrder: "test-ns/first,test-ns/second,test-ns/third",
-		keys.State:          kubeinteraction.StateQueued,
+		keys.State:          keys.StateQueued,
 	}
 	startedAnnotations := map[string]string{
 		keys.ExecutionOrder: "test-ns/first,test-ns/second,test-ns/third",
-		keys.State:          kubeinteraction.StateStarted,
+		keys.State:          keys.StateStarted,
 	}
 	firstPR := newTestPR("first", cw.Now(), startedLabel, startedAnnotations)
 	secondPR := newTestPR("second", cw.Now().Add(5*time.Second), queuedLabel, queuedAnnotations)

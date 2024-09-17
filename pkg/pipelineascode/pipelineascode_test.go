@@ -18,7 +18,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -633,7 +632,7 @@ func TestRun(t *testing.T) {
 					if tt.concurrencyLimit > 0 {
 						concurrencyLimit, ok := pr.GetAnnotations()[keys.State]
 						assert.Assert(t, ok, "State hasn't been set on PR", concurrencyLimit)
-						assert.Equal(t, concurrencyLimit, kubeinteraction.StateQueued)
+						assert.Equal(t, concurrencyLimit, keys.StateQueued)
 					}
 				}
 			}

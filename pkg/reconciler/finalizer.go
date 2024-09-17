@@ -6,7 +6,6 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,11 +16,11 @@ import (
 func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
 	state, exist := pr.GetAnnotations()[keys.State]
-	if !exist || state == kubeinteraction.StateCompleted {
+	if !exist || state == keys.StateCompleted {
 		return nil
 	}
 
-	if state == kubeinteraction.StateQueued || state == kubeinteraction.StateStarted {
+	if state == keys.StateQueued || state == keys.StateStarted {
 		repoName, ok := pr.GetAnnotations()[keys.Repository]
 		if !ok {
 			return nil

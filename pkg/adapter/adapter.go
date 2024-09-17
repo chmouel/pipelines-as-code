@@ -12,7 +12,6 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
-	pacDb "github.com/openshift-pipelines/pipelines-as-code/pkg/db"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -49,7 +48,6 @@ type listener struct {
 	kint   kubeinteraction.Interface
 	logger *zap.SugaredLogger
 	event  *info.Event
-	db     *pacDb.DB
 }
 
 type Response struct {
@@ -59,13 +57,12 @@ type Response struct {
 
 var _ adapter.Adapter = (*listener)(nil)
 
-func New(run *params.Run, k *kubeinteraction.Interaction, db *pacDb.DB) adapter.AdapterConstructor {
+func New(run *params.Run, k *kubeinteraction.Interaction) adapter.AdapterConstructor {
 	return func(ctx context.Context, _ adapter.EnvConfigAccessor, _ cloudevents.Client) adapter.Adapter {
 		return &listener{
 			logger: logging.FromContext(ctx),
 			run:    run,
 			kint:   k,
-			db:     db,
 		}
 	}
 }
@@ -193,7 +190,6 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 			payload:    payload,
 			pacInfo:    &pacInfo,
 			globalRepo: globalRepo,
-			db:         l.db,
 		}
 
 		// clone the request to use it further

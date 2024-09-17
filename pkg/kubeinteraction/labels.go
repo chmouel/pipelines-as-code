@@ -14,13 +14,6 @@ import (
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 )
 
-const (
-	StateStarted   = "started"
-	StateQueued    = "queued"
-	StateCompleted = "completed"
-	StateFailed    = "failed"
-)
-
 func AddLabelsAndAnnotations(event *info.Event, pipelineRun *tektonv1.PipelineRun, repo *apipac.Repository, providerConfig *info.ProviderConfig, paramsRun *params.Run) error {
 	if event == nil {
 		return fmt.Errorf("event should not be nil")
@@ -37,7 +30,7 @@ func AddLabelsAndAnnotations(event *info.Event, pipelineRun *tektonv1.PipelineRu
 		keys.URLRepository:             formatting.CleanValueKubernetes(event.Repository),
 		keys.SHA:                       formatting.CleanValueKubernetes(event.SHA),
 		keys.Repository:                formatting.CleanValueKubernetes(repo.GetName()),
-		keys.State:                     StateStarted,
+		keys.State:                     keys.StateStarted,
 		keys.EventType:                 formatting.CleanValueKubernetes(event.EventType),
 	}
 
@@ -55,7 +48,7 @@ func AddLabelsAndAnnotations(event *info.Event, pipelineRun *tektonv1.PipelineRu
 		keys.SourceBranch:  event.HeadBranch,
 		keys.Repository:    repo.GetName(),
 		keys.GitProvider:   providerConfig.Name,
-		keys.State:         StateStarted,
+		keys.State:         keys.StateStarted,
 		keys.ControllerInfo: fmt.Sprintf(`{"name":"%s","configmap":"%s","secret":"%s", "gRepo": "%s"}`,
 			paramsinfo.Controller.Name, paramsinfo.Controller.Configmap, paramsinfo.Controller.Secret, paramsinfo.Controller.GlobalRepository),
 	}

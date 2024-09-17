@@ -23,7 +23,7 @@ func (k Interaction) CleanupPipelines(ctx context.Context, logger *zap.SugaredLo
 	labelSelector := fmt.Sprintf("%s=%s,%s=%s,%s=%s",
 		keys.Repository, formatting.CleanValueKubernetes(repo.GetName()), keys.OriginalPRName,
 		formatting.CleanValueKubernetes(pr.GetLabels()[keys.OriginalPRName]),
-		keys.State, StateCompleted)
+		keys.State, keys.StateCompleted)
 	logger.Infof("selecting pipelineruns by labels \"%s\" for deletion", labelSelector)
 
 	pruns, err := k.Run.Clients.Tekton.TektonV1().PipelineRuns(repo.GetNamespace()).List(ctx,

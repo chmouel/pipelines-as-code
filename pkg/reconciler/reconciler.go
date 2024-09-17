@@ -56,7 +56,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 	logger := logging.FromContext(ctx).With("namespace", pr.GetNamespace())
 	// if pipelineRun is in completed or failed state then return
 	state, exist := pr.GetAnnotations()[keys.State]
-	if exist && (state == kubeinteraction.StateCompleted || state == kubeinteraction.StateFailed) {
+	if exist && (state == keys.StateCompleted || state == keys.StateFailed) {
 		return nil
 	}
 
@@ -69,8 +69,8 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 
 	// queue pipelines which are in queued state and pending status
 	// if status is not pending, it could be canceled so let it be reported, even if state is queued
-	if state == kubeinteraction.StateQueued && pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
-		return r.queuePipelineRun(ctx, logger, pr)
+	if state == keys.StateQueued && pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
+		return r.processQ(ctx, logger, pr)
 	}
 
 	if !pr.IsDone() {
@@ -178,11 +178,11 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		return repo, fmt.Errorf("cannot set client: %w", err)
 	}
 
-	finalState := kubeinteraction.StateCompleted
+	finalState := keys.StateCompleted
 	newPr, err := r.postFinalStatus(ctx, logger, pacInfo, provider, event, pr)
 	if err != nil {
 		logger.Errorf("failed to post final status, moving on: %v", err)
-		finalState = kubeinteraction.StateFailed
+		finalState = keys.StateFailed
 	}
 
 	if err := r.updateRepoRunStatus(ctx, logger, newPr, repo, event); err != nil {
@@ -219,7 +219,7 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 }
 
 func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) error {
-	pr, err := r.updatePipelineRunState(ctx, logger, pr, kubeinteraction.StateStarted)
+	pr, err := r.updatePipelineRunState(ctx, logger, pr, keys.StateStarted)
 	if err != nil {
 		return fmt.Errorf("cannot update state: %w", err)
 	}
@@ -306,7 +306,7 @@ func (r *Reconciler) updatePipelineRunState(ctx context.Context, logger *zap.Sug
 		},
 	}
 	// if state is started then remove pipelineRun pending status
-	if state == kubeinteraction.StateStarted {
+	if state == keys.StateStarted {
 		mergePatch["spec"] = map[string]interface{}{
 			"status": "",
 		}

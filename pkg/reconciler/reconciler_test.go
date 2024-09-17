@@ -128,7 +128,7 @@ func TestReconciler_ReconcileKind(t *testing.T) {
 
 			pr.Annotations = map[string]string{
 				keys.GitAuthSecret:  secretName,
-				keys.State:          kubeinteraction.StateCompleted,
+				keys.State:          keys.StateCompleted,
 				keys.InstallationID: "1234",
 				keys.RepoURL:        randomURL,
 				keys.Repository:     pr.GetName(),
@@ -229,7 +229,7 @@ func TestReconciler_ReconcileKind(t *testing.T) {
 			assert.NilError(t, err)
 
 			// state must be updated to completed
-			assert.Equal(t, got.Annotations[keys.State], kubeinteraction.StateCompleted)
+			assert.Equal(t, got.Annotations[keys.State], keys.StateCompleted)
 		})
 	}
 }
@@ -250,7 +250,7 @@ func TestUpdatePipelineRunState(t *testing.T) {
 					Namespace: "test",
 					Name:      "test",
 					Annotations: map[string]string{
-						keys.State: kubeinteraction.StateQueued,
+						keys.State: keys.StateQueued,
 					},
 				},
 				Spec: tektonv1.PipelineRunSpec{
@@ -258,7 +258,7 @@ func TestUpdatePipelineRunState(t *testing.T) {
 				},
 				Status: tektonv1.PipelineRunStatus{},
 			},
-			state: kubeinteraction.StateStarted,
+			state: keys.StateStarted,
 		},
 		{
 			name: "started to completed",
@@ -267,13 +267,13 @@ func TestUpdatePipelineRunState(t *testing.T) {
 					Namespace: "test",
 					Name:      "test",
 					Annotations: map[string]string{
-						keys.State: kubeinteraction.StateStarted,
+						keys.State: keys.StateStarted,
 					},
 				},
 				Spec:   tektonv1.PipelineRunSpec{},
 				Status: tektonv1.PipelineRunStatus{},
 			},
-			state: kubeinteraction.StateCompleted,
+			state: keys.StateCompleted,
 		},
 	}
 	for _, tt := range tests {

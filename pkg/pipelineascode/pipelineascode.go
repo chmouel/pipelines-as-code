@@ -9,7 +9,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/customparams"
-	pacDb "github.com/openshift-pipelines/pipelines-as-code/pkg/db"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/db"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
@@ -42,17 +42,15 @@ type PacRun struct {
 	logger       *zap.SugaredLogger
 	eventEmitter *events.EventEmitter
 	manager      *ConcurrencyManager
-	db           *pacDb.DB
 	pacInfo      *info.PacOpts
 	globalRepo   *v1alpha1.Repository
 }
 
-func NewPacs(event *info.Event, vcx provider.Interface, run *params.Run, pacInfo *info.PacOpts, k8int kubeinteraction.Interface, logger *zap.SugaredLogger, globalRepo *v1alpha1.Repository, db *pacDb.DB) PacRun {
+func NewPacs(event *info.Event, vcx provider.Interface, run *params.Run, pacInfo *info.PacOpts, k8int kubeinteraction.Interface, logger *zap.SugaredLogger, globalRepo *v1alpha1.Repository) PacRun {
 	return PacRun{
 		event: event, run: run, vcx: vcx, k8int: k8int, pacInfo: pacInfo, logger: logger, globalRepo: globalRepo,
 		eventEmitter: events.NewEventEmitter(run.Clients.Kube, logger),
 		manager:      NewConcurrencyManager(),
-		db:           db,
 	}
 }
 
@@ -118,9 +116,6 @@ func (p *PacRun) Run(ctx context.Context) error {
 					p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryCreateStatus", fmt.Sprintf("Cannot create status: %s: %s", err, createStatusErr))
 				}
 			}
-			if err := p.db.AddPipelineRun(pr); err != nil {
-				p.logger.Errorf("Failed to add PipelineRun %s to the database: %s", pr.GetName(), err)
-			}
 			p.manager.AddPipelineRun(pr)
 		}(match, i)
 	}
@@ -178,8 +173,8 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 		// pending status
 		match.PipelineRun.Spec.Status = tektonv1.PipelineRunSpecStatusPending
 		// pac state as queued
-		match.PipelineRun.Labels[keys.State] = kubeinteraction.StateQueued
-		match.PipelineRun.Annotations[keys.State] = kubeinteraction.StateQueued
+		match.PipelineRun.Labels[keys.State] = keys.StateQueued
+		match.PipelineRun.Annotations[keys.State] = keys.StateQueued
 	}
 
 	// Create the actual pipeline
@@ -191,6 +186,13 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 			match.Repo.GetNamespace(), err)
 	}
 
+	if match.Repo.Spec.ConcurrencyLimit != nil && *match.Repo.Spec.ConcurrencyLimit != 0 {
+		if err := p.run.Clients.DB.AddUpdatePR(pr, &db.Queue{
+			State: keys.StateQueued,
+		}); err != nil {
+			return nil, fmt.Errorf("failed to update DB for PipelineRun %s to queued: %w", pr.GetName(), err)
+		}
+	}
 	// Create status with the log url
 	p.logger.Infof("pipelinerun %s has been created in namespace %s for SHA: %s Target Branch: %s",
 		pr.GetName(), match.Repo.GetNamespace(), p.event.SHA, p.event.BaseBranch)

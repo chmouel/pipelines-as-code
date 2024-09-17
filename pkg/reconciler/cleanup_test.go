@@ -30,7 +30,7 @@ func TestCleanupPipelineRuns(t *testing.T) {
 	cleanupLabels := map[string]string{
 		keys.OriginalPRName: cleanupPRName,
 		keys.Repository:     cleanupRepoName,
-		keys.State:          kubeinteraction.StateCompleted,
+		keys.State:          keys.StateCompleted,
 	}
 
 	cleanupAnnotation := map[string]string{

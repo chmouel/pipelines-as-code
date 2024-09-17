@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
+	pacdb "github.com/openshift-pipelines/pipelines-as-code/pkg/db"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/generated/clientset/versioned"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/pkg/errors"
@@ -38,6 +39,7 @@ type Clients struct {
 	Dynamic           dynamic.Interface
 	consoleUIMutex    *sync.Mutex
 	consoleUI         consoleui.Interface
+	DB                *pacdb.DB
 }
 
 func (c *Clients) InitClients() {
@@ -183,7 +185,20 @@ func (c *Clients) NewClients(ctx context.Context, info *info.Info) error {
 	c.SetConsoleUI(c.consoleUIClient(ctx, c.Dynamic, info))
 	c.ClientInitialized = true
 
+	c.DB, err = c.dbConnect()
+	if err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func (c *Clients) dbConnect() (*pacdb.DB, error) {
+	pacDB := pacdb.NewDB(c.Log)
+	if err := pacDB.Connect(); err != nil {
+		return nil, errors.Wrap(err, "Failed to connect to database")
+	}
+	return pacDB, nil
 }
 
 func (c *Clients) ConsoleUI() consoleui.Interface {

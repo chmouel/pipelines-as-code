@@ -10,7 +10,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/generated/clientset/versioned"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/sort"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	versioned2 "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
@@ -162,7 +161,7 @@ func (qm *QueueManager) InitQueues(ctx context.Context, tekton versioned2.Interf
 		// add all pipelineRuns in started state to pending queue
 		prs, err := tekton.TektonV1().PipelineRuns(repo.Namespace).
 			List(ctx, v1.ListOptions{
-				LabelSelector: fmt.Sprintf("%s=%s", keys.State, kubeinteraction.StateStarted),
+				LabelSelector: fmt.Sprintf("%s=%s", keys.State, keys.StateStarted),
 			})
 		if err != nil {
 			return err
@@ -187,7 +186,7 @@ func (qm *QueueManager) InitQueues(ctx context.Context, tekton versioned2.Interf
 		// now fetch all queued pipelineRun
 		prs, err = tekton.TektonV1().PipelineRuns(repo.Namespace).
 			List(ctx, v1.ListOptions{
-				LabelSelector: fmt.Sprintf("%s=%s", keys.State, kubeinteraction.StateQueued),
+				LabelSelector: fmt.Sprintf("%s=%s", keys.State, keys.StateQueued),
 			})
 		if err != nil {
 			return err

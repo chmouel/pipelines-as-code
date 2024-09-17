@@ -63,4 +63,11 @@ const (
 	ResultsRecordSummary = "results.tekton.dev/recordSummaryAnnotations"
 )
 
+const (
+	StateStarted   = "started"
+	StateQueued    = "queued"
+	StateCompleted = "completed"
+	StateFailed    = "failed"
+)
+
 var ParamsRe = regexp.MustCompile(`{{([^}]{2,})}}`)

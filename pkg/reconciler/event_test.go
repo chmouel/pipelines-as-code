@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
@@ -44,7 +43,7 @@ func TestBuildEventFromPipelineRun(t *testing.T) {
 						keys.URLRepository: "repo",
 						keys.SHA:           "sha",
 						keys.EventType:     "push",
-						keys.State:         kubeinteraction.StateStarted,
+						keys.State:         keys.StateStarted,
 						keys.PullRequest:   "1234",
 					},
 					Annotations: map[string]string{
@@ -63,7 +62,7 @@ func TestBuildEventFromPipelineRun(t *testing.T) {
 						keys.SHA:             "sha",
 						keys.EventType:       "push",
 						keys.Branch:          "branch",
-						keys.State:           kubeinteraction.StateStarted,
+						keys.State:           keys.StateStarted,
 						keys.PullRequest:     "1234",
 					},
 				},

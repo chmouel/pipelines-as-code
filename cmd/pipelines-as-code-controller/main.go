@@ -5,7 +5,6 @@ import (
 	"log"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/adapter"
-	pacDb "github.com/openshift-pipelines/pipelines-as-code/pkg/db"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -47,11 +46,5 @@ func main() {
 	ctx = evadapter.WithNamespace(ctx, system.Namespace())
 	ctx = evadapter.WithConfigWatcherEnabled(ctx)
 
-	// TODO: move to clients
-	db := pacDb.NewDB(run.Clients)
-	if err := db.Connect(ctx); err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-
-	evadapter.MainWithContext(ctx, PACControllerLogKey, adapter.NewEnvConfig, adapter.New(run, kinteract, db))
+	evadapter.MainWithContext(ctx, PACControllerLogKey, adapter.NewEnvConfig, adapter.New(run, kinteract))
 }
