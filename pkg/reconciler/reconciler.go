@@ -220,6 +220,11 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 }
 
 func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) error {
+	if err := r.run.Clients.DB.CreatedUpdatePR(pr, &db.Queue{
+		State: kubeinteraction.StateCompleted,
+	}); err != nil {
+		return fmt.Errorf("db: cannot update state %w", err)
+	}
 	pr, err := r.updatePipelineRunState(ctx, logger, pr, kubeinteraction.StateStarted)
 	if err != nil {
 		return fmt.Errorf("cannot update state: %w", err)
@@ -296,7 +301,7 @@ func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *
 }
 
 func (r *Reconciler) updatePipelineRunState(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun, state string) (*tektonv1.PipelineRun, error) {
-	if err := r.run.Clients.DB.UpdatePipelineRun(pr, db.Queue{
+	if err := r.run.Clients.DB.CreatedUpdatePR(pr, &db.Queue{
 		State: state,
 	}); err != nil {
 		return pr, fmt.Errorf("error updating pipelinerun state in db: %w", err)

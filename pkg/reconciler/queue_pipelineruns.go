@@ -47,7 +47,6 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
 			return fmt.Errorf("failed to update PipelineRun to in_progress: %w", err)
 		}
-		return nil
 	}
 
 	orderedList := strings.Split(order, ",")

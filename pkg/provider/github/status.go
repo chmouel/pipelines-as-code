@@ -243,7 +243,7 @@ func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info
 				GitHubCheckRunID: *checkRunID,
 				GitHubStatusURL:  statusOpts.DetailsURL,
 			}
-			if err := v.Run.Clients.DB.UpdatePipelineRun(statusOpts.PipelineRun, q); err != nil {
+			if err := v.Run.Clients.DB.CreatedUpdatePR(statusOpts.PipelineRun, &q); err != nil {
 				return err
 			}
 		}

@@ -33,26 +33,41 @@ func NewDB(logger *zap.SugaredLogger) *DB {
 	return &DB{logger: logger}
 }
 
-func (db *DB) AddPipelineRun(pr *tektonv1.PipelineRun) error {
+func (db *DB) addPipelineRun(pr *tektonv1.PipelineRun, q *Queue) error {
+	if q == nil {
+		q = &Queue{}
+	}
 	if db.Cnx == nil {
 		return nil
 	}
-	result := db.Cnx.Create(&Queue{
-		Name:       pr.GetName(),
-		CreatedAt:  time.Now(),
-		Repository: pr.GetAnnotations()[keys.Repository],
-	})
+	q.CreatedAt = time.Now()
+	if q.Name == "" {
+		q.Name = pr.GetName()
+	}
+	if q.Repository == "" {
+		q.Repository = pr.GetAnnotations()[keys.Repository]
+	}
+	result := db.Cnx.Create(q)
 	return result.Error
 }
 
-func (db *DB) UpdatePipelineRun(pr *tektonv1.PipelineRun, q Queue) error {
+func (db *DB) CreatedUpdatePR(pr *tektonv1.PipelineRun, q *Queue) error {
+	if q == nil {
+		q = &Queue{}
+	}
 	if db.Cnx == nil {
 		return nil
 	}
 	q.UpdatedAt = time.Now()
-	result := db.Cnx.Model(&Queue{}).Where("name = ?", pr.GetName()).Updates(q)
-
-	return result.Error
+	name := pr.GetName()
+	if name == "" {
+		name = pr.GetGenerateName()
+	}
+	update := db.Cnx.Model(q).Where("name = ?", name).Updates(q)
+	if update.RowsAffected == 0 {
+		return db.addPipelineRun(pr, q)
+	}
+	return update.Error
 }
 
 func (db *DB) Connect() error {
