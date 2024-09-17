@@ -1,15 +1,14 @@
 package db
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"regexp"
 	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
+	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -18,18 +17,20 @@ type Queue struct {
 	ID               int       `gorm:"primaryKey"`
 	Name             string    `gorm:"name"`
 	CreatedAt        time.Time `gorm:"created_at"`
+	UpdatedAt        time.Time `gorm:"updated_at"`
 	Repository       string    `gorm:"repository"`
-	GitHubCheckRunId int64     `gorm:"gh_check_run_id"`
+	GitHubCheckRunID int64     `gorm:"gh_check_run_id"`
 	GitHubStatusURL  string    `gorm:"gh_status_url"`
+	State            string    `gorm:"state"`
 }
 
 type DB struct {
-	Cnx     *gorm.DB
-	clients clients.Clients
+	Cnx    *gorm.DB
+	logger *zap.SugaredLogger
 }
 
-func NewDB(c clients.Clients) *DB {
-	return &DB{clients: c}
+func NewDB(logger *zap.SugaredLogger) *DB {
+	return &DB{logger: logger}
 }
 
 func (db *DB) AddPipelineRun(pr *tektonv1.PipelineRun) error {
@@ -44,7 +45,17 @@ func (db *DB) AddPipelineRun(pr *tektonv1.PipelineRun) error {
 	return result.Error
 }
 
-func (db *DB) Connect(ctx context.Context) error {
+func (db *DB) UpdatePipelineRun(pr *tektonv1.PipelineRun, q Queue) error {
+	if db.Cnx == nil {
+		return nil
+	}
+	q.UpdatedAt = time.Now()
+	result := db.Cnx.Model(&Queue{}).Where("name = ?", pr.GetName()).Updates(q)
+
+	return result.Error
+}
+
+func (db *DB) Connect() error {
 	var dbc *gorm.DB
 	var err error
 	var databaseType string
@@ -61,8 +72,7 @@ func (db *DB) Connect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	db.clients.Log.Infof("Connected to database %s", databaseType)
-
+	db.logger.Infof("Connected to database %s", databaseType)
 	if err := dbc.AutoMigrate(&Queue{}); err != nil {
 		return err
 	}

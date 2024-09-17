@@ -11,6 +11,7 @@ import (
 	"github.com/google/go-github/v64/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/action"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/db"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	kstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction/status"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -234,6 +235,15 @@ func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info
 		}
 		if statusOpts.PipelineRun != nil {
 			if _, err := action.PatchPipelineRun(ctx, v.Logger, "checkRunID and logURL", v.Run.Clients.Tekton, statusOpts.PipelineRun, metadataPatch(checkRunID, statusOpts.DetailsURL)); err != nil {
+				return err
+			}
+		}
+		if checkRunID != nil {
+			q := db.Queue{
+				GitHubCheckRunID: *checkRunID,
+				GitHubStatusURL:  statusOpts.DetailsURL,
+			}
+			if err := v.Run.Clients.DB.UpdatePipelineRun(statusOpts.PipelineRun, q); err != nil {
 				return err
 			}
 		}
