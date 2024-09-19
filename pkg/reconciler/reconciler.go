@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/go-github/v64/github"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	pipelinerunreconciler "github.com/tektoncd/pipeline/pkg/client/injection/reconciler/pipeline/v1/pipelinerun"
 	tektonv1lister "github.com/tektoncd/pipeline/pkg/client/listers/pipeline/v1"
@@ -200,6 +201,16 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 
 	// remove pipelineRun from Queue and start the next one
 	next := r.qm.RemoveFromQueue(repo, pr)
+
+	if err := r.run.Clients.DB.CreatedUpdatePR(pr, &db.Queue{Queued: github.Bool(false)}); err != nil {
+		logger.Error(fmt.Sprintf("db: failed to update PipelineRun: %v", err))
+	}
+	if _next, err := r.run.Clients.DB.GetNextInQueue(repo); err != nil {
+		logger.Debug(fmt.Sprintf("db: failed to get next in queue: %v", err))
+	} else {
+		next = _next
+	}
+
 	if next != "" {
 		key := strings.Split(next, "/")
 		pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
@@ -221,7 +232,8 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 
 func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) error {
 	if err := r.run.Clients.DB.CreatedUpdatePR(pr, &db.Queue{
-		State: kubeinteraction.StateCompleted,
+		State:  kubeinteraction.StateStarted,
+		Queued: github.Bool(false),
 	}); err != nil {
 		return fmt.Errorf("db: cannot update state %w", err)
 	}

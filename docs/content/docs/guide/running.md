@@ -119,4 +119,4 @@ testing the PipelineRun.
 This feature enables you to either rerun a particular pipeline or execute the
 entire suite of checks once again.
 
-![github apps rerun check](/images/github-apps-rerun-checks.png)
+![GitHub apps rerun check](/images/github-apps-rerun-checks.png)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/google/go-github/v64/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/action"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -116,9 +117,6 @@ func (p *PacRun) Run(ctx context.Context) error {
 					p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryCreateStatus", fmt.Sprintf("Cannot create status: %s: %s", err, createStatusErr))
 				}
 			}
-			if err := p.run.Clients.DB.CreatedUpdatePR(pr, nil); err != nil {
-				p.logger.Errorf("Failed to add PipelineRun %s to the database: %s", pr.GetName(), err)
-			}
 			p.manager.AddPipelineRun(pr)
 		}(match, i)
 	}
@@ -190,7 +188,10 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 	}
 
 	if match.Repo.Spec.ConcurrencyLimit != nil && *match.Repo.Spec.ConcurrencyLimit != 0 {
-		if err := p.run.Clients.DB.CreatedUpdatePR(pr, &db.Queue{State: kubeinteraction.StateQueued}); err != nil {
+		if err := p.run.Clients.DB.CreatedUpdatePR(pr, &db.Queue{
+			Queued: github.Bool(true),
+			State:  kubeinteraction.StateQueued,
+		}); err != nil {
 			return nil, fmt.Errorf("failed to update DB for PipelineRun %s to queued: %w", pr.GetName(), err)
 		}
 	}
