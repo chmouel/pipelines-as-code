@@ -32,10 +32,19 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@latest
+        with:
+          cluster_name: kind
+          wait: 120s
+      - uses: openshift-pipelines/setup-tektoncd@v1
+        with:
+          pipeline_version: latest
+          feature_flags: '{"enable-step-actions": "true"}'
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
-
       - uses: ko-build/setup-ko@v0.7
 
       - name: Install gosmee
@@ -54,11 +63,17 @@ jobs:
           detached: true
           limit-access-to-actor: true
 
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
+          detached: true
+
       - name: Start installing cluster
         run: |
           export PAC_DIR=${PWD}
           export TEST_GITEA_SMEEURL="${{ secrets.TEST_GITEA_SMEEURL }}"
-          bash -x ./hack/dev/kind/install.sh
+          bash -x ./hack/dev/kind/install.sh -C
 
       - name: Create PAC github-app-secret
         run: |

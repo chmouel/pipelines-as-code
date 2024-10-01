@@ -128,10 +128,9 @@ function install_tekton() {
   kubectl apply --filename https://storage.googleapis.com/tekton-releases/dashboard/latest/release.yaml >/dev/null
   i=0
   echo -n "Waiting for tekton pipeline to come up: "
-  tt=pipelines
   while true; do
     [[ ${i} == 120 ]] && exit 1
-    ep=$(kubectl get ep -n tekton-pipelines tekton-${tt}-webhook -o jsonpath='{.subsets[*].addresses[*].ip}')
+    ep=$(kubectl get ep -n tekton-pipelines tekton-pipelines-webhook -o jsonpath='{.subsets[*].addresses[*].ip}')
     [[ -n ${ep} ]] && break
     sleep 2
     i=$((i + 1))
@@ -243,6 +242,7 @@ Usage: $0 [OPTIONS]
 Options:
   -h          Show this message
   -b          Only install the registry/kind/nginx and tekton and don't install PAC
+  -C          CI run
   -c          Configure PAC
   -p          Install only PAC
   -g          Install only Gitea
@@ -253,7 +253,7 @@ Options:
 EOF
 }
 
-while getopts "ROGhgpcrb" o; do
+while getopts "CROGhgpcrb" o; do
   case "${o}" in
   h)
     usage
@@ -266,6 +266,12 @@ while getopts "ROGhgpcrb" o; do
     install_tekton
     exit
     ;;
+  C)
+    start_registry
+    install_nginx
+    install_pac
+    install_gitea
+    ;;
   c)
     configure_pac
     exit
@@ -275,7 +281,6 @@ while getopts "ROGhgpcrb" o; do
     exit
     ;;
   R)
-
     echo "Restarting pac pods"
     kubectl delete pod -l app.kubernetes.io/part-of=pipelines-as-code -n pipelines-as-code || true
     ;;
