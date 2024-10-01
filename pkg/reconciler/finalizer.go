@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
@@ -45,7 +46,10 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 			repo.Spec.Merge(r.globalRepo.Spec)
 		}
 		logger = logger.With("namespace", repo.Namespace)
-		next := r.qm.RemoveFromQueue(repo, pr)
+		next, err := r.run.Clients.DB.RemovePipelineRun(repo, pr.GetName())
+		if err != nil {
+			return fmt.Errorf("db: failed to remove PipelineRun: %w", err)
+		}
 		if next != "" {
 			key := strings.Split(next, "/")
 			pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})

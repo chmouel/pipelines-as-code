@@ -314,9 +314,6 @@ github.com/mattn/go-colorable
 # github.com/mattn/go-isatty v0.0.20
 ## explicit; go 1.15
 github.com/mattn/go-isatty
-# github.com/mattn/go-sqlite3 v1.14.22
-## explicit; go 1.19
-github.com/mattn/go-sqlite3
 # github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 ## explicit
 github.com/mgutz/ansi
@@ -685,9 +682,6 @@ gopkg.in/yaml.v3
 # gorm.io/driver/postgres v1.5.9
 ## explicit; go 1.19
 gorm.io/driver/postgres
-# gorm.io/driver/sqlite v1.5.6
-## explicit; go 1.20
-gorm.io/driver/sqlite
 # gorm.io/gorm v1.25.12
 ## explicit; go 1.18
 gorm.io/gorm

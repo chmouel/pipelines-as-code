@@ -38,7 +38,6 @@ require (
 	golang.org/x/sync v0.8.0
 	golang.org/x/text v0.17.0
 	gopkg.in/yaml.v2 v2.4.0
-	gorm.io/driver/sqlite v1.5.6
 	gorm.io/gorm v1.25.12
 	gotest.tools/v3 v3.5.1
 	k8s.io/api v0.31.0
@@ -60,7 +59,6 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
-	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 )

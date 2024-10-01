@@ -29,6 +29,7 @@ func PatchPipelineRun(ctx context.Context, logger *zap.SugaredLogger, whatPatchi
 		if err != nil {
 			return err
 		}
+		fmt.Printf("mergePatch: %v\n", mergePatch)
 		patchedPR, err = tekton.TektonV1().PipelineRuns(pr.GetNamespace()).Patch(ctx, pr.GetName(), types.MergePatchType, patch, metav1.PatchOptions{})
 		if err != nil {
 			logger.Infof("could not patch Pipelinerun with %v, retrying %v/%v: %v", whatPatching, pr.GetNamespace(), pr.GetName(), err)

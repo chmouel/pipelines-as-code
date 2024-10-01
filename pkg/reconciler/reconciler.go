@@ -199,18 +199,13 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		logger.Error("failed to emit metrics: ", err)
 	}
 
-	// remove pipelineRun from Queue and start the next one
-	next := r.qm.RemoveFromQueue(repo, pr)
-
 	if err := r.run.Clients.DB.CreatedUpdatePR(pr, &db.Queue{Queued: github.Bool(false)}); err != nil {
 		logger.Error(fmt.Sprintf("db: failed to update PipelineRun: %v", err))
 	}
-	if _next, err := r.run.Clients.DB.GetNextInQueue(repo); err != nil {
+	next, err := r.run.Clients.DB.GetNextInQueue(repo)
+	if err != nil {
 		logger.Debug(fmt.Sprintf("db: failed to get next in queue: %v", err))
-	} else {
-		next = _next
 	}
-
 	if next != "" {
 		key := strings.Split(next, "/")
 		pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})

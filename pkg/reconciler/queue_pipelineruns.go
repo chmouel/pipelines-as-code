@@ -15,6 +15,47 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func (r *Reconciler) processQ(ctx context.Context, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun, logger *zap.SugaredLogger) error {
+	var orderedList []string
+
+	orderedList, err := r.run.Clients.DB.GetQueue(pr)
+	fmt.Printf("orderedList: %v\n", orderedList)
+	if err != nil {
+		return fmt.Errorf("db: failed to get queue: %w", err)
+	}
+	redo := false
+	// we start cleaning the queue if the queue is out of sync with what on cluster
+	// we can't do this in a single transaction as we need to check each item in the queue
+	// TODO: we can probably optimize with a List instead of Get each items everytime
+	for _, prKeys := range orderedList {
+		nsName := strings.Split(prKeys, "/")
+		_, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(nsName[0]).Get(ctx, nsName[1], metav1.GetOptions{})
+		if err != nil {
+			logger.Infof("removing PipelineRun from queue: %s/%s, %v", nsName[0], nsName[1], err)
+			_, _ = r.run.Clients.DB.RemovePipelineRun(repo, nsName[1])
+			redo = true
+		}
+	}
+	if redo {
+		return r.processQ(ctx, repo, pr, logger)
+	}
+	acquired, err := r.getNextPRInQueue(repo, orderedList)
+	if err != nil {
+		return fmt.Errorf("db: failed to get queue: %w", err)
+	}
+	for _, prKeys := range acquired {
+		nsName := strings.Split(prKeys, "/")
+		pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(nsName[0]).Get(ctx, nsName[1], metav1.GetOptions{})
+		if err != nil {
+			return r.processQ(ctx, repo, pr, logger)
+		}
+		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+			return fmt.Errorf("failed to update pipelineRun to in_progress: %w", err)
+		}
+	}
+	return nil
+}
+
 func (r *Reconciler) getNextPRInQueue(repo *v1alpha1.Repository, orderedList []string) ([]string, error) {
 	acquiredList := []string{}
 	for i := 0; i < *repo.Spec.ConcurrencyLimit; i++ {
@@ -32,22 +73,7 @@ func (r *Reconciler) getNextPRInQueue(repo *v1alpha1.Repository, orderedList []s
 }
 
 func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) error {
-	var orderedList []string
 	var err error
-
-	if orderedList, err = r.run.Clients.DB.GetQueue(pr); err != nil {
-		return fmt.Errorf("db: failed to get queue: %w", err)
-	}
-	if len(orderedList) == 0 {
-		order, exist := pr.GetAnnotations()[keys.ExecutionOrder]
-		if !exist {
-			// if the pipelineRun doesn't have order label then wait
-			return nil
-		}
-		orderedList = strings.Split(order, ",")
-	}
-
-	r.run.Clients.Log.Infof("DEBUG: orderedList: %+v", orderedList)
 
 	repoName := pr.GetAnnotations()[keys.Repository]
 	repo, err := r.repoLister.Repositories(pr.Namespace).Get(repoName)
@@ -83,27 +109,5 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 			return fmt.Errorf("failed to update PipelineRun to in_progress: %w", err)
 		}
 	}
-
-	acquired, err := r.qm.AddListToQueue(repo, orderedList)
-	if err != nil {
-		return fmt.Errorf("failed to add to queue: %s: %w", pr.GetName(), err)
-	}
-
-	acquired, err = r.getNextPRInQueue(repo, orderedList)
-	if err != nil {
-		return err
-	}
-
-	for _, prKeys := range acquired {
-		nsName := strings.Split(prKeys, "/")
-		pr, err = r.run.Clients.Tekton.TektonV1().PipelineRuns(nsName[0]).Get(ctx, nsName[1], metav1.GetOptions{})
-		if err != nil {
-			logger.Info("failed to get pr with namespace and name: ", nsName[0], nsName[1])
-			return err
-		}
-		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-			return fmt.Errorf("failed to update pipelineRun to in_progress: %w", err)
-		}
-	}
-	return nil
+	return r.processQ(ctx, repo, pr, logger)
 }
