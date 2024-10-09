@@ -188,7 +188,10 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 
 	if match.Repo.Spec.ConcurrencyLimit != nil && *match.Repo.Spec.ConcurrencyLimit != 0 {
 		if err := p.run.Clients.DB.AddUpdatePR(pr, &db.Queue{
-			State: keys.StateQueued,
+			OriginalPRName: pr.GetAnnotations()[keys.OriginalPRName],
+			RepositoryName: match.Repo.GetName(),
+			Namespace:      match.Repo.GetNamespace(),
+			State:          keys.StateQueued,
 		}); err != nil {
 			return nil, fmt.Errorf("failed to update DB for PipelineRun %s to %s: %w", pr.GetName(), keys.StateQueued, err)
 		}

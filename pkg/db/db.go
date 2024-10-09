@@ -18,7 +18,7 @@ type Queue struct {
 	Name           string    `gorm:"name"`
 	CreatedAt      time.Time `gorm:"created_at"`
 	UpdatedAt      time.Time `gorm:"updated_at"`
-	Repository     string    `gorm:"repository"`
+	RepositoryName string    `gorm:"repository"`
 	Namespace      string    `gorm:"namespace"`
 	OriginalPRName string    `gorm:"original_pr_name"`
 	State          string    `gorm:"state"`
@@ -44,8 +44,8 @@ func (db *DB) createPipelineRun(pr *tektonv1.PipelineRun, q *Queue) error {
 	if q.Name == "" {
 		q.Name = pr.GetName()
 	}
-	if q.Repository == "" {
-		q.Repository = pr.GetAnnotations()[keys.Repository]
+	if q.RepositoryName == "" {
+		q.RepositoryName = pr.GetAnnotations()[keys.Repository]
 	}
 	if q.Namespace == "" {
 		q.Namespace = pr.GetNamespace()
@@ -74,12 +74,20 @@ func (db *DB) AddUpdatePR(pr *tektonv1.PipelineRun, q *Queue) error {
 	return update.Error
 }
 
-func (db *DB) GetQueuedPRs() ([]Queue, error) {
+func (db *DB) GetQueuedPRs(limit int, namespace, repo string) ([]Queue, error) {
 	if db.Cnx == nil {
 		return nil, nil
 	}
 	var queues []Queue
-	result := db.Cnx.Where("state = ?", keys.StateQueued).Find(&queues)
+	query := db.Cnx.Where(
+		Queue{Namespace: namespace, RepositoryName: repo, State: keys.StateQueued},
+	)
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	query = query.Order("created_at asc")
+
+	result := query.Find(&queues)
 	return queues, result.Error
 }
 

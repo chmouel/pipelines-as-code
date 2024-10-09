@@ -230,10 +230,10 @@ func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *
 		return fmt.Errorf("cannot update state: %w", err)
 	}
 	if err := r.run.Clients.DB.AddUpdatePR(pr, &db.Queue{
-		State:      keys.StateStarted,
-		Name:       pr.GetName(),
-		Repository: repo.GetName(),
-		Namespace:  pr.GetNamespace(),
+		State:          keys.StateStarted,
+		Name:           pr.GetName(),
+		RepositoryName: repo.GetName(),
+		Namespace:      pr.GetNamespace(),
 	}); err != nil {
 		return fmt.Errorf("cannot update pipelinerun state to %s: %w", keys.StateStarted, err)
 	}
