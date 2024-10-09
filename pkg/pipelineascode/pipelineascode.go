@@ -190,7 +190,7 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 		if err := p.run.Clients.DB.AddUpdatePR(pr, &db.Queue{
 			State: keys.StateQueued,
 		}); err != nil {
-			return nil, fmt.Errorf("failed to update DB for PipelineRun %s to queued: %w", pr.GetName(), err)
+			return nil, fmt.Errorf("failed to update DB for PipelineRun %s to %s: %w", pr.GetName(), keys.StateQueued, err)
 		}
 	}
 	// Create status with the log url

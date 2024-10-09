@@ -74,6 +74,15 @@ func (db *DB) AddUpdatePR(pr *tektonv1.PipelineRun, q *Queue) error {
 	return update.Error
 }
 
+func (db *DB) GetQueuedPRs() ([]Queue, error) {
+	if db.Cnx == nil {
+		return nil, nil
+	}
+	var queues []Queue
+	result := db.Cnx.Where("state = ?", keys.StateQueued).Find(&queues)
+	return queues, result.Error
+}
+
 func (db *DB) Connect() error {
 	var dbc *gorm.DB
 	var err error

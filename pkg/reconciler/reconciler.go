@@ -19,6 +19,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/customparams"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/db"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	pacapi "github.com/openshift-pipelines/pipelines-as-code/pkg/generated/listers/pipelinesascode/v1alpha1"
@@ -185,6 +186,11 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		finalState = keys.StateFailed
 	}
 
+	if err := r.run.Clients.DB.AddUpdatePR(pr, &db.Queue{State: finalState}); err != nil {
+		return nil, fmt.Errorf("failed to update DB for PipelineRun %s to %s: %w",
+			pr.GetName(), keys.StateCompleted, err)
+	}
+
 	if err := r.updateRepoRunStatus(ctx, logger, newPr, repo, event); err != nil {
 		return repo, fmt.Errorf("cannot update run status: %w", err)
 	}
@@ -223,6 +229,15 @@ func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *
 	if err != nil {
 		return fmt.Errorf("cannot update state: %w", err)
 	}
+	if err := r.run.Clients.DB.AddUpdatePR(pr, &db.Queue{
+		State:      keys.StateStarted,
+		Name:       pr.GetName(),
+		Repository: repo.GetName(),
+		Namespace:  pr.GetNamespace(),
+	}); err != nil {
+		return fmt.Errorf("cannot update pipelinerun state to %s: %w", keys.StateStarted, err)
+	}
+
 	pacInfo := r.run.Info.GetPacOpts()
 	detectedProvider, event, err := r.detectProvider(ctx, logger, pr)
 	if err != nil {
