@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -56,15 +57,36 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 		return fmt.Errorf("failed to add to queue: %s: %w", pr.GetName(), err)
 	}
 
+	var reterr error
+
+	// try 5 time to acquire the lock until it is acquired
+	for i := 0; i < 5; i++ {
+		reterr = r.startQ(ctx, acquired, repo, logger)
+		if reterr != nil {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+	}
+	return reterr
+}
+
+func (r *Reconciler) startQ(ctx context.Context, acquired []string, repo *v1alpha1.Repository, logger *zap.SugaredLogger) error {
 	for _, prKeys := range acquired {
 		nsName := strings.Split(prKeys, "/")
-		pr, err = r.run.Clients.Tekton.TektonV1().PipelineRuns(nsName[0]).Get(ctx, nsName[1], metav1.GetOptions{})
+		pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(nsName[0]).Get(ctx, nsName[1], metav1.GetOptions{})
 		if err != nil {
-			logger.Info("failed to get pr with namespace and name: ", nsName[0], nsName[1])
-			return err
+			logger.Infof("failed to get pr %s/%s: %s", nsName[0], nsName[1], err.Error())
+
+			// skip the pr if it is not found, it may have been deleted or
+			// otherwise but don't break the whole Q process for that
+			if errors.IsNotFound(err) {
+				logger.Info("failed to get pr with namespace and name: ", nsName[0], nsName[1])
+				continue
+			}
 		}
 		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-			return fmt.Errorf("failed to update pipelineRun to in_progress: %w", err)
+			logger.Infof("queuing error, failed to update pipelineRun to in_progress: %w", err.Error())
+			return err
 		}
 	}
 	return nil
