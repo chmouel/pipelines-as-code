@@ -12,7 +12,8 @@ type Semaphore interface {
 	resize(int) bool
 	addToQueue(string, time.Time) bool
 	addToFailedQueue(string, time.Time) bool
-	getFailureQueue() []string
+	getNextFailureInQueue() string
+	removeFailureFromQueue(string)
 	removeFromQueue(string)
 	getName() string
 	getLimit() int

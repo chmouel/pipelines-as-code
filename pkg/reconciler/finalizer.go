@@ -38,8 +38,6 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 		if err != nil {
 			return err
 		}
-		failures := r.qm.GetFailedQueue(repo)
-		logger.Infof("DEBUG: failures: %v\n", failures)
 		r.secretNS = repo.GetNamespace()
 		if r.globalRepo, err = r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && r.globalRepo != nil {
 			if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && r.globalRepo.Spec.GitProvider != nil && r.globalRepo.Spec.GitProvider.Secret != nil {
@@ -49,6 +47,8 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 		}
 		logger = logger.With("namespace", repo.Namespace)
 		next := r.qm.RemoveFromQueue(repo, pr)
+		nextFailure := r.qm.GetNextFailed(repo)
+		logger.Infof("DEBUG: FinalizeKind: failures: %v\n", nextFailure)
 		if next != "" {
 			key := strings.Split(next, "/")
 			pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
@@ -56,7 +56,9 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 				return err
 			}
 			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-				r.qm.AddToFailureQueue(repo, pr.GetName())
+				if !r.qm.AddToFailureQueue(repo, next) {
+					logger.Errorf("failed to add to failure queue: %s", next)
+				}
 				return fmt.Errorf("finalizer/FinalizeKind: failure to set PipelineRun status to in_progress: %w", err)
 			}
 			return nil

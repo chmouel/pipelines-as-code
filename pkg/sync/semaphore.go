@@ -150,15 +150,27 @@ func (s *prioritySemaphore) addToFailedQueue(key string, creationTime time.Time)
 	return true
 }
 
-func (s *prioritySemaphore) getFailureQueue() []string {
+func (s *prioritySemaphore) getNextFailureInQueue() string {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	keys := []string{}
-	for k := range s.failed {
-		keys = append(keys, k)
+	if len(s.failed) == 0 {
+		return ""
 	}
-	return keys
+	for key, value := range s.failed {
+		if !value {
+			continue
+		}
+		return key
+	}
+	return ""
+}
+
+func (s *prioritySemaphore) removeFailureFromQueue(key string) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	s.failed[key] = false
 }
 
 func (s *prioritySemaphore) tryAcquire(key string) (bool, string) {

@@ -199,9 +199,13 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 
 	// remove pipelineRun from Queue and start the next one
 	for {
-		failures := r.qm.GetFailedQueue(repo)
-		logger.Infof("DEBUG: failures: %v\n", failures)
+		nextFailure := r.qm.GetNextFailed(repo)
+		logger.Infof("DEBUG: reportFinalStatus: failures: %v\n", nextFailure)
 		next := r.qm.RemoveFromQueue(repo, pr)
+		if next == "" && nextFailure != "" {
+			next = nextFailure
+			r.qm.RemoveFailureFromQueue(repo, nextFailure)
+		}
 		if next != "" {
 			key := strings.Split(next, "/")
 			pr, err = r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
@@ -210,7 +214,10 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 			}
 
 			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-				r.qm.AddToFailureQueue(repo, pr.GetName())
+				r.qm.ReleaseLock(repo, pr)
+				if !r.qm.AddToFailureQueue(repo, next) {
+					logger.Errorf("failed to add to failure queue: %s", next)
+				}
 				logger.Errorf("reportFinalStatus: failed to update pipelineRun to in_progress: %v, trying next one", err)
 				continue
 			}

@@ -76,7 +76,7 @@ func (qm *QueueManager) checkAndUpdateSemaphoreSize(repo *v1alpha1.Repository, s
 	return nil
 }
 
-func (qm *QueueManager) AddToFailureQueue(repo *v1alpha1.Repository, pr string) bool {
+func (qm *QueueManager) AddToFailureQueue(repo *v1alpha1.Repository, prNs string) bool {
 	qm.lock.Lock()
 	defer qm.lock.Unlock()
 
@@ -86,20 +86,33 @@ func (qm *QueueManager) AddToFailureQueue(repo *v1alpha1.Repository, pr string) 
 		return false
 	}
 
-	return sema.addToFailedQueue(pr, time.Now())
+	return sema.addToFailedQueue(prNs, time.Now())
 }
 
-func (qm *QueueManager) GetFailedQueue(repo *v1alpha1.Repository) []string {
+func (qm *QueueManager) GetNextFailed(repo *v1alpha1.Repository) string {
 	qm.lock.Lock()
 	defer qm.lock.Unlock()
 
 	repoKey := repoKey(repo)
 	sema, found := qm.queueMap[repoKey]
 	if !found {
-		return []string{}
+		return ""
 	}
 
-	return sema.getFailureQueue()
+	return sema.getNextFailureInQueue()
+}
+
+func (qm *QueueManager) RemoveFailureFromQueue(repo *v1alpha1.Repository, prNs string) {
+	qm.lock.Lock()
+	defer qm.lock.Unlock()
+
+	repoKey := repoKey(repo)
+	sema, found := qm.queueMap[repoKey]
+	if !found {
+		return
+	}
+
+	sema.removeFailureFromQueue(prNs)
 }
 
 // AddListToQueue adds the pipelineRun to the waiting queue of the repository
@@ -163,6 +176,19 @@ func (qm *QueueManager) RemoveFromQueue(repo *v1alpha1.Repository, run *tektonv1
 		return next
 	}
 	return ""
+}
+
+func (qm *QueueManager) ReleaseLock(repo *v1alpha1.Repository, run *tektonv1.PipelineRun) {
+	qm.lock.Lock()
+	defer qm.lock.Unlock()
+	repoKey := repoKey(repo)
+	sema, found := qm.queueMap[repoKey]
+	if !found {
+		return
+	}
+
+	qKey := getQueueKey(run)
+	sema.release(qKey)
 }
 
 func getQueueKey(run *tektonv1.PipelineRun) string {
