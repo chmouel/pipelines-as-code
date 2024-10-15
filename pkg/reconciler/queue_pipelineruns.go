@@ -17,7 +17,6 @@ import (
 func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) error {
 	order, exist := pr.GetAnnotations()[keys.ExecutionOrder]
 	if !exist {
-		// if the pipelineRun doesn't have order label then wait
 		return nil
 	}
 

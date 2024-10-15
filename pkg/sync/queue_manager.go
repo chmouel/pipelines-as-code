@@ -76,6 +76,32 @@ func (qm *QueueManager) checkAndUpdateSemaphoreSize(repo *v1alpha1.Repository, s
 	return nil
 }
 
+func (qm *QueueManager) AddToFailureQueue(repo *v1alpha1.Repository, pr string) bool {
+	qm.lock.Lock()
+	defer qm.lock.Unlock()
+
+	repoKey := repoKey(repo)
+	sema, found := qm.queueMap[repoKey]
+	if !found {
+		return false
+	}
+
+	return sema.addToFailedQueue(pr, time.Now())
+}
+
+func (qm *QueueManager) GetFailedQueue(repo *v1alpha1.Repository) []string {
+	qm.lock.Lock()
+	defer qm.lock.Unlock()
+
+	repoKey := repoKey(repo)
+	sema, found := qm.queueMap[repoKey]
+	if !found {
+		return []string{}
+	}
+
+	return sema.getFailureQueue()
+}
+
 // AddListToQueue adds the pipelineRun to the waiting queue of the repository
 // and if it is at the top and ready to run which means currently running pipelineRun < limit
 // then move it to running queue

@@ -38,6 +38,8 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 		if err != nil {
 			return err
 		}
+		failures := r.qm.GetFailedQueue(repo)
+		logger.Infof("DEBUG: failures: %v\n", failures)
 		r.secretNS = repo.GetNamespace()
 		if r.globalRepo, err = r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && r.globalRepo != nil {
 			if repo.Spec.GitProvider != nil && repo.Spec.GitProvider.Secret == nil && r.globalRepo.Spec.GitProvider != nil && r.globalRepo.Spec.GitProvider.Secret != nil {
@@ -54,9 +56,7 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 				return err
 			}
 			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-				if _, rerr := r.qm.AddListToQueue(repo, []string{next}); rerr != nil {
-					return fmt.Errorf("failure to readd pr %s to queue: %w", next, rerr)
-				}
+				r.qm.AddToFailureQueue(repo, pr.GetName())
 				return fmt.Errorf("finalizer/FinalizeKind: failure to set PipelineRun status to in_progress: %w", err)
 			}
 			return nil

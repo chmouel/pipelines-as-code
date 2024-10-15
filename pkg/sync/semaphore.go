@@ -13,6 +13,7 @@ type prioritySemaphore struct {
 	limit     int
 	pending   *priorityQueue
 	running   map[string]bool
+	failed    map[string]bool
 	semaphore *sema.Weighted
 	lock      *sync.Mutex
 }
@@ -26,6 +27,7 @@ func newSemaphore(name string, limit int) *prioritySemaphore {
 		pending:   &priorityQueue{itemByKey: make(map[string]*item)},
 		semaphore: sema.NewWeighted(int64(limit)),
 		running:   make(map[string]bool),
+		failed:    make(map[string]bool),
 		lock:      &sync.Mutex{},
 	}
 }
@@ -128,6 +130,35 @@ func (s *prioritySemaphore) addToQueue(key string, creationTime time.Time) bool 
 	}
 	s.pending.add(key, creationTime.UnixNano())
 	return true
+}
+
+func (s *prioritySemaphore) addToFailedQueue(key string, creationTime time.Time) bool {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if _, ok := s.running[key]; ok {
+		return false
+	}
+	if s.pending.isPending(key) {
+		return false
+	}
+	if _, ok := s.failed[key]; ok {
+		return true
+	}
+
+	s.failed[key] = true
+	return true
+}
+
+func (s *prioritySemaphore) getFailureQueue() []string {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	keys := []string{}
+	for k := range s.failed {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func (s *prioritySemaphore) tryAcquire(key string) (bool, string) {

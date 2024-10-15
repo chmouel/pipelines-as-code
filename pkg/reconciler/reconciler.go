@@ -199,6 +199,8 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 
 	// remove pipelineRun from Queue and start the next one
 	for {
+		failures := r.qm.GetFailedQueue(repo)
+		logger.Infof("DEBUG: failures: %v\n", failures)
 		next := r.qm.RemoveFromQueue(repo, pr)
 		if next != "" {
 			key := strings.Split(next, "/")
@@ -208,9 +210,7 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 			}
 
 			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-				if _, rerr := r.qm.AddListToQueue(repo, []string{next}); rerr != nil {
-					return repo, fmt.Errorf("failed to readd pr %s to queue: %w", next, rerr)
-				}
+				r.qm.AddToFailureQueue(repo, pr.GetName())
 				logger.Errorf("reportFinalStatus: failed to update pipelineRun to in_progress: %v, trying next one", err)
 				continue
 			}
