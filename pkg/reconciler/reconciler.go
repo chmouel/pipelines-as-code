@@ -198,20 +198,24 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	}
 
 	// remove pipelineRun from Queue and start the next one
-	next := r.qm.RemoveFromQueue(repo, pr)
-	if next != "" {
-		key := strings.Split(next, "/")
-		pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
-		if err != nil {
-			return repo, fmt.Errorf("cannot get pipeline for next in queue: %w", err)
-		}
-
-		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-			if _, rerr := r.qm.AddListToQueue(repo, []string{next}); rerr != nil {
-				return repo, fmt.Errorf("failed to readd pr %s to queue: %w", next, rerr)
+	for {
+		next := r.qm.RemoveFromQueue(repo, pr)
+		if next != "" {
+			key := strings.Split(next, "/")
+			pr, err = r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
+			if err != nil {
+				return repo, fmt.Errorf("cannot get pipeline for next in queue: %w", err)
 			}
-			return repo, fmt.Errorf("reportFinalStatus: cannot update pipelinerun to in_progress %w", err)
+
+			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+				if _, rerr := r.qm.AddListToQueue(repo, []string{next}); rerr != nil {
+					return repo, fmt.Errorf("failed to readd pr %s to queue: %w", next, rerr)
+				}
+				logger.Errorf("reportFinalStatus: failed to update pipelineRun to in_progress: %v, trying next one", err)
+				continue
+			}
 		}
+		break
 	}
 
 	if err := r.cleanupPipelineRuns(ctx, logger, pacInfo, repo, pr); err != nil {
@@ -223,7 +227,7 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 
 func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) error {
 	prn := pr.GetName()
-	if strings.HasPrefix(prn, "test-gh-13") {
+	if strings.HasPrefix(prn, "test-gh-12") {
 		return fmt.Errorf("DEBUG: error error miss robinson")
 	}
 	pr, err := r.updatePipelineRunState(ctx, logger, pr, kubeinteraction.StateStarted)
