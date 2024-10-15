@@ -207,7 +207,10 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		}
 
 		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-			return repo, fmt.Errorf("failed to update status: %w", err)
+			if _, rerr := r.qm.AddListToQueue(repo, []string{next}); rerr != nil {
+				return repo, fmt.Errorf("failed to readd pr %s to queue: %w", next, rerr)
+			}
+			return repo, fmt.Errorf("reportFinalStatus: cannot update pipelinerun to in_progress %w", err)
 		}
 	}
 
@@ -219,6 +222,10 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 }
 
 func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) error {
+	prn := pr.GetName()
+	if strings.HasPrefix(prn, "test-gh-13") {
+		return fmt.Errorf("DEBUG: error error miss robinson")
+	}
 	pr, err := r.updatePipelineRunState(ctx, logger, pr, kubeinteraction.StateStarted)
 	if err != nil {
 		return fmt.Errorf("cannot update state: %w", err)

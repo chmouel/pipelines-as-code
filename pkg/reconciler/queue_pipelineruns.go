@@ -85,8 +85,12 @@ func (r *Reconciler) startQ(ctx context.Context, acquired []string, repo *v1alph
 			}
 		}
 		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-			logger.Infof("queuing error, failed to update pipelineRun to in_progress: %w", err.Error())
-			return err
+			if _, rerr := r.qm.AddListToQueue(repo, []string{prKeys}); rerr != nil {
+				logger.Infof("queuing error, failed to readd pr %s to queue: %w", prKeys, rerr.Error())
+				return err
+			}
+			logger.Infof("startQ: failure to update pipelineRun to in_progress: %w", err.Error())
+			continue
 		}
 	}
 	return nil

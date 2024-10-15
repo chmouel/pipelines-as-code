@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
@@ -52,10 +53,11 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 			if err != nil {
 				return err
 			}
-			if err := r.
-				updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-				logger.Error("failed to update status: ", err)
-				return err
+			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+				if _, rerr := r.qm.AddListToQueue(repo, []string{next}); rerr != nil {
+					return fmt.Errorf("failure to readd pr %s to queue: %w", next, rerr)
+				}
+				return fmt.Errorf("finalizer/FinalizeKind: failure to set PipelineRun status to in_progress: %w", err)
 			}
 			return nil
 		}
