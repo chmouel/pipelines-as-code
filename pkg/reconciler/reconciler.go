@@ -234,7 +234,7 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 
 func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) error {
 	prn := pr.GetName()
-	if strings.HasPrefix(prn, "test-gh-12") {
+	if strings.HasPrefix(prn, "test-gh-14") {
 		return fmt.Errorf("DEBUG: error error miss robinson")
 	}
 	pr, err := r.updatePipelineRunState(ctx, logger, pr, kubeinteraction.StateStarted)
