@@ -2,6 +2,8 @@ package reconciler
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -232,10 +234,25 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	return repo, nil
 }
 
+func randomError(prn, prefix string) error {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Errorf("failed to generate random number: %w", err)
+	}
+	randomNumber := binary.LittleEndian.Uint64(b[:]) % 100
+
+	if strings.HasPrefix(prn, prefix) && randomNumber < 50 {
+		return fmt.Errorf("DEBUG: we error while updating the pipelinerun to in progress: %s", prn)
+	}
+
+	return nil
+}
+
 func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) error {
 	prn := pr.GetName()
-	if strings.HasPrefix(prn, "test-gh-14") {
-		return fmt.Errorf("DEBUG: error error miss robinson")
+
+	if err := randomError(prn, "test-gh-14"); err != nil {
+		return err
 	}
 	pr, err := r.updatePipelineRunState(ctx, logger, pr, kubeinteraction.StateStarted)
 	if err != nil {
