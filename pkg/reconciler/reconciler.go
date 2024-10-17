@@ -202,11 +202,13 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	// remove pipelineRun from Queue and start the next one
 	for {
 		nextFailure := r.qm.GetNextFailed(repo)
-		logger.Infof("DEBUG: reportFinalStatus: failures: %v\n", nextFailure)
-		next := r.qm.RemoveFromQueue(repo, pr)
-		if next == "" && nextFailure != "" {
+		var next string
+		if nextFailure != "" {
 			next = nextFailure
 			r.qm.RemoveFailureFromQueue(repo, nextFailure)
+			logger.Infof("DEBUG 🖲️: processing the previously failed pipelinerun: %s", next)
+		} else {
+			next = r.qm.RemoveFromQueue(repo, pr)
 		}
 		if next != "" {
 			key := strings.Split(next, "/")
@@ -218,10 +220,9 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
 				r.qm.ReleaseLock(repo, pr)
 				if !r.qm.AddToFailureQueue(repo, next) {
-					logger.Errorf("failed to add to failure queue: %s", next)
+					logger.Errorf("DEBUG 💥 failure to add to failure queue: %s", next)
 				}
-				logger.Errorf("reportFinalStatus: failed to update pipelineRun to in_progress: %v, trying next one", err)
-				continue
+				break
 			}
 		}
 		break
@@ -234,15 +235,15 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	return repo, nil
 }
 
-func randomError(prn, prefix string) error {
+func randomError(prn string) error {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return fmt.Errorf("failed to generate random number: %w", err)
 	}
 	randomNumber := binary.LittleEndian.Uint64(b[:]) % 100
 
-	if strings.HasPrefix(prn, prefix) && randomNumber < 50 {
-		return fmt.Errorf("DEBUG: we error while updating the pipelinerun to in progress: %s", prn)
+	if randomNumber < 50 {
+		return fmt.Errorf("DEBUG: 😈 randomly failing this PipelineRun: %s", prn)
 	}
 
 	return nil
@@ -251,7 +252,7 @@ func randomError(prn, prefix string) error {
 func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) error {
 	prn := pr.GetName()
 
-	if err := randomError(prn, "test-gh-14"); err != nil {
+	if err := randomError(prn); err != nil {
 		return err
 	}
 	pr, err := r.updatePipelineRunState(ctx, logger, pr, kubeinteraction.StateStarted)

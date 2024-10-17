@@ -142,10 +142,6 @@ func (s *prioritySemaphore) addToFailedQueue(key string, creationTime time.Time)
 	if s.pending.isPending(key) {
 		return false
 	}
-	if _, ok := s.failed[key]; ok {
-		return true
-	}
-
 	s.failed[key] = true
 	return true
 }
