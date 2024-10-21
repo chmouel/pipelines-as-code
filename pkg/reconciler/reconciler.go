@@ -135,6 +135,41 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 	return nil
 }
 
+func (r *Reconciler) startNextPipelineRun(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) error {
+	var err error
+	for {
+		nextFailure := r.qm.GetNextFailed(repo)
+		var next string
+		if nextFailure != "" {
+			next = nextFailure
+			r.qm.RemoveFailureFromQueue(repo, nextFailure)
+			logger.Infof("DEBUG 🖲️: processing the previously failed pipelinerun: %s", next)
+		} else {
+			next = r.qm.RemoveFromQueue(repo, pr)
+		}
+		if next == "" {
+			logger.Debug("DEBUG 🖲️: no more pipelineRuns in queue")
+			break
+		}
+		key := strings.Split(next, "/")
+		pr, err = r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
+		if err != nil {
+			logger.Infof("DEBUG 🖲️: cannot get pipelinerun: %s error: %s", next, err.Error())
+			continue
+		}
+
+		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+			r.qm.ReleaseLock(repo, pr)
+			if !r.qm.AddToFailureQueue(repo, next) {
+				logger.Errorf("DEBUG 💥 failure to add to failure queue: %s error: %s", next, err.Error())
+			}
+			continue
+		}
+		break
+	}
+	return nil
+}
+
 func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredLogger, pacInfo *info.PacOpts, event *info.Event, pr *tektonv1.PipelineRun, provider provider.Interface) (*v1alpha1.Repository, error) {
 	repoName := pr.GetAnnotations()[keys.Repository]
 	repo, err := r.repoLister.Repositories(pr.Namespace).Get(repoName)
@@ -200,32 +235,8 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	}
 
 	// remove pipelineRun from Queue and start the next one
-	for {
-		nextFailure := r.qm.GetNextFailed(repo)
-		var next string
-		if nextFailure != "" {
-			next = nextFailure
-			r.qm.RemoveFailureFromQueue(repo, nextFailure)
-			logger.Infof("DEBUG 🖲️: processing the previously failed pipelinerun: %s", next)
-		} else {
-			next = r.qm.RemoveFromQueue(repo, pr)
-		}
-		if next != "" {
-			key := strings.Split(next, "/")
-			pr, err = r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
-			if err != nil {
-				return repo, fmt.Errorf("cannot get pipeline for next in queue: %w", err)
-			}
-
-			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-				r.qm.ReleaseLock(repo, pr)
-				if !r.qm.AddToFailureQueue(repo, next) {
-					logger.Errorf("DEBUG 💥 failure to add to failure queue: %s", next)
-				}
-				break
-			}
-		}
-		break
+	if err := r.startNextPipelineRun(ctx, logger, repo, pr); err != nil {
+		return repo, fmt.Errorf("cannot start next pipelineRun: %w", err)
 	}
 
 	if err := r.cleanupPipelineRuns(ctx, logger, pacInfo, repo, pr); err != nil {

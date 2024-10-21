@@ -2,8 +2,6 @@ package reconciler
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -46,22 +44,8 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 			repo.Spec.Merge(r.globalRepo.Spec)
 		}
 		logger = logger.With("namespace", repo.Namespace)
-		next := r.qm.RemoveFromQueue(repo, pr)
-		nextFailure := r.qm.GetNextFailed(repo)
-		logger.Infof("DEBUG: FinalizeKind: failures: %v\n", nextFailure)
-		if next != "" {
-			key := strings.Split(next, "/")
-			pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
-			if err != nil {
-				return err
-			}
-			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-				if !r.qm.AddToFailureQueue(repo, next) {
-					logger.Errorf("failed to add to failure queue: %s", next)
-				}
-				return fmt.Errorf("finalizer/FinalizeKind: failure to set PipelineRun status to in_progress: %w", err)
-			}
-			return nil
+		if err := r.startNextPipelineRun(ctx, logger, repo, pr); err != nil {
+			return err
 		}
 	}
 	return nil

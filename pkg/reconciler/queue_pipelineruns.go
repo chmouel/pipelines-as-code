@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
@@ -56,17 +55,7 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 		return fmt.Errorf("failed to add to queue: %s: %w", pr.GetName(), err)
 	}
 
-	var reterr error
-
-	// try 5 time to acquire the lock until it is acquired
-	for i := 0; i < 5; i++ {
-		reterr = r.startQ(ctx, acquired, repo, logger)
-		if reterr != nil {
-			time.Sleep(2 * time.Second)
-			continue
-		}
-	}
-	return reterr
+	return r.startQ(ctx, acquired, repo, logger)
 }
 
 func (r *Reconciler) startQ(ctx context.Context, acquired []string, repo *v1alpha1.Repository, logger *zap.SugaredLogger) error {
@@ -82,11 +71,17 @@ func (r *Reconciler) startQ(ctx context.Context, acquired []string, repo *v1alph
 				logger.Info("failed to get pr with namespace and name: ", nsName[0], nsName[1])
 				continue
 			}
+
+			r.qm.ReleaseLock(repo, pr)
+			if !r.qm.AddToFailureQueue(repo, prKeys) {
+				logger.Errorf("DEBUG 💥 failure to add to failure queue: %s error: %s", prKeys, err.Error())
+			}
+			continue
 		}
 		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-			if _, rerr := r.qm.AddListToQueue(repo, []string{prKeys}); rerr != nil {
-				logger.Infof("queuing error, failed to readd pr %s to queue: %w", prKeys, rerr.Error())
-				return err
+			r.qm.ReleaseLock(repo, pr)
+			if !r.qm.AddToFailureQueue(repo, prKeys) {
+				logger.Errorf("DEBUG 💥 failure to add to failure queue: %s error: %s", prKeys, err.Error())
 			}
 			logger.Infof("startQ: failure to update pipelineRun to in_progress: %w", err.Error())
 			continue
