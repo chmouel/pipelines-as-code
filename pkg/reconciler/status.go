@@ -106,8 +106,10 @@ func (r *Reconciler) postFinalStatus(ctx context.Context, logger *zap.SugaredLog
 	}
 
 	trStatus := kstatus.GetStatusFromTaskStatusOrFromAsking(ctx, pr, r.run)
-	var taskStatusText string
-	if len(trStatus) > 0 {
+	var taskStatusText, stepActionsStatusText string
+	if len(trStatus) == 1 {
+		stepActionsStatusText = ""
+	} else if len(trStatus) > 0 {
 		var err error
 		taskStatusText, err = sort.TaskStatusTmpl(pr, trStatus, r.run, vcx.GetConfig())
 		if err != nil {
@@ -120,14 +122,15 @@ func (r *Reconciler) postFinalStatus(ctx context.Context, logger *zap.SugaredLog
 	namespaceURL := r.run.Clients.ConsoleUI().NamespaceURL(pr)
 	consoleURL := r.run.Clients.ConsoleUI().DetailURL(pr)
 	mt := formatting.MessageTemplate{
-		PipelineRunName: pr.GetName(),
-		Namespace:       pr.GetNamespace(),
-		NamespaceURL:    namespaceURL,
-		ConsoleName:     r.run.Clients.ConsoleUI().GetName(),
-		ConsoleURL:      consoleURL,
-		TknBinary:       settings.TknBinaryName,
-		TknBinaryURL:    settings.TknBinaryURL,
-		TaskStatus:      taskStatusText,
+		PipelineRunName:   pr.GetName(),
+		Namespace:         pr.GetNamespace(),
+		NamespaceURL:      namespaceURL,
+		ConsoleName:       r.run.Clients.ConsoleUI().GetName(),
+		ConsoleURL:        consoleURL,
+		TknBinary:         settings.TknBinaryName,
+		TknBinaryURL:      settings.TknBinaryURL,
+		TaskStatus:        taskStatusText,
+		StepActionsStatus: stepActionsStatusText,
 	}
 	if pacInfo.ErrorLogSnippet {
 		failures := r.getFailureSnippet(ctx, pr)

@@ -25,15 +25,16 @@ var PipelineRunStatusHTML string
 var PipelineRunStatusMarkDown string
 
 type MessageTemplate struct {
-	PipelineRunName string
-	Namespace       string
-	NamespaceURL    string
-	ConsoleName     string
-	ConsoleURL      string
-	TknBinary       string
-	TknBinaryURL    string
-	TaskStatus      string
-	FailureSnippet  string
+	PipelineRunName   string
+	Namespace         string
+	NamespaceURL      string
+	ConsoleName       string
+	ConsoleURL        string
+	TknBinary         string
+	TknBinaryURL      string
+	TaskStatus        string
+	StepActionsStatus string
+	FailureSnippet    string
 }
 
 func (mt MessageTemplate) MakeTemplate(tmpl string) (string, error) {

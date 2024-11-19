@@ -3,8 +3,14 @@
 <li><b>PipelineRun:</b> <a href="{{ .Mt.ConsoleURL }}">{{ .Mt.PipelineRunName }}</a></li>
 </ul>
 <hr>
+{{- if not (eq .Mt.TaskStatus "")}}
 <h4>Task Statuses:</h4>
 {{ .Mt.TaskStatus }}
+{{- end }}
+{{- if not (eq .Mt.StepActionsStatus "")}}
+<h4>Task Statuses:</h4>
+{{ .Mt.TaskStatus }}
+{{- end }}
 {{- if not (eq .Mt.FailureSnippet "")}}
 <hr>
 <h4>Failure snippet:</h4>
