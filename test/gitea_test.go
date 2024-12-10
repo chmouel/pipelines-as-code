@@ -760,10 +760,11 @@ func TestGiteaErrorSnippet(t *testing.T) {
 }
 
 func TestGiteaOnPullRequestLabels(t *testing.T) {
+	prName := "on-label"
 	topts := &tgitea.TestOpts{
 		TargetEvent: triggertype.PullRequest.String(),
 		YAMLFiles: map[string]string{
-			".tekton/pr.yaml": "testdata/pipelinerun-on-label.yaml",
+			fmt.Sprintf(".tekton/%s.yaml", prName): "testdata/pipelinerun-on-label.yaml",
 		},
 		ExpectEvents:         false,
 		CheckForNumberStatus: 0,
@@ -796,6 +797,10 @@ func TestGiteaOnPullRequestLabels(t *testing.T) {
 	twait.GoldenPodLog(context.Background(), t, topts.ParamsRun, topts.TargetNS,
 		fmt.Sprintf("tekton.dev/pipelineRun=%s,tekton.dev/pipelineTask=task", repo.Status[0].PipelineRunName),
 		"step-success", strings.ReplaceAll(fmt.Sprintf("%s.golden", t.Name()), "/", "-"), 2)
+
+	// Make sure the on-label pr has triggered and post status
+	topts.Regexp = regexp.MustCompile(fmt.Sprintf("Pipelines as Code CI/%s.* has <b>successfully</b> validated your commit", prName))
+	tgitea.WaitForPullRequestCommentMatch(t, topts)
 }
 
 func TestGiteaErrorSnippetWithSecret(t *testing.T) {

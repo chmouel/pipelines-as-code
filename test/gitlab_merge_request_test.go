@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/google/go-github/v66/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
@@ -103,6 +104,7 @@ func TestGitlabMergeRequest(t *testing.T) {
 		Body: clientGitlab.Ptr("/retest"),
 	})
 	assert.NilError(t, err)
+
 	sopt = twait.SuccessOpt{
 		Title:           commitTitle,
 		OnEvent:         opscomments.RetestAllCommentEventType.String(),
@@ -123,30 +125,76 @@ func TestGitlabMergeRequest(t *testing.T) {
 	}
 	// we get 2 PRS initially, 2 prs from the push update and 2 prs from the /retest == 6
 	assert.Equal(t, 6, successCommentsPost)
+}
 
-	// Now test that we react to labels
-	scmEntries, err := payload.GetEntries(map[string]string{
-		".tekton/pipelinerun-label.yaml": "testdata/pipelinerun-on-label.yaml",
+func TestGitlabOnLabel(t *testing.T) {
+	prName := "on-label"
+	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
+	ctx := context.Background()
+	runcnx, opts, glprovider, err := tgitlab.Setup(ctx)
+	assert.NilError(t, err)
+	ctx, err = cctx.GetControllerCtxInfo(ctx, runcnx)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Info("Testing with Gitlab")
+
+	projectinfo, resp, err := glprovider.Client.Projects.GetProject(opts.ProjectID, nil)
+	assert.NilError(t, err)
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
+		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
+	}
+
+	err = tgitlab.CreateCRD(ctx, projectinfo, runcnx, targetNS, nil)
+	assert.NilError(t, err)
+
+	entries, err := payload.GetEntries(map[string]string{
+		fmt.Sprintf(".tekton/%s.yaml", prName): "testdata/pipelinerun-on-label.yaml",
 	}, targetNS, projectinfo.DefaultBranch,
 		triggertype.PullRequest.String(), map[string]string{})
 	assert.NilError(t, err)
+	targetRefName := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test")
+	gitCloneURL, err := scm.MakeGitCloneURL(projectinfo.WebURL, opts.UserName, opts.Password)
+	assert.NilError(t, err)
+	commitTitle := "Committing files from test on " + targetRefName
+	scmOpts := &scm.Opts{
+		GitURL:        gitCloneURL,
+		CommitTitle:   commitTitle,
+		Log:           runcnx.Clients.Log,
+		WebURL:        projectinfo.WebURL,
+		TargetRefName: targetRefName,
+		BaseRefName:   projectinfo.DefaultBranch,
+	}
+	scm.PushFilesToRefGit(t, scmOpts, entries)
+	runcnx.Clients.Log.Infof("Branch %s has been created and pushed with files", targetRefName)
 
-	scm.PushFilesToRefGit(t, scmOpts, scmEntries)
-	_, _, err = glprovider.Client.MergeRequests.UpdateMergeRequest(opts.ProjectID, mrID, &clientGitlab.UpdateMergeRequestOptions{
+	mrTitle := "TestMergeRequest - " + targetRefName
+	mrID, err := tgitlab.CreateMR(glprovider.Client, opts.ProjectID, targetRefName, projectinfo.DefaultBranch, mrTitle)
+	assert.NilError(t, err)
+	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
+	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
+
+	runcnx.Clients.Log.Infof("waiting 5 seconds until we make sure nothing happened")
+	time.Sleep(5 * time.Second)
+	prsNew, err := runcnx.Clients.Tekton.TektonV1().PipelineRuns(targetNS).List(ctx, metav1.ListOptions{})
+	assert.NilError(t, err)
+	assert.Assert(t, len(prsNew.Items) == 0)
+
+	// now add a Label
+	mr, _, err := glprovider.Client.MergeRequests.UpdateMergeRequest(opts.ProjectID, mrID, &clientGitlab.UpdateMergeRequestOptions{
 		Labels: &clientGitlab.LabelOptions{"bug"},
 	})
 	assert.NilError(t, err)
 
-	notes, _, err = glprovider.Client.Notes.ListMergeRequestNotes(opts.ProjectID, mrID, nil)
-	assert.NilError(t, err)
-	successCommentsPost = 0
-	for _, n := range notes {
-		if successRegexp.MatchString(n.Body) {
-			successCommentsPost++
-		}
+	waitOpts := twait.Opts{
+		RepoName:        targetNS,
+		Namespace:       targetNS,
+		MinNumberStatus: 1,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       mr.SHA,
 	}
-	// we get 2 PRS initially, 2 prs from the push update and 2 prs from the /retest + 2 prs from the label == 8
-	assert.Equal(t, 8, successCommentsPost)
+	repo, err := twait.UntilRepositoryUpdated(ctx, runcnx.Clients, waitOpts)
+	assert.NilError(t, err)
+	assert.Assert(t, len(repo.Status) > 0)
+	assert.Equal(t, *repo.Status[0].EventType, triggertype.LabelUpdate.String())
 }
 
 func TestGitlabOnComment(t *testing.T) {
