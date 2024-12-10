@@ -56,11 +56,16 @@ func (v *Provider) ParsePayload(_ context.Context, _ *params.Run, request *http.
 
 		v.pathWithNamespace = gitEvent.ObjectAttributes.Target.PathWithNamespace
 		processedEvent.Organization, processedEvent.Repository = getOrgRepo(v.pathWithNamespace)
-		processedEvent.TriggerTarget = triggertype.PullRequest
 		processedEvent.SourceProjectID = gitEvent.ObjectAttributes.SourceProjectID
 		processedEvent.TargetProjectID = gitEvent.Project.ID
+
+		processedEvent.TriggerTarget = triggertype.PullRequest
 		processedEvent.EventType = strings.ReplaceAll(event, " Hook", "")
 
+		// This is a label update, like adding or removing a label from a MR.
+		if gitEvent.Changes.Labels.Current != nil {
+			processedEvent.EventType = triggertype.LabelUpdate.String()
+		}
 		for _, label := range gitEvent.Labels {
 			processedEvent.PullRequestLabel = append(processedEvent.PullRequestLabel, label.Title)
 		}

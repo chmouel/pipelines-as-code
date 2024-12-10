@@ -267,6 +267,9 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 				}
 				logger.Infof("matched PipelineRun with name: %s, annotation Label: %q", prName, key)
 				prMatch.Config["label"] = key
+			} else if event.EventType == string(triggertype.LabelUpdate) {
+				logger.Infof("label update event, PipelineRun %s does not have a on-label for any of those labels: %s", prName, strings.Join(event.PullRequestLabel, "|"))
+				continue
 			}
 
 			if key, ok := prun.GetObjectMeta().GetAnnotations()[keys.OnPathChangeIgnore]; ok {

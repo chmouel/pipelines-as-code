@@ -73,12 +73,6 @@ func TestGitlabMergeRequest(t *testing.T) {
 	runcnx.Clients.Log.Infof("MergeRequest %s/-/merge_requests/%d has been created", projectinfo.WebURL, mrID)
 	defer tgitlab.TearDown(ctx, t, runcnx, glprovider, mrID, targetRefName, targetNS, opts.ProjectID)
 
-	// updating labels to test if we skip them, this used to create multiple PRs
-	_, _, err = glprovider.Client.MergeRequests.UpdateMergeRequest(opts.ProjectID, mrID, &clientGitlab.UpdateMergeRequestOptions{
-		Labels: &clientGitlab.LabelOptions{"hello-label"},
-	})
-	assert.NilError(t, err)
-
 	// Send another Push to make an update and make sure we react to it
 	entries, err = payload.GetEntries(map[string]string{
 		"hello-world.yaml": "testdata/pipelinerun.yaml",
@@ -129,6 +123,30 @@ func TestGitlabMergeRequest(t *testing.T) {
 	}
 	// we get 2 PRS initially, 2 prs from the push update and 2 prs from the /retest == 6
 	assert.Equal(t, 6, successCommentsPost)
+
+	// Now test that we react to labels
+	scmEntries, err := payload.GetEntries(map[string]string{
+		".tekton/pipelinerun-label.yaml": "testdata/pipelinerun-on-label.yaml",
+	}, targetNS, projectinfo.DefaultBranch,
+		triggertype.PullRequest.String(), map[string]string{})
+	assert.NilError(t, err)
+
+	scm.PushFilesToRefGit(t, scmOpts, scmEntries)
+	_, _, err = glprovider.Client.MergeRequests.UpdateMergeRequest(opts.ProjectID, mrID, &clientGitlab.UpdateMergeRequestOptions{
+		Labels: &clientGitlab.LabelOptions{"bug"},
+	})
+	assert.NilError(t, err)
+
+	notes, _, err = glprovider.Client.Notes.ListMergeRequestNotes(opts.ProjectID, mrID, nil)
+	assert.NilError(t, err)
+	successCommentsPost = 0
+	for _, n := range notes {
+		if successRegexp.MatchString(n.Body) {
+			successCommentsPost++
+		}
+	}
+	// we get 2 PRS initially, 2 prs from the push update and 2 prs from the /retest + 2 prs from the label == 8
+	assert.Equal(t, 8, successCommentsPost)
 }
 
 func TestGitlabOnComment(t *testing.T) {

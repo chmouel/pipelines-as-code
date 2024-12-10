@@ -37,6 +37,7 @@ const (
 	Retest                Trigger = "retest"
 	Push                  Trigger = "push"
 	PullRequest           Trigger = "pull_request"
+	LabelUpdate           Trigger = "label_update"
 	Cancel                Trigger = "cancel"
 	CheckSuiteRerequested Trigger = "check-suite-rerequested"
 	CheckRunRerequested   Trigger = "check-run-rerequested"
