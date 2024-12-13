@@ -20,6 +20,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
@@ -88,6 +89,8 @@ var samplePRAnother = github.PullRequest{
 }
 
 func TestParsePayLoad(t *testing.T) {
+	samplePrEventClosed := samplePRevent
+	samplePrEventClosed.Action = github.String("closed")
 	tests := []struct {
 		name                       string
 		wantErrString              string
@@ -190,7 +193,7 @@ func TestParsePayLoad(t *testing.T) {
 			name:          "good/rerequest check_run on pull request",
 			eventType:     "check_run",
 			githubClient:  true,
-			triggerTarget: "issue-recheck",
+			triggerTarget: string(triggertype.PullRequest),
 			payloadEventStruct: github.CheckRunEvent{
 				Action: github.String("rerequested"),
 				Repo:   sampleRepo,
@@ -208,7 +211,7 @@ func TestParsePayLoad(t *testing.T) {
 			name:          "good/rerequest check_suite on pull request",
 			eventType:     "check_suite",
 			githubClient:  true,
-			triggerTarget: "issue-recheck",
+			triggerTarget: string(triggertype.PullRequest),
 			payloadEventStruct: github.CheckSuiteEvent{
 				Action: github.String("rerequested"),
 				Repo:   sampleRepo,
@@ -220,10 +223,9 @@ func TestParsePayLoad(t *testing.T) {
 			shaRet:     "samplePRsha",
 		},
 		{
-			name:          "good/rerequest on push",
-			eventType:     "check_run",
-			githubClient:  true,
-			triggerTarget: "issue-recheck",
+			name:         "good/rerequest on push",
+			eventType:    "check_run",
+			githubClient: true,
 			payloadEventStruct: github.CheckRunEvent{
 				Action: github.String("rerequested"),
 				Repo:   sampleRepo,
@@ -263,8 +265,15 @@ func TestParsePayLoad(t *testing.T) {
 		{
 			name:               "good/pull request",
 			eventType:          "pull_request",
-			triggerTarget:      "pull_request",
+			triggerTarget:      triggertype.PullRequest.String(),
 			payloadEventStruct: samplePRevent,
+			shaRet:             "sampleHeadsha",
+		},
+		{
+			name:               "good/pull request closed",
+			eventType:          "pull_request",
+			triggerTarget:      triggertype.PullRequestClosed.String(),
+			payloadEventStruct: samplePrEventClosed,
 			shaRet:             "sampleHeadsha",
 		},
 		{
@@ -283,7 +292,7 @@ func TestParsePayLoad(t *testing.T) {
 		{
 			name:          "good/issue comment for retest",
 			eventType:     "issue_comment",
-			triggerTarget: "pull_request",
+			triggerTarget: triggertype.PullRequest.String(),
 			githubClient:  true,
 			payloadEventStruct: github.IssueCommentEvent{
 				Action: github.String("created"),
@@ -304,7 +313,7 @@ func TestParsePayLoad(t *testing.T) {
 		{
 			name:          "good/issue comment for cancel all",
 			eventType:     "issue_comment",
-			triggerTarget: "pull_request",
+			triggerTarget: triggertype.PullRequest.String(),
 			githubClient:  true,
 			payloadEventStruct: github.IssueCommentEvent{
 				Action: github.String("created"),
@@ -324,7 +333,7 @@ func TestParsePayLoad(t *testing.T) {
 		{
 			name:          "good/issue comment for cancel a pr",
 			eventType:     "issue_comment",
-			triggerTarget: "pull_request",
+			triggerTarget: triggertype.PullRequest.String(),
 			githubClient:  true,
 			payloadEventStruct: github.IssueCommentEvent{
 				Action: github.String("created"),
@@ -588,7 +597,7 @@ func TestParsePayLoad(t *testing.T) {
 			assert.NilError(t, err)
 			assert.Assert(t, ret != nil)
 			assert.Equal(t, tt.shaRet, ret.SHA)
-			if tt.eventType == "pull_request" {
+			if tt.eventType == triggertype.PullRequest.String() {
 				assert.Equal(t, "my first PR", ret.PullRequestTitle)
 			}
 			if tt.eventType == "commit_comment" {
@@ -602,6 +611,7 @@ func TestParsePayLoad(t *testing.T) {
 			if tt.targetCancelPipelinerun != "" {
 				assert.Equal(t, tt.targetCancelPipelinerun, ret.TargetCancelPipelineRun)
 			}
+			assert.Equal(t, tt.triggerTarget, string(ret.TriggerTarget))
 		})
 	}
 }
