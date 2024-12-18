@@ -82,7 +82,7 @@ func TestSkippedEvent(t *testing.T) {
 	assert.NilError(t, err)
 	defer resp.Body.Close()
 
-	assert.Equal(t, resp.StatusCode, http.StatusOK, "%s reply expected 200 OK", elURL)
+	assert.Equal(t, resp.StatusCode, http.StatusAccepted, "%s reply expected 202 OK", elURL)
 }
 
 func TestGETCall(t *testing.T) {

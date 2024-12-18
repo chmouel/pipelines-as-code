@@ -91,6 +91,10 @@ var samplePRAnother = github.PullRequest{
 func TestParsePayLoad(t *testing.T) {
 	samplePrEventClosed := samplePRevent
 	samplePrEventClosed.Action = github.String("closed")
+
+	samplePRNoRepo := samplePRevent
+	samplePRNoRepo.Repo = nil
+
 	tests := []struct {
 		name                       string
 		wantErrString              string
@@ -187,6 +191,20 @@ func TestParsePayLoad(t *testing.T) {
 				},
 			},
 			shaRet: "samplePRsha",
+		},
+		{
+			name:               "bad/pull request",
+			eventType:          "pull_request",
+			triggerTarget:      triggertype.PullRequest.String(),
+			payloadEventStruct: samplePRNoRepo,
+			wantErrString:      "error parsing payload the repository should not be nil",
+		},
+		{
+			name:               "bad/push",
+			eventType:          "push",
+			triggerTarget:      triggertype.Push.String(),
+			payloadEventStruct: github.PushEvent{},
+			wantErrString:      "error parsing payload the repository should not be nil",
 		},
 		{
 			// specific run from a check_suite
