@@ -233,8 +233,41 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 	}
 	// only add a note when we are on a MR
 	if eventType == triggertype.PullRequest || provider.Valid(event.EventType, anyMergeRequestEventType) {
-		mopt := &gitlab.CreateMergeRequestNoteOptions{Body: gitlab.Ptr(body)}
-		_, _, err := v.Client.Notes.CreateMergeRequestNote(event.TargetProjectID, event.PullRequestNumber, mopt)
+		// List existing notes on the merge request
+		notes, _, err := v.Client.Notes.ListMergeRequestNotes(event.TargetProjectID, event.PullRequestNumber, &gitlab.ListMergeRequestNotesOptions{})
+		if err != nil {
+			return err
+		}
+
+		appPrName := fmt.Sprintf("%s%s", v.pacInfo.ApplicationName, onPr)
+		var existingNote *gitlab.Note
+
+		// Find existing note that starts with the pipeline run name
+		for _, note := range notes {
+			if strings.HasPrefix(note.Body, appPrName) {
+				existingNote = note
+				break
+			}
+		}
+
+		if existingNote != nil {
+			// Update existing note
+			updateOpt := &gitlab.UpdateMergeRequestNoteOptions{Body: gitlab.Ptr(body)}
+			_, _, err = v.Client.Notes.UpdateMergeRequestNote(
+				event.TargetProjectID,
+				event.PullRequestNumber,
+				existingNote.ID,
+				updateOpt,
+			)
+		} else {
+			// Create new note
+			createOpt := &gitlab.CreateMergeRequestNoteOptions{Body: gitlab.Ptr(body)}
+			_, _, err = v.Client.Notes.CreateMergeRequestNote(
+				event.TargetProjectID,
+				event.PullRequestNumber,
+				createOpt,
+			)
+		}
 		return err
 	}
 	return nil

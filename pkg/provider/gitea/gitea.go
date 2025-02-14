@@ -181,11 +181,41 @@ func (v *Provider) createStatusCommit(event *info.Event, pacopts *info.PacOpts, 
 	}
 	if status.Text != "" && (eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
 		status.Text = strings.ReplaceAll(strings.TrimSpace(status.Text), "<br>", "\n")
-		_, _, err := v.Client.CreateIssueComment(event.Organization, event.Repository,
-			int64(event.PullRequestNumber), gitea.CreateIssueCommentOption{
-				Body: fmt.Sprintf("%s\n%s", status.Summary, status.Text),
-			},
-		)
+
+		// List all comments on the PR
+		// TODO: Pagination
+		comments, _, err := v.Client.ListIssueComments(event.Organization, event.Repository,
+			int64(event.PullRequestNumber), gitea.ListIssueCommentOptions{})
+		if err != nil {
+			return err
+		}
+
+		commentBody := fmt.Sprintf("%s\n%s", status.Summary, status.Text)
+		var existingComment *gitea.Comment
+
+		appPrunName := fmt.Sprintf("%s/%s", pacopts.ApplicationName, status.PipelineRunName)
+		// Find existing comment that starts with the pipeline run name
+		for _, comment := range comments {
+			if strings.HasPrefix(comment.Body, appPrunName) {
+				existingComment = comment
+				break
+			}
+		}
+
+		if existingComment != nil {
+			// Update existing comment
+			_, _, err = v.Client.EditIssueComment(event.Organization, event.Repository,
+				existingComment.ID, gitea.EditIssueCommentOption{
+					Body: commentBody,
+				})
+		} else {
+			// Create new comment
+			_, _, err = v.Client.CreateIssueComment(event.Organization, event.Repository,
+				int64(event.PullRequestNumber), gitea.CreateIssueCommentOption{
+					Body: commentBody,
+				})
+		}
+
 		if err != nil {
 			return err
 		}
