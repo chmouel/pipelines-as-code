@@ -4,46 +4,32 @@ weight: 4
 ---
 {{< tech_preview "Global repository settings" >}}
 
-## Pipelines-as-Code Global Repository Settings
+## Pipelines-as-Code: Global Repository Settings
 
-Pipelines-as-Code lets you have a global repository for settings of all your
-local repositories. This enables you to define settings that will be applied to
-all local repositories on your cluster.
+Ever wished you could set up Pipelines-as-Code settings just *once* and have them apply to all your repositories?  Well, with global repository settings, you can! Think of it as a central settings hub for all your repositories on the cluster.  If a repository doesn't have its own specific settings, it'll automatically use these global ones as a fallback.
 
-The global repository settings serve as a fallback for all repositories if the
-local repository settings in the namespace do not override them.
+You'll need to create this global repository in the same namespace where your `pipelines-as-code` controller lives (usually `pipelines-as-code` or `openshift-pipelines`).  Interestingly, this global repository doesn't actually *need* a real URL in its `spec.url` field. You can leave it blank, or even point it to a fake address like `<https://pac.global.repo>` – Pipelines-as-Code won't mind!
 
-The global repository must be created in the namespace where the
-`pipelines-as-code` controller is installed (usually `pipelines-as-code` or
-`openshift-pipelines`).
+By default, name your global repository `pipelines-as-code`.  Unless, of course, you want to get fancy and rename it. In that case, you can tweak the `PAC_CONTROLLER_GLOBAL_REPOSITORY` environment variable in your controller and watcher Deployment.
 
-The global repository Custom Resource (CR) does not need a `spec.url` field. The
-field can either be blank or point to an unknown destination, such as:
-
-<https://pac.global.repo>
-
-By default, the global repository should be named `pipelines-as-code` unless
-you redefine it by setting the environment variable
-`PAC_CONTROLLER_GLOBAL_REPOSITORY` in the controller and watcher Deployment.
-
-The settings that can be defined in the global repository are:
+So, what kind of settings can you actually define globally? Here's the rundown:
 
 - [Concurrency Limit]({{< relref "/docs/guide/repositorycrd.md#concurrency" >}}).
 - [PipelineRun Provenance]({{< relref "/docs/guide/repositorycrd.md#pipelinerun-definition-provenance" >}}).
 - [Repository Policy]({{< relref "/docs/guide/policy" >}}).
 - [Repository GitHub App Token Scope]({{< relref "/docs/guide/repositorycrd.md#scoping-the-github-token-using-global-configuration" >}}).
-- Git provider auth settings such as user, token, URL, etc.
-  - The `type` must be defined in the namespace repository settings and must match the `type` of the global repository (see below for an example).
+- Git provider auth settings like user, token, URL, etc.
+  -  Just a heads up, the `type` needs to be defined in your namespace repository settings and match the `type` in the global repository (example below!).
 - [Custom Parameters]({{< relref "/docs/guide/customparams.md" >}}).
 - [Incoming Webhooks Rules]({{< relref "/docs/guide/incoming_webhook.md" >}}).
 
 {{< hint info >}}
-Global settings are only applied when running via a Git provider event; they are not applied when for example using the `tkn pac` cli.
+**Important Note:** Global settings only kick in when Pipelines-as-Code is triggered by a Git event (like a webhook). If you're using the `tkn pac` command-line tool, these global settings won't apply. Just something to keep in mind!
 {{< /hint >}}
 
-### Example of How Global Repository Settings Are Applied
+### How Global Settings Actually Work: An Example
 
-- If you have a Repository CR in the namespace named `user-namespace`:
+Let's walk through a quick example to make this clearer. Imagine you have a Repository CR in your `user-namespace` that looks like this:
 
 ```yaml
 apiVersion: pipelinesascode.tekton.dev/v1alpha1
@@ -58,7 +44,7 @@ spec:
     type: gitlab
 ```
 
-- And a global Repository CR in the namespace where the controller and the watcher is located:
+And then you've got your global Repository CR chilling in the controller's namespace, like so:
 
 ```yaml
 apiVersion: pipelinesascode.tekton.dev/v1alpha1
@@ -80,23 +66,11 @@ spec:
       name: gitlab-webhook-secret
 ```
 
-In this example, the Repository `repo` will have a concurrency limit of 2 since
-the setting comes from the user namespace and is ignored from the global
-repository. The parameter `custom` will be set to `value` and will be available
-for every repository that does not define other custom parameters.
+Now, what happens?  Well, in this case, the `repo` in `user-namespace` will use a concurrency limit of 2.  Why? Because it's defined *locally* and overrides the global setting.  However, the `custom` parameter? That *will* come from the global settings, set to `value` – unless your local repo defines its own parameters.  And because both repos specify `git_provider.type: gitlab`, the Git provider details (like secrets!) will be pulled from the global repository.  The secret itself will be looked up in the namespace where the global repo is defined.
 
-Since the local Repository CR has the `git_provider.type` set to `gitlab`, like
-the global Repository CR, the Git provider settings for [GitLab]({{< relref "/docs/install/gitlab.md#create-a-repository-and-configure-webhook-manually" >}})
-will be taken from the global repository. The secret referenced will be fetched
-from where the global repository is defined.
+### Global Settings for Webhook-Based Git Providers
 
-### Webhook Based provider global settings
-
-These are the `spec.git_provider.type` you can set up for the Git provider
-settings. They are only used when handling incoming webhooks or global
-repository settings. They are used for webhook-based Git providers (i.e.,
-everything except GitHub Apps installations). In this case, the type `github`
-means a repository configured using [GitHub webhooks]({{< relref "/docs/install/github_webhook.md" >}}):
+These `spec.git_provider.type` settings are specifically for defining your Git provider in global settings. They're used when Pipelines-as-Code receives webhook events or when it's looking at those global repo settings.  Basically, they're for Git providers that work with webhooks (so, everything *except* GitHub Apps installations).  For instance, if you set the `type` to `github`, it means you're using good ol' [GitHub webhooks]({{< relref "/docs/install/github_webhook.md" >}}). Here's the list of types you can use:
 
 - github
 - gitlab
@@ -104,7 +78,4 @@ means a repository configured using [GitHub webhooks]({{< relref "/docs/install/
 - bitbucket-cloud
 - bitbucket-server
 
-The global repository settings for the Git provider can currently only
-reference one type of provider on a cluster. The user would need to specify
-their own provider information in their own Repository CR if they do not want
-to use the global settings or want to target another provider.
+Heads up:  Currently, your global repository settings can only point to *one* type of Git provider across your whole cluster.  If you want to use a different provider for a specific repository, or just want to manage provider details locally, you'll need to define the provider information directly in that repository's CR.

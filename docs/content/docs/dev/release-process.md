@@ -1,52 +1,60 @@
 ---
 title: Pipelines-as-Code Release Process
 ---
-# Release process for Pipelines-as-Code
 
-* Clear out the PR needed to be merged.
-* Wait that CI is connected.
-* Verify PAC CI cluster is up.
-* Verify that you have gpg signing [setup](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification) for your commits.
+# Releasing Pipelines-as-Code: A Step-by-Step Guide
 
-* Prepare to tag the release with a version, you need to choose between a major release/minor or patch release.
+Before you kick off a release, here are a few quick checks:
 
-* If for example you choose to do the release 1.2.3 you tag it locally :
+* **Make sure your pull requests are all squared away.**  Basically, tidy up any pending PRs.
+* **Wait for the CI to connect.**  Gotta make sure the Continuous Integration is hooked up and ready.
+* **Double-check the PAC CI cluster is up and running.**  We need our Pipelines-as-Code CI cluster to be online, obviously!
+* **Confirm you've got GPG signing set up for your commits.** This is important for security, so [check out this guide](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification) if you're not sure.
+
+Okay, let's get to tagging and pushing.
+
+* **Decide on your version number.** Are we doing a major, minor, or patch release?  Choose wisely!
+
+* **Tag it locally.**  Let's say we're going with version `1.2.3`.  Fire up your terminal and tag it:
 
 ```shell
 git tag v1.2.3
 ```
 
-* And pushing it directly to the repo (you need access) :
+* **Push it to the repo.**  You'll need write access for this bit.  Use this command to push the tag:
 
 ```shell
 % NOTESTS=ci git push git@github.com:openshift-pipelines/pipelines-as-code refs/tags/1.2.3
 ```
 
-* When it started you can follow it on the pac cluster :
+Time to watch the magic happen!
 
-`tkn pr logs -n pipelines-as-code-ci -Lf`
+* **Keep an eye on the release process.** You can follow along on the PAC cluster with this command:
 
-* After a while (gorelease takes sometime) If everything is fine you should
-  have the new version set as pre-release in
-  <https://github.com/openshift-pipelines/pipelines-as-code/releases>
+```shell
+tkn pr logs -n pipelines-as-code-ci -Lf
+```
 
-* Edit the release like the other releases has been done with a snippet of the highlight of the release.
+* **Give it some time.**  The `gorelease` process takes a little while.  If all goes well, you should see your new version pop up as a pre-release over here: <https://github.com/openshift-pipelines/pipelines-as-code/releases>
 
-* Announce it on Slack (upstream/downstream)  and twitter.
+* **Spruce up the release notes.** Just like the other releases, add a quick summary of the highlights for this version.
 
-## Packages
+Spread the word!
 
-* [Arch AUR](https://aur.archlinux.org/packages/tkn-pac): Ping chmouel for an update
+* **Shout it from the rooftops (or at least Slack and Twitter).** Let everyone know about the new release on Slack (both upstream and downstream channels) and Twitter.
 
-# Issues you may see
+## Package Updates
 
-* Sometimes, there may be some issues with system or others. If you need to re-kick the release process you need to :
+* **Arch AUR Package:**  If you're updating the Arch AUR package ([link here](https://aur.archlinux.org/packages/tkn-pac)), give chmouel a nudge to get it updated.
+
+# Uh Oh, Something Went Wrong?
+
+* **Need to re-run the release?**  Sometimes things just don't go as planned. If you need to re-kick the release process, try this:
 
 ```shell
    git tag --sign --force v1.2.3
    git push --force git@github.com:openshift-pipelines/pipelines-as-code v1.2.3
 ```
 
-* Some issues may be with the GitHub token which may be expired or badly generated with a \n.
-* Some other issues if you didn't do a `git fetch -a origin` before tagging so,
-  you don't have the latest commits from origin/main
+* **GitHub Token Troubles?**  Double-check your GitHub token.  Expired tokens or tokens with a sneaky newline character can cause issues.
+* **Forgot to Fetch?**  Make sure you did a `git fetch -a origin` *before* tagging.  Otherwise, you might be missing the latest commits from `origin/main`, and that's no good!

@@ -3,109 +3,81 @@ title: Authoring PipelineRun
 weight: 3
 ---
 
-# Authoring PipelineRuns in `.tekton/` directory
+# Crafting PipelineRuns in Your `.tekton/` Folder
 
-- Pipelines-as-Code will always try to be as close to the Tekton template as
-  possible. Usually, you will write your template and save them with a `.yaml`
-  extension, and Pipelines-as-Code will run them.
+So, you're looking to set up your workflows with Pipelines as Code? Awesome!  The general idea is to keep things as close to standard Tekton as possible. You probably already write your Tekton templates and save them as `.yaml` files, right? Pipelines as Code is designed to just pick those up and run them.
 
-- The `.tekton` directory must be at the top level of the repo.
-  You can reference YAML files in other repos using remote URLs
-  (see [Remote HTTP URLs](./resolver.md#remote-http-url) for more information),
-  but PipelineRuns will only be triggered by events in the repository containing
-  the `.tekton` directory.
+Here's the deal with the `.tekton` directory: it *must* live right at the top level of your repository. Think of it as the command center for your pipelines.  You *can* pull in YAML files from other places using web addresses (check out [Remote HTTP URLs](./resolver.md#remote-http-url) for the nitty-gritty). But remember, PipelineRuns only kick off when something happens in the repo that contains that `.tekton` directory.  So, keep your pipelines close to your code!
 
-- Using its [resolver](../resolver/) Pipelines-as-Code will try to bundle the
-  PipelineRun with all its Tasks as a single PipelineRun with no external
-  dependencies.
+Using its clever [resolver](../resolver/), Pipelines as Code tries to package up your PipelineRun and all the Tasks it needs into one neat bundle. This means you get a single PipelineRun without having to worry about external dependencies hanging around. Nice and tidy!
 
-- Inside your pipeline, you need to be able to check out the commit as
-  received from the webhook by checking out the repository from that ref. Most of the time
-  you want to reuse the
-  [git-clone](https://github.com/tektoncd/catalog/blob/main/task/git-clone/)
-  task from the [tektoncd/catalog](https://github.com/tektoncd/catalog).
+Now, inside your pipeline, you'll almost always want to grab the code that triggered the pipeline run in the first place.  That means checking out the repository at the commit that came in with the webhook.  The easiest way to do this?  Reach for the trusty [git-clone](https://github.com/tektoncd/catalog/blob/main/task/git-clone/) task from the [tektoncd/catalog](https://github.com/tektoncd/catalog). It’s a real workhorse.
 
-- To be able to specify parameters of your commit and URL, Pipelines-as-Code
-  gives you some “dynamic” variables that are defined according to the execution
-  of the events. Those variables look like this `{{ var }}` and can be used
-  anywhere in your template, see [below](#dynamic-variables) for the list of
-  available variables.
+To make things flexible, Pipelines as Code gives you some handy "dynamic" variables. These are like magic words that change depending on what event triggered your pipeline. They look like this: `{{ var }}`. You can sprinkle these anywhere in your template.  We've got a list of them [below](#dynamic-variables), so you can see what goodies are available.
 
-- For Pipelines-as-Code to process your `PipelineRun`, you must have either an
-  embedded `PipelineSpec` or a separate `Pipeline` object that references a YAML
-  file in the `.tekton` directory. The Pipeline object can include `TaskSpecs`,
-  which may be defined separately as Tasks in another YAML file in the same
-  directory. It's important to give each `PipelineRun` a unique name to avoid
-  conflicts. **PipelineRuns with duplicate names will never be matched**.
+For Pipelines as Code to actually *do* anything with your `PipelineRun`, it needs to know what pipeline to run! You've got two main choices here: either embed the `PipelineSpec` directly in your `PipelineRun` file, or create a separate `Pipeline` object that points to a YAML file in your `.tekton` directory.  If you go the separate `Pipeline` route, you can even include `TaskSpecs` right inside it, or define your Tasks separately in other YAML files in the same directory.  One important thing: make sure every `PipelineRun` has a unique name.  **PipelineRuns with the same name? They'll just be ignored.**  Don't let your pipelines get into a naming fight!
 
-## Dynamic variables
+## Dynamic Variables: Your Pipeline's Secret Sauce
 
-Here is a list of all the dynamic variables available in Pipelines-as-Code. The
-one that would be the most important to you would probably be the `revision` and `repo_url`
-variables, they will give you the commit SHA and the repository URL that is
-getting tested. You usually use this with the
-[git-clone](https://hub.tekton.dev/tekton/task/git-clone) task to be able to
-check out the code that is being tested.
+Here's the rundown on all the dynamic variables Pipelines as Code gives you.  If you're just starting out, the `revision` and `repo_url` variables are probably going to be your best friends. They tell you the commit SHA and the repository URL that's being tested.  Pair these with the [git-clone](https://hub.tekton.dev/tekton/task/git-clone) task, and you're set to checkout the right code.
 
 | Variable            | Description                                                                                                                                                                     | Example                             | Example Output                                                                                                                                                |
 |---------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| body                | The full payload body (see [below](#using-the-body-and-headers-in-a-pipelines-as-code-parameter))                                                                               | `{{body.pull_request.user.email }}` | <email@domain.com>                                                                                                                                            |
-| event_type          | The event type (eg: `pull_request` or `push`)                                                                                                                                   | `{{event_type}}`                    | pull_request          (see the note for GitOps Comments [here]({{< relref "/docs/guide/gitops_commands.md#event-type-annotation-and-dynamic-variables" >}}) ) |
-| git_auth_secret     | The secret name auto-generated with provider token to check out private repos.                                                                                                  | `{{git_auth_secret}}`               | pac-gitauth-xkxkx                                                                                                                                             |
-| headers             | The request headers (see [below](#using-the-body-and-headers-in-a-pipelines-as-code-parameter))                                                                                 | `{{headers['x-github-event']}}`     | push                                                                                                                                                          |
-| pull_request_number | The pull or merge request number, only defined when we are in a `pull_request` event type.                                                                                      | `{{pull_request_number}}`           | 1                                                                                                                                                             |
-| repo_name           | The repository name.                                                                                                                                                            | `{{repo_name}}`                     | pipelines-as-code                                                                                                                                             |
-| repo_owner          | The repository owner.                                                                                                                                                           | `{{repo_owner}}`                    | openshift-pipelines                                                                                                                                           |
-| repo_url            | The repository full URL.                                                                                                                                                        | `{{repo_url}}`                      | https:/github.com/repo/owner                                                                                                                                  |
-| revision            | The commit full sha revision.                                                                                                                                                   | `{{revision}}`                      | 1234567890abcdef                                                                                                                                              |
-| sender              | The sender username (or account ID on some providers) of the commit.                                                                                                             | `{{sender}}`                        | johndoe                                                                                                                                                       |
-| source_branch       | The branch name where the event comes from.                                                                                                                                      | `{{source_branch}}`                 | main                                                                                                                                                          |
-| source_url          | The source repository URL from which the event comes from (same as `repo_url` for push events).                                                                                  | `{{source_url}}`                    | https:/github.com/repo/owner                                                                                                                                  |
-| target_branch       | The branch name on which the event targets (same as `source_branch` for push events).                                                                                           | `{{target_branch}}`                 | main                                                                                                                                                          |
-| target_namespace    | The target namespace where the Repository has matched and the PipelineRun will be created.                                                                                      | `{{target_namespace}}`              | my-namespace                                                                                                                                                  |
-| trigger_comment     | The comment triggering the PipelineRun when using a [GitOps command]({{< relref "/docs/guide/running.md#gitops-command-on-pull-or-merge-request" >}}) (like `/test`, `/retest`) | `{{trigger_comment}}`               | /merge-pr branch                                                                                                                                              |
-| pull_request_labels | The labels of the pull request separated by a newline                                                                                                                           | `{{pull_request_labels}}`           | bugs\nenhancement                                                                                                                                             |
+| body                | The whole shebang – the full request payload body. (More on this [below](#using-the-body-and-headers-in-a-pipelines-as-code-parameter))                                                                               | `{{body.pull_request.user.email }}` | <email@domain.com>                                                                                                                                            |
+| event_type          | What kind of event kicked this off? (Like `pull_request` or `push`).                                                                                                                                   | `{{event_type}}`                    | pull_request          (Psst! Check out the note for GitOps Comments [here]({{< relref "/docs/guide/gitops_commands.md#event-type-annotation-and-dynamic-variables" >}}) ) |
+| git_auth_secret     | A secret name, automatically created, that holds the token for checking out private repos.                                                                                                  | `{{git_auth_secret}}`               | pac-gitauth-xkxkx                                                                                                                                             |
+| headers             | All the request headers. (More info [below](#using-the-body-and-headers-in-a-pipelines-as-code-parameter))                                                                                 | `{{headers['x-github-event']}}`     | push                                                                                                                                                          |
+| pull_request_number | If it's a pull request event, this is the number of that request.                                                                                      | `{{pull_request_number}}`           | 1                                                                                                                                                             |
+| repo_name           | The name of the repository.  Pretty straightforward.                                                                                                                             | `{{repo_name}}`                     | pipelines-as-code                                                                                                                                             |
+| repo_owner          | Who owns the repository? This'll tell you.                                                                                                                            | `{{repo_owner}}`                    | openshift-pipelines                                                                                                                                           |
+| repo_url            | The full web address of the repository.                                                                                                                                                        | `{{repo_url}}`                      | https:/github.com/repo/owner                                                                                                                                  |
+| revision            | The full commit SHA.  Handy for pinpointing a specific commit.                                                                                                                                                   | `{{revision}}`                      | 1234567890abcdef                                                                                                                                              |
+| sender              | The username (or account ID) of the person who triggered the commit.                                                                                                             | `{{sender}}`                        | johndoe                                                                                                                                                       |
+| source_branch       | The branch where the event originated.                                                                                                                                      | `{{source_branch}}`                 | main                                                                                                                                                          |
+| source_url          | The URL of the source repository (usually the same as `repo_url` for push events).                                                                                  | `{{source_url}}`                    | https:/github.com/repo/owner                                                                                                                                  |
+| target_branch       | The branch the event is aimed at (usually the same as `source_branch` for push events).                                                                                           | `{{target_branch}}`                 | main                                                                                                                                                          |
+| target_namespace    | The Kubernetes namespace where your Repository matched and where the PipelineRun will be created.                                                                                      | `{{target_namespace}}`              | my-namespace                                                                                                                                                  |
+| trigger_comment     | If a [GitOps command]({{< relref "/docs/guide/running.md#gitops-command-on-pull-or-merge-request" >}}) like `/test` or `/retest` started this, here's the comment. | `{{trigger_comment}}`               | /merge-pr branch                                                                                                                                              |
+| pull_request_labels |  A list of labels on the pull request, each on a new line.                                                                                                                          | `{{pull_request_labels}}`           | bugs\nenhancement                                                                                                                                             |
 
-### Defining Parameters with Object Values in YAML
+### YAML Gotcha: Parameters with Object Values
 
-When working with YAML, particularly when defining parameters, you might encounter situations where you need to pass an object or a dynamic variable (e.g., `{{ body }}`) as the value of a parameter. However, YAML's validation rules prevent such values from being defined inline.
+YAML can be a bit picky sometimes, especially when you're setting up parameters. If you want to pass an object or a dynamic variable (like `{{ body }}`) as a parameter value, you might run into trouble if you try to do it inline. YAML's validation rules just don't like it.
 
-For instance, if you attempt to define a parameter like this:
+For example, this *won't* work:
 
 ```yaml
 spec:
   params:
     - name: body
-      value: {{ body }}  # This will result in a YAML validation error
+      value: {{ body }}  # Nope, YAML says no!
   pipelineSpec:
     tasks:
 ```
 
-You will encounter a YAML validation error because objects or multiline strings cannot be placed inline. To resolve this issue and ensure your YAML is correctly validated, you should define the value in block format instead of inline. Here’s an example:
+You'll get a YAML validation error because objects and multi-line strings can't be squished inline like that.  The fix? Use the "block format" instead.  Here's how:
 
 ```yaml
 spec:
   params:
     - name: body
-      value: |-
+      value: |- # "Pipe" symbol for block format
         {{ body }}
-    # Alternatively, use '>' to specify that the value will be in block format
+    # Or, you can use ">" too, it also means block format
     - name: pull_request
-      value: >
+      value: > # "Greater than" symbol for another block format option
         {{ body.pull_request }}
   pipelineSpec:
     tasks:
 ```
 
-By using the block format, you can avoid validation errors and ensure that your YAML is properly structured.
+Using the block format keeps YAML happy and your pipelines running smoothly.
 
-## Matching an event to a PipelineRun
+## Matching Events to Your PipelineRun: It's All About Annotations
 
-Each `PipelineRun` can match different Git provider events through some special
-annotations on the `PipelineRun`.
+Each `PipelineRun` can be set up to react to different kinds of events from your Git provider.  The secret? Special annotations on your `PipelineRun`.
 
-For example, when you have these metadata in
-your `PipelineRun`:
+Let's say you have this in your `PipelineRun` metadata:
 
 ```yaml
 metadata:
@@ -115,31 +87,25 @@ annotations:
   pipelinesascode.tekton.dev/on-event: "[pull_request]"
 ```
 
-`Pipelines-as-Code` will match the PipelineRun `pipeline-pr-main` if the Git
-provider events target the branch `main` and it's coming from a `[pull_request]`
+Pipelines as Code will only run this `pipeline-pr-main` PipelineRun if two things are true: the Git event is aimed at the `main` branch, *and* it's a `pull_request` event.  Simple as that!
 
-There are many ways to match an event to a PipelineRun, head over to this patch
-[page]({{< relref "/docs/guide/matchingevents.md" >}}) for more details.
+There are lots of ways to match events to PipelineRuns. If you want to dive deeper, check out this [page]({{< relref "/docs/guide/matchingevents.md" >}}).
 
-## Using the body and headers in a Pipelines-as-Code parameter
+## Digging into Request Body and Headers in Pipelines as Code Parameters
 
-Pipelines-as-Code lets you access the full body and headers of the request as a CEL expression.
+Pipelines as Code lets you get at the full request body and headers using CEL expressions.  Think of it as having superpowers!
 
-This allows you to go beyond the standard variables and even play with multiple
-conditions and variables to output values.
+This means you're not stuck with just the standard variables. You can get really clever and use conditions and combinations of variables to pull out exactly what you need.
 
-For example, if you want to get the title of the Pull Request in your PipelineRun you can simply access it like this:
+Want to grab the title of a Pull Request in your PipelineRun?  Easy peasy:
 
 ```go
 {{ body.pull_request.title }}
 ```
 
-You can then get creative and for example mix the variable inside a python
-script to evaluate the json.
+And you can get even fancier!  Mix these variables into scripts, like Python, to process JSON and do all sorts of cool stuff.
 
-This task, for example, is using python and will check the labels on the PR,
-`exit 0` if it has the label called 'bug' on the pull request or `exit 1` if it
-doesn't:
+For instance, this task uses Python to check the labels on a PR. It'll `exit 0` (success) if it finds a label called 'bug' on the pull request, and `exit 1` (failure) if it doesn't:
 
 ```yaml
 taskSpec:
@@ -152,13 +118,13 @@ taskSpec:
         labels=json.loads("""{{ body.pull_request.labels }}""")
         for label in labels:
             if label['name'] == 'bug':
-              print('This is a PR targeting a BUG')
+              print('This PR is about a BUG!')
               exit(0)
-        print('This is not a PR targeting a BUG :(')
+        print('Nope, not a bug-fix PR :(')
         exit(1)
 ```
 
-The expressions are CEL expressions so you can as well make some conditional:
+Since these are CEL expressions, you can even use conditionals.  Check this out:
 
 ```yaml
 - name: bash
@@ -169,36 +135,29 @@ The expressions are CEL expressions so you can as well make some conditional:
     fi
 ```
 
-if the PR is open the condition then returns `true` and the shell script sees this
-as a valid boolean.
+If the PR is open, that condition becomes `true`, and your shell script sees it as a regular boolean value.
 
-Headers from the payload body can be accessed from the `headers` keyword, note that headers are case-sensitive,
-for example, this will show the GitHub event type for a GitHub event:
+Headers from the payload body are accessed using the `headers` keyword.  Keep in mind that headers are case-sensitive!  For example, to see the GitHub event type for a GitHub event:
 
 ```yaml
 {{ headers['X-Github-Event'] }}
 ```
 
-and then you can do the same conditional or access as described above for the `body` keyword.
+You can then use the same conditional logic and access methods for headers as you do for the `body` keyword.
 
-## Using the temporary GitHub APP Token for GitHub API operations
+## Using the Temporary GitHub App Token for GitHub API Magic
 
-You can use the temporary installation token that is generated by Pipelines as
-Code from the GitHub App to access the GitHub API.
+Pipelines as Code can generate a temporary installation token from the GitHub App, and you can use this token to talk to the GitHub API.  Pretty neat, huh?
 
-The token value is stored in the temporary git-auth secret as generated for [private
-repositories](../privaterepo/) in the key `git-provider-token`.
+This token lives in that temporary `git-auth` secret we talked about earlier (the one for [private repositories](../privaterepo/)), under the key `git-provider-token`.
 
-As an example, if you want to add a comment to your pull request, you can use the
-[github-add-comment](https://hub.tekton.dev/tekton/task/github-add-comment)
-task from the [Tekton Hub](https://hub.tekton.dev)
-using a [pipelines as code annotation](../resolver/#remote-http-url):
+Let's say you want to add a comment to your pull request. You can use the [github-add-comment](https://hub.tekton.dev/tekton/task/github-add-comment) task from the [Tekton Hub](https://hub.tekton.dev). Just use a [pipelines as code annotation](../resolver/#remote-http-url) to pull it in:
 
 ```yaml
 pipelinesascode.tekton.dev/task: "github-add-comment"
 ```
 
-you can then add the task to your [tasks section](https://tekton.dev/docs/pipelines/pipelines/#adding-tasks-to-the-pipeline) (or [finally](https://tekton.dev/docs/pipelines/pipelines/#adding-finally-to-the-pipeline) tasks) of your PipelineRun :
+Then, add this task to the `tasks` (or `finally` tasks) section of your `PipelineRun`:
 
 ```yaml
 [...]
@@ -217,11 +176,9 @@ tasks:
           value: "git-provider-token"
 ```
 
-Since we are using the dynamic variables we are able to reuse this on any
-PullRequest from any repositories.
+Because we're using those dynamic variables, this will work on any Pull Request in any repository.  Talk about reusable!
 
-and for completeness, here is another example of how to set the GITHUB_TOKEN
-environment variable on a task step:
+And just to show you another way, here's how to set the `GITHUB_TOKEN` environment variable in a task step:
 
 ```yaml
 env:
@@ -234,13 +191,11 @@ env:
 
 {{< hint info >}}
 
-- On GitHub apps the generated installation token [will be available for 8 hours](https://docs.github.com/en/developers/apps/building-github-apps/refreshing-user-to-server-access-tokens)
-- On GitHub apps the token is scoped to the repository the event (payload) comes
-  from unless [configured](/docs/install/settings#pipelines-as-code-configuration-settings) differently on the cluster.
+- Heads up: On GitHub Apps, the generated installation token [is good for 8 hours](https://docs.github.com/en/developers/apps/building-github-apps/refreshing-user-to-server-access-tokens).
+- Also, on GitHub Apps, the token is limited to the repository that triggered the event, unless you've [changed the settings](/docs/install/settings#pipelines-as-code-configuration-settings) on your cluster.
 
 {{< /hint >}}
 
-## Example
+## Example? Look No Further Than Pipelines as Code Itself
 
-`Pipelines as code` test itself, you can see the examples in its
-[.tekton](https://github.com/openshift-pipelines/pipelines-as-code/tree/main/.tekton) repository.
+Want to see Pipelines as Code in action?  Check out how Pipelines as Code tests *itself*.  You can find examples in its own [.tekton](https://github.com/openshift-pipelines/pipelines-as-code/tree/main/.tekton) repository.  It's a great place to see real-world examples!

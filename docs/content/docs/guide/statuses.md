@@ -3,109 +3,83 @@ title: PipelineRun status
 weight: 6
 ---
 
-# Status
+# Checking in on your PipelineRun Status
 
-## GitHub apps
+So, your `PipelineRun` is off and running – great!  Let's talk about how you can see what's happening and if everything's going smoothly.
 
-After the `PipelineRun` has finished, its status will be
-shown in the GitHub Check tabs, along with a concise overview
-of the status the name and the duration of each task in the pipeline. If the task has a
-[displayName](https://tekton.dev/docs/pipelines/tasks/#specifying-a-display-name)
-it will use it as the description of the task or otherwise just the task
-name.
+## GitHub Apps: Your Pipeline's Report Card
 
-If any step fails, a small portion of the log from that step will
-also be included in the output.
+Once your `PipelineRun` wraps up, you can get a quick rundown right in GitHub.  Look for the "Check" tabs – that's where Pipelines-as-Code will post a summary.  You'll see:
 
-In case an error is encountered while creating the `PipelineRun` on the cluster,
-the error message reported by the Pipeline Controller will be conveyed to the
-GitHub user interface. This facilitates the user to swiftly identify and
-troubleshoot the issue, without having to navigate to the underlying
-infrastructure.
+*   The overall status of the `PipelineRun` (success or failure, naturally!).
+*   A list of each task in your pipeline, along with its name and how long it took.  If you've given a task a fancy `displayName` in your Tekton setup, that's what you'll see here. Otherwise, it'll just use the plain task name.
 
-Any other error that may arise during the execution of the pipeline will also
-be reported to the GitHub user interface. However, if there was no match for the
-namespace, the error will be logged in the Pipelines-as-Code Controller's logs.
+And if something goes wrong?  No worries, GitHub will give you a heads-up.  If a step in your pipeline fails, you’ll even get a little snippet of the logs right there in the GitHub output, which can be super helpful for figuring out what went sideways.
 
-## Statuses for other providers (Webhook based)
+**Cluster Hiccups? GitHub's Got Your Back**
 
-If the webhook event pertains to a pull request, it will be included as a
-comment to the corresponding pull or merge request. However, when it comes to
-push events, it is not feasible to exhibit the status of the PipelineRun as
-there is no dedicated space to showcase it. In such scenarios, you can employ
-alternate methods as enumerated below.
+Sometimes, things can go wrong even *before* your pipeline really gets going – maybe there's an issue creating the `PipelineRun` on your Kubernetes cluster.  If that happens, Pipelines-as-Code will pipe the error message from the Pipeline Controller straight to GitHub.  This means you can quickly spot and fix problems without digging around in your cluster logs.  Nice, right?
 
-## Log Snippet when reporting error
+Any other errors that pop up during the pipeline's execution? Yep, those get reported to GitHub too.  However, if Pipelines-as-Code can't find a matching namespace for your repository (which shouldn't happen often!), those errors will end up in the Pipelines-as-Code Controller's logs instead.
 
-If an error is detected in one of the tasks in the Pipeline, a brief excerpt of
-the last three lines from the task breakdown is displayed. However, the API has
-a character limit that restricts us to output only the output of the first
-failed task.
+## What About Other Providers (Webhooks, etc.)?
 
-To prevent exposing secrets, Pipelines-as-Code analyze the PipelineRun and
-replace secret values with hidden characters. This is achieved by retrieving
-all secrets from the environment variables associated with tasks and steps, and
-searching for matches of these values in the output snippet.
+If you're using webhooks for your events, things work a little differently.
 
-These matches are first sorted by the longest and then replaced with a
-`"*****"` placeholder in the output snippet. This ensures that the output
-will not contain any leaked secrets.
+*   **Pull Requests? You'll get a comment!**  For pull request events, Pipelines-as-Code is helpful and will post the status as a comment directly on your pull request.  Easy peasy.
+*   **Push Events?  A bit trickier.** When it's a push event, there isn't really a dedicated spot in GitHub to show the status in the same way as checks or PR comments. So, for push events, you'll need to use some of the other methods we're talking about here to keep an eye on things.
 
-The hiding of the secret does not support concealing secrets from `workspaces`
-and
-[envFrom](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.23/#envfromsource-v1-core)
-sources.
+##  Log Snippets:  Errors in a Nutshell (and Secret-Safe!)
 
-![log snippet](/images/snippet-failure-message.png)
+When a task in your pipeline hits a snag, Pipelines-as-Code is helpful and gives you a little taste of what went wrong with a snippet of the logs.  Specifically, it grabs the last three lines from the task that failed.
 
-### Error detection from containers logs as GitHub Annotation
+**Secret Agent Mode: Protecting Your Sensitive Info**
 
-If you enable the `error-detection-from-container-logs` option in the
-pipeline-as-code configuration map, Pipelines-as-Code will attempt to detect
-errors from the container logs and add them as annotations on the corresponding
-Pull Request where the error occurred.
+We know you don't want secrets leaking out, so Pipelines-as-Code has a built-in secret-hiding feature. It's pretty clever:
 
-Currently, only a simple error format such as those resembling `makefile` or
-`grep` output are supported, specifically the format of :
+1.  It looks at all the secrets defined as environment variables in your tasks and steps.
+2.  It then scans the log snippet for those secret values.
+3.  Any matches it finds are replaced with `"*****"` before the snippet is displayed.
+
+This way, you get the error info you need without accidentally exposing passwords or API keys.
+
+**Important Note:**  This secret-hiding magic *doesn't* currently cover secrets from `workspaces` or `envFrom` sources.  Just something to keep in mind!
+
+![Log snippet example](/images/snippet-failure-message.png)
+
+### Error Hunting in Container Logs: GitHub Annotations to the Rescue
+
+Want even *more* error detail right in GitHub?  You can turn on the `error-detection-from-container-logs` option in the Pipelines-as-Code settings.  When you do, Pipelines-as-Code will try to sniff out errors directly from your container logs and flag them as annotations on the pull request where they happened.  Think of it like little error notes attached to your code in GitHub.
+
+**What kind of errors can it find?** Right now, it's looking for errors that are in a simple, standard format – kind of like what you'd see from `makefile` or `grep`.  Specifically, it likes this format:
 
 ```console
 filename:line:column: error message
 ```
 
-Tools like `golangci-lint`, `pylint`, `yamllint`, and many others can
-produce errors in this format.
+Good news is, lots of tools already output errors in this format!  Think `golangci-lint`, `pylint`, `yamllint`, and many others.
 
-You can refer to the Pipelines-as-Code
-[pull_request.yaml](https://github.com/openshift-pipelines/pipelines-as-code/blob/7c9b16409a1a6c93e9480758f069f881e5a50f05/.tekton/pull-request.yaml#L70)
-for an example of how we lint our code and output errors in the
-specified format.
+**Want to see it in action?** Check out the Pipelines-as-Code [pull\_request.yaml](https://github.com/openshift-pipelines/pipelines-as-code/blob/7c9b16409a1a6c93e9480758f069f881e5a50f05/.tekton/pull-request.yaml#L70) file.  That's how the Pipelines-as-Code project itself uses linting and shows errors in this format.
 
-You can customize the regular expression used for detecting errors with the
-`error-detection-simple-regexp` setting. The regular expression uses [named
-groups](https://www.regular-expressions.info/named.html) to provide flexibility
-in specifying the matching criteria. The necessary groups for matching are
-filename, line, and error (the column group is not used). The default regular
-expression is defined in the configuration map.
+**Customize Error Detection (For the Power Users)**
 
-By default, Pipelines-as-Code searches for errors in only the last 50 lines of
-the container logs. However, you can increase this limit by setting the
-`error-detection-max-number-of-lines` value. If you set this value to -1, the
-system will search through all available lines for errors. Keep in mind that
-increasing this maximum number of lines may increase the memory usage of the
-watcher.
+If you're feeling fancy, you can even tweak *how* Pipelines-as-Code detects errors.  The `error-detection-simple-regexp` setting lets you define a custom regular expression.  Don't worry, you don't have to be a regex wizard!  It uses [named groups](https://www.regular-expressions.info/named.html) to keep things flexible.  You just need to make sure your regex has groups named `filename`, `line`, and `error` (it ignores the `column` group, if you were wondering).  The default regex is already set up in the configuration, so you probably won't need to change it unless you have very specific needs.
 
-![annotations](/images/github-annotation-error-failure-detection.png)
+**Log Line Limits**
 
-## Namespace Event stream
+By default, Pipelines-as-Code only scans the *last* 50 lines of container logs for errors.  Why? To keep things speedy and not use too much memory.  But if you need it to look further back, you can adjust this with the `error-detection-max-number-of-lines` setting.  Setting it to `-1` tells it to search through *all* the log lines.  Just be aware that scanning more lines might mean it uses a bit more memory.
 
-When a namespace has been matched to a repository, Pipelines-as-Code will emit
-its log messages as Kubernetes events within the namespace of the corresponding
-repository.
+![Example of GitHub annotations](/images/github-annotation-error-failure-detection.png)
 
-## Repository CRD
+## Namespace Event Stream:  Logs in Your Namespace
 
-The most recent five statuses of any PipelineRuns associated with a repository
-are stored within the corresponding repository custom resource (CR).
+When you link a namespace to a repository, Pipelines-as-Code does a cool thing: it starts sending its log messages as Kubernetes events right inside that repository's namespace.  This can be handy if you're already used to monitoring Kubernetes events for insights.
+
+## Repository CRD:  PipelineRun History
+
+Pipelines-as-Code also keeps a little history for you! It remembers the five most recent statuses of any `PipelineRuns` associated with your repository and stores them in the repository's custom resource (CR).
+
+You can see this history by running:
 
 ```console
 % kubectl get repo -n pipelines-as-code-ci
@@ -113,25 +87,18 @@ NAME                  URL                                                       
 pipelines-as-code-ci   https://github.com/openshift-pipelines/pipelines-as-code   pipelines-as-code-ci   True        Succeeded   59m         56m
 ```
 
-Using the tkn pac describe command from the [cli](../cli/) you can easily view
-all of the statuses of the PipelineRuns associated with your repository, as
-well as their metadata.
+Even easier, you can use the `tkn pac describe` command from the Pipelines-as-Code CLI (check out the [cli docs](../cli/)) to get a full view of all the `PipelineRun` statuses and metadata for your repository.  Super convenient!
 
-## Notifications
+## Notifications:  You're in Charge!
 
-Notifications are not managed by Pipelines-as-Code.
+Pipelines-as-Code itself *doesn't* handle notifications directly.  But don't worry, you've got options!
 
-To add notifications to your pipeline runs, you can use the [finally feature of
-Tekton
-Pipelines](https://github.com/tektoncd/pipeline/blob/main/docs/pipelines.md#adding-finally-to-the-pipeline).
-This allows you to execute a set of tasks at the end of a
-pipeline run, regardless of whether it succeeds or fails.
+If you want to get alerts or notifications about your pipeline runs, the best way is to use Tekton Pipelines' [finally tasks](https://github.com/tektoncd/pipeline/blob/main/docs/pipelines.md#adding-finally-to-the-pipeline).  `finally` tasks let you define a set of tasks that will always run at the very end of your pipeline, no matter if it succeeded or failed.
 
-As an example, you can [refer](https://github.com/openshift-pipelines/pipelines-as-code/blob/16596b478f4bce202f9f69de9a4b5a7ca92962c1/.tekton/generate-coverage-release.yaml#L127) to the coverage generation PipelineRun in the
-`.tekton` directory of the Pipelines-as-Code repository, it uses the [finally
-task with the guard
-feature](https://tekton.dev/docs/pipelines/pipelines/#guard-finally-task-execution-using-when-expressions)
-to send a notification to Slack if there is any failure in the pipelinerun. See
-it in action here:
+**Example Time!**  Take a look at the Pipelines-as-Code project's own [coverage generation pipeline](https://github.com/openshift-pipelines/pipelines-as-code/blob/16596b478f4bce202f9f69de9a4b5a7ca92962c1/.tekton/generate-coverage-release.yaml#L127).  It uses a `finally` task with the [guard feature](https://tekton.dev/docs/pipelines/pipelines/#guard-finally-task-execution-using-when-expressions) to send a Slack notification if anything goes wrong during the pipeline run.
+
+You can see it in action right here:
 
 <https://github.com/openshift-pipelines/pipelines-as-code/blob/16596b478f4bce202f9f69de9a4b5a7ca92962c1/.tekton/generate-coverage-release.yaml#L126>
+
+So, while Pipelines-as-Code doesn't do notifications for you, it gives you the tools to easily set them up yourself using Tekton's powerful features!

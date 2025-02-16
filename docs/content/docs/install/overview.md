@@ -2,35 +2,26 @@
 title: Overview
 weight: 1
 ---
-# Pipelines-as-Code - Installation
+# Getting Pipelines-as-Code Installed
 
-Pipelines-as-Code support different installation method to Git provider
-platforms (i.e: GitHub, Bitbucket and so on)
+Good news! You can install Pipelines-as-Code with different methods depending on your Git platform (think GitHub, Bitbucket, etc.).
 
-The preferred method to use Pipelines-as-Code is configured with a [GitHub
-Application](https://docs.github.com/en/developers/apps/getting-started-with-apps/about-apps).
+For the best experience though, we suggest using a [GitHub Application](https://docs.github.com/en/developers/apps/getting-started-with-apps/about-apps). It's usually the easiest way to get started.
 
-# Install Pipelines-as-Code infrastructure
+# Setting up Pipelines-as-Code
 
-Pipelines-as-Code support different installation method to Git provider
-platforms (ie: GitHub, Bitbucket and so on) The preferred method to use
-Pipelines-as-Code is configured with a GitHub Application.
+Okay, let's get you up and running with Pipelines-as-Code! Here's the lowdown:
 
-To get started with Pipelines-as-Code, you need to
+*  First things first, you'll need to install Pipelines-as-Code:
+    *  Using OpenShift Pipelines (version 1.7.x onwards)?  Great! It's probably already installed.
+    *  Fancy a manual install?  No sweat, just head over to the [installation guide](/docs/install/installation).
+*  After that, you'll want to set up your Git provider (like a GitHub App) so it can talk to Pipelines-as-Code.
 
-* Install Pipelines-as-Code.
-  * If you run on OpenShift Pipelines (from 1.7.x) Pipelines-as-Code should be
-     automatically installed
-  * If you want to do a manual install you can
-      follow the [installation guide](/docs/install/installation).
-* Configure your Git Provider (eg: a GitHub Application) to access Pipelines as
-  Code.
+## Connecting to Your Git Provider
 
-## Git Provider Setup
+With Pipelines-as-Code installed, the next step is to connect it to your Git provider.  There are a few ways to do this, so pick the one that works best for you.  If you're unsure, we recommend the GitHub App method – it's generally the easiest.
 
-After installing Pipelines-as-Code you are now ready to configure your Git
-provider. Choose your preferred install method, if you don't have any
-preferences the preferred install method is the GitHub Application method.
+Here's a rundown of the different setup options for your Git provider:
 
 * [GitHub Application](/docs/install/github_apps).
 * [GitHub Webhook](/docs/install/github_webhook)

@@ -3,48 +3,42 @@ title: GitHub Apps
 weight: 10
 ---
 
-# Create a Pipelines-as-Code GitHub App
+# Setting up a Pipelines-as-Code GitHub App
 
-The GitHub App install is different from the other install methods since it
-acts as the integration point with OpenShift Pipelines and brings the Git
-workflow into Tekton pipelines. You only need one GitHub App for every user on
-the cluster usually setup by the admin.
+Using a GitHub App is a bit different than other ways to connect Pipelines-as-Code, but it's a neat way to tie your Git workflow directly into Tekton pipelines.  Think of it as the central hub for your Git stuff and your pipelines.  Usually, you just need one GitHub App per cluster, and it's typically something your admin sets up.
 
-You need the webhook of the GitHub App to point to your Pipelines-as-Code
-Controller route or ingress endpoint which would listen to GitHub events.
+You'll need to make sure your GitHub App webhook points to your Pipelines-as-Code controller's address (that route or ingress URL). This is how Pipelines-as-Code knows when things happen in your Git repositories.
 
-There are 2 ways to set up GitHub App:
+There are two main ways to get your GitHub App up and running:
 
-## Setup using tkn pac cli
+## The Speedy Way with `tkn pac cli`
 
-You could use [`tkn pac bootstrap`](/docs/guide/cli) command which will a create GitHub App, provides
-steps to configure it with your Git repository and also creates required secrets.
-After creating the GitHub App, you must install it on the repositories you want to use for Pipelines-as-Code.
+The quickest path is using the [`tkn pac bootstrap`](/docs/guide/cli) command. This command is like a little helper that will create a GitHub App for you, walk you through setting it up with your Git repo, and even handle creating those necessary secret keys.  Once it's done, you just need to install the GitHub App in the specific repositories you want to use with Pipelines-as-Code.
 
-Alternatively, you could set up manually by following the steps [here](./#setup-manually)
+If you're feeling more hands-on, or just curious about the details, you can also set things up manually, and the steps are right here: [Manual Setup](#setup-manually)
 
-## Manual SetUp
+## The Manual Route
 
-* Go to <https://github.com/settings/apps> (or *Settings > Developer settings > GitHub Apps*) and click on **New GitHub
-  App** button
-* Provide the following info in the GitHub App form
-  * **GitHub Application Name**: `OpenShift Pipelines`
-  * **Homepage URL**: *[OpenShift Console URL]*
-  * **Webhook URL**: *[the Pipelines-as-Code route or ingress URL as copied in the previous section]*
-  * **Webhook secret**: *[an arbitrary secret, you can generate one with `head -c 30 /dev/random | base64`]*
+* First, head over to GitHub Apps settings. You can find it at <https://github.com/settings/apps> (or go to *Settings > Developer settings > GitHub Apps*) and click that shiny **New GitHub App** button.
 
-* Select the following repository permissions:
-  * **Checks**: `Read & Write`
-  * **Contents**: `Read & Write`
-  * **Issues**: `Read & Write`
-  * **Metadata**: `Readonly`
-  * **Pull request**: `Read & Write`
+* Now, you'll need to fill out the GitHub App form with these details:
+  * **GitHub Application Name**: How about `OpenShift Pipelines`?  Something easy to recognize.
+  * **Homepage URL**:  Pop in your OpenShift Console URL here.
+  * **Webhook URL**: This is important!  Paste the Pipelines-as-Code route or ingress URL you grabbed earlier. This tells GitHub where to send event notifications.
+  * **Webhook secret**:  Think of this as a password for your webhook. You can make up something random – a quick way to generate one is by running `head -c 30 /dev/random | base64` in your terminal.
 
-* Select the following organization permissions:
-  * **Members**: `Readonly`
-  * **Plan**: `Readonly`
+* Next up, permissions!  You need to tell the GitHub App what it's allowed to do.  Select these repository permissions:
+  * **Checks**:  `Read & Write` (Pipelines-as-Code needs to create check runs to report pipeline status)
+  * **Contents**: `Read & Write` (So it can access your code, obviously!)
+  * **Issues**: `Read & Write` (For commenting on issues, maybe?)
+  * **Metadata**: `Readonly` (Just needs to know a little bit *about* the repo)
+  * **Pull request**: `Read & Write` (Essential for PR workflows)
 
-* Subscribe to following events:
+* And these organization permissions:
+  * **Members**: `Readonly` (To know who's who, perhaps?)
+  * **Plan**: `Readonly` (Probably not super critical, but let's include it)
+
+* Almost there! Now, tell GitHub App which events to pay attention to by subscribing to these:
   * Check run
   * Check suite
   * Issue comment
@@ -53,34 +47,24 @@ Alternatively, you could set up manually by following the steps [here](./#setup-
   * Push
 
 {{< hint info >}}
-> You can see a screenshot of how the GitHub App permissions look like [here](https://user-images.githubusercontent.com/98980/124132813-7e53f580-da81-11eb-9eb4-e4f1487cf7a0.png)
+> Just to be sure we're on the same page, here's a [screenshot](https://user-images.githubusercontent.com/98980/124132813-7e53f580-da81-11eb-9eb4-e4f1487cf7a0.png) of what the permissions should look like.
 {{< /hint >}}
 
-* Click on **Create GitHub App**.
+* Okay, all set?  Click on **Create GitHub App**.
 
-* Take note of the **App ID** at the top of the page on the detail's page of the GitHub App you just created.
+* Awesome, you've got a GitHub App!  On the app's details page, jot down the **App ID** at the top. You'll need this in a sec.
 
-* In **Private keys** section, click on **Generate Private key* to generate a private key for the GitHub app. It will
-  download automatically. Store the private key in a safe place as you need it in the next section and in future when
-  reconfiguring this app to use a different cluster.
+* Now, in the **Private keys** section, hit **Generate Private key**.  This will download a `.pem` file to your computer. Keep this safe! You'll need it in the next step and if you ever want to move your app to a different cluster.
 
-### Configure Pipelines-as-Code on your cluster to access the GitHub App
+### Hooking up Pipelines-as-Code to your GitHub App
 
-In order for Pipelines-as-Code to be able to authenticate to the GitHub App and have the GitHub App securely trigger the
-Pipelines-as-Code webhook, you need to create a Kubernetes secret containing the private key of the GitHub App and the
-webhook secret of the Pipelines-as-Code as it was provided when you created the GitHub App in the previous section. This
-secret
-is [used to generate](https://docs.github.com/en/developers/apps/building-github-apps/identifying-and-authorizing-users-for-github-apps)
-a token on behalf of the user running the event and validating the webhook
-through the webhook secret.
+To let Pipelines-as-Code actually *use* your GitHub App, you need to create a Kubernetes secret. This secret basically holds the private key for your GitHub App and that webhook secret you created earlier.  Think of it as providing Pipelines-as-Code with the credentials it needs to talk to GitHub securely and verify that webhook requests are legit.
 
-Run the following command and replace:
+Run this command, but make sure to replace these placeholders with your actual values:
 
-* `APP_ID` with the GitHub App **App ID** copied in the previous section
-* `WEBHOOK_SECRET` with the webhook secret provided when created the GitHub App
-  in the previous section
-* `PATH_PRIVATE_KEY` with the path to the private key that was downloaded in the
-  previous section
+* `APP_ID`:  That **App ID** you wrote down from the GitHub App page.
+* `WEBHOOK_SECRET`: The webhook secret you set when creating the GitHub App.
+* `PATH_PRIVATE_KEY`: The path to that `.pem` private key file you downloaded.
 
 ```bash
 kubectl -n pipelines-as-code create secret generic pipelines-as-code-secret \
@@ -89,12 +73,10 @@ kubectl -n pipelines-as-code create secret generic pipelines-as-code-secret \
         --from-literal webhook.secret="WEBHOOK_SECRET"
 ```
 
-Lastly, install the App on any repos you'd like to use with Pipelines-as-Code.
+And finally, the last step – install the GitHub App on any Git repositories you want to use with Pipelines-as-Code.  Go to your repo settings, find "GitHub Apps," and install the "OpenShift Pipelines" app you just created.
 
-## GitHub Enterprise
+## Got GitHub Enterprise?
 
-Pipelines-as-Code supports GitHub Enterprise.
+Pipelines-as-Code plays nicely with GitHub Enterprise too.
 
-You don't need to do anything special to get Pipelines as code working with
-GHE. Pipelines as code automatically detect the header as set from GHE and
-use the GHE API auth URL rather than the public GitHub.
+You really don't have to do anything special to make it work with GHE.  Pipelines-as-Code is smart enough to detect if you're using GitHub Enterprise and will automatically use the right API endpoints for authentication instead of the public GitHub ones.  Pretty neat, huh?

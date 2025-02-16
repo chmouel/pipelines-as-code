@@ -2,65 +2,64 @@
 title: CLI tkn-pac
 weight: 100
 ---
-# Pipelines-as-Code CLI
 
-Pipelines-as-Code provides a powerful CLI designed to work as a plug-in to the [Tekton CLI (tkn)](https://github.com/tektoncd/cli).
+# Meet the Pipelines-as-Code CLI: `tkn pac`
 
-`tkn pac` allows you to:
+Pipelines-as-Code comes with a handy command-line tool, `tkn pac`, that works as a plugin for the [Tekton CLI (`tkn`)](https://github.com/tektoncd/cli). Think of it as your sidekick for all things Pipelines-as-Code!
 
-* `bootstrap`: quickly bootstrap a Pipelines-as-Code installation.
-* `create`: create a new Pipelines-as-Code Repository definition.
-* `delete`: delete an existing Pipelines-as-Code Repository definition.
-* `generate`: generate a simple pipelinerun to get you started with Pipelines-as-Code.
-* `list`: list Pipelines-as-Code Repositories.
-* `logs`: show the logs of a PipelineRun from a Repository CRD.
-* `describe`: describe a Pipelines-as-Code Repository and the runs associated with it.
-* `resolve`: Resolve a pipelinerun as if it were executed by pipelines as code on service.
-* `webhook`: Updates webhook secret.
-* `info`: Show information (currently only about your installation with `info install`).
+`tkn pac` gives you superpowers to:
 
-## Install
+* `bootstrap`: Get Pipelines-as-Code up and running super fast.
+* `create`:  Define a new Git repository for Pipelines-as-Code to watch.
+* `delete`:  Remove a repository definition you no longer need.
+* `generate`:  Create a basic pipeline setup to get your feet wet with Pipelines-as-Code.
+* `list`:  See all your Pipelines-as-Code managed repositories at a glance.
+* `logs`:  Dive into the logs of a Pipeline run from a Repository.
+* `describe`: Get the lowdown on a Repository and its associated runs.
+* `resolve`: Test out a PipelineRun locally, just like Pipelines-as-Code would run it.
+* `webhook`: Update your webhook secret key.
+* `info`:  Get the inside scoop on your Pipelines-as-Code setup (like installation details with `info install`).
+
+## Get it Installed
 
 {{< tabs "installbinary" >}}
 {{< tab "Binary" >}}
-You can grab the latest binary directly for your operating system from the
-[releases](https://github.com/openshift-pipelines/pipelines-as-code/releases)
-page.
+Want to grab the latest and greatest? You can download the binary for your OS straight from the [releases](https://github.com/openshift-pipelines/pipelines-as-code/releases) page.
 
-Available operating systems are:
+We've got binaries for:
 
-* MacOS - M1 and x86 architecture
-* Linux - 64bits - RPM, Debian packages, and tarballs.
+* MacOS - Both M1 and x86 architectures
+* Linux - 64bits - RPM, Debian packages, and good old tarballs.
 * Linux - ARM 64bits - RPM, Debian packages, and tarballs.
-* Windows - Arm 64 Bits and x86 architecture.
+* Windows - Arm 64 Bits and x86 architectures.
 
 {{< hint info >}}
-On Windows, tkn-pac will look for the Kubernetes config in `%USERPROFILE%\.kube\config`. On Linux and MacOS, it will use the standard $HOME/.kube/config.
+Good to know: On Windows, `tkn-pac` looks for your Kubernetes config in `%USERPROFILE%\.kube\config`. On Linux and MacOS, it's the usual `$HOME/.kube/config`.
 {{< /hint >}}
 
 {{< /tab >}}
 
 {{< tab "Homebrew" >}}
-tkn pac plug-in is available from HomeBrew as a "Tap". You simply need to run this command to install it:
+For macOS and Linux Homebrew users, `tkn pac` is available as a "Tap"!  Just run this command to install:
 
 ```shell
 brew install openshift-pipelines/pipelines-as-code/tektoncd-pac
 ```
 
-and if you need to upgrade it:
+And if you want to upgrade to the latest version:
 
 ```shell
 brew upgrade openshift-pipelines/pipelines-as-code/tektoncd-pac
 ```
 
-`tkn pac` plug-in is compatible with [Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux)
+Yep, `tkn pac` plays nicely with [Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux) too.
 
 {{< /tab >}}
 {{< tab "Container" >}}
-`tkn-pac` is available as a docker container:
+Feeling container-y?  `tkn-pac` is also available as a Docker container:
 
 ```shell
-# use docker
+# using podman (or docker, if that's your jam)
 podman run -e KUBECONFIG=/tmp/kube/config -v ${HOME}/.kube:/tmp/kube \
      -it  ghcr.io/openshift-pipelines/pipelines-as-code/tkn-pac:stable tkn-pac help
 ```
@@ -68,7 +67,7 @@ podman run -e KUBECONFIG=/tmp/kube/config -v ${HOME}/.kube:/tmp/kube \
 {{< /tab >}}
 
 {{< tab "GO" >}}
-If you want to install from the Git repository you can just do:
+If you're a Go enthusiast and want to install straight from the source code, go for it:
 
 ```shell
 go install github.com/openshift-pipelines/pipelines-as-code/cmd/tkn-pac
@@ -77,9 +76,7 @@ go install github.com/openshift-pipelines/pipelines-as-code/cmd/tkn-pac
 {{< /tab >}}
 
 {{< tab "Arch" >}}
-You can install the `tkn pac` plugin from the [Arch User
-Repository](https://aur.archlinux.org/packages/tkn-pac/) (AUR) with your
-favorite AUR installer like `yay`:
+Arch Linux users, we haven't forgotten you!  You can grab the `tkn pac` plugin from the [Arch User Repository](https://aur.archlinux.org/packages/tkn-pac/) (AUR) using your favorite AUR helper like `yay`:
 
 ```shell
 yay -S tkn-pac
@@ -89,322 +86,225 @@ yay -S tkn-pac
 
 {{< /tabs >}}
 
-## Commands
+## Command Breakdown
 
 {{< details "tkn pac bootstrap" >}}
 
-### bootstrap
+### `bootstrap` Command
 
-`tkn pac bootstrap` command will help you to get started installing and
-configuring Pipelines as code. It currently supports the following providers:
+The `tkn pac bootstrap` command is your fast track to setting up Pipelines-as-Code. Right now, it's got your back for these providers:
 
 * GitHub Application on public GitHub
 * GitHub Application on GitHub Enterprise
 
-It will start checking if you have installed Pipelines-as-Code and if not it
-will ask you if you want to install (with `kubectl`) the latest stable
-release. If you add the flag `--nightly` it will install the latest code ci
-release.
+It'll first check if Pipelines-as-Code is already installed. If not, it'll ask if you want to install the latest stable version (using `kubectl`, of course). Throw in the `--nightly` flag if you're feeling adventurous and want the latest code from the CI.
 
-Bootstrap detects the OpenShift Route automatically associated with the Pipelines
-as code controller service and uses this as the endpoint for the created GitHub
-application.
+Bootstrap is smart enough to find the OpenShift Route linked to your Pipelines-as-Code controller service and use that as the endpoint for your new GitHub App.
 
-You can use the `--route-url` flag to replace the OpenShift Route URL or specify
-a custom URL on an
-[Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/) in a
-Kubernetes cluster.
+Need to use a different URL? No problem! You can use the `--route-url` flag to override the OpenShift Route URL or point it to a custom URL on an [Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/) in a Kubernetes cluster.
 
-The OpenShift console is automatically detected. On Kubernetes, `tkn-pac` will
-attempt to detect the tekton-dashboard Ingress URL and let you choose to use it
-as the endpoint for the created GitHub application.
+It also automatically detects the OpenShift console.  On plain Kubernetes, `tkn-pac` will try to find the tekton-dashboard Ingress URL and let you pick it as the endpoint for your GitHub App.
 
-If your cluster is not accessible to the internet, Pipelines-as-Code provides an
-option to install a webhook forwarder called
-[gosmee](https://github.com/chmouel/gosmee). This forwarder enables connectivity
-between the Pipelines-as-Code controller and GitHub without requiring an
-internet connection. In this scenario, it will set up a forwarding URL on
-<https://hook.pipelinesascode.com> and set it up on GitHub. For OpenShift, it
-will not prompt you unless you explicitly specify the `--force-gosmee` flag
-(which can be useful if you are running [OpenShift Local](https://developers.redhat.com/products/openshift-local/overview) for instance).
+If your cluster isn't reachable from the internet, Pipelines-as-Code has a cool option to install a webhook forwarder called [gosmee](https://github.com/chmouel/gosmee). This lets Pipelines-as-Code talk to GitHub without needing a public internet connection.  In this case, it sets up a forwarding URL at <https://hook.pipelinesascode.com> and configures it on GitHub. For OpenShift, it won't ask unless you specifically use the `--force-gosmee` flag (which can be handy if you're running [OpenShift Local](https://developers.redhat.com/products/openshift-local/overview), for example).
 
 {{< /details >}}
 
 {{< details "tkn pac bootstrap github-app" >}}
 
-### bootstrap github-app
+### `bootstrap github-app` Command
 
-If you only want to create a GitHub application to use with Pipelines-as-Code
-and not the full `bootstrap` exercise, you can use `tkn pac bootstrap
-github-app` directly which will skip the installation and only create the
-GitHub application and the secret with all the information needed in the
-`pipelines-as-code` namespace.
+Just want to create a GitHub App for Pipelines-as-Code without the full `bootstrap` process?  `tkn pac bootstrap github-app` is your friend.  It skips the installation part and just creates the GitHub App and the secret with all the necessary info in the `pipelines-as-code` namespace.
 
 {{< /details >}}
 
 {{< details "tkn pac create repo" >}}
 
-### Repository Creation
+### `create repo` Command
 
-`tkn pac create repo` -- Creates a new Pipelines-as-Code `Repository` custom resource definition,
-With a Git repository to execute pipelineruns based on Git events. It
-will also generate a sample file with a [PipelineRun](/docs/guide/authoringprs)
-in the `.tekton` directory called `pipelinerun.yaml` targeting the `main` branch
-and the `pull_request` and `push` events. You can customize this by editing the
-[PipelineRun](/docs/guide/authoringprs) to target a different branch or event.
+`tkn pac create repo` -  This command is all about creating a new Pipelines-as-Code `Repository` custom resource.  It sets up a link to a Git repo so you can trigger pipeline runs based on Git events.  It'll even whip up a sample [PipelineRun](/docs/guide/authoringprs) file called `pipelinerun.yaml` in your `.tekton` directory. This starter file targets the `main` branch and the `pull_request` and `push` events.  Feel free to tweak this [PipelineRun](/docs/guide/authoringprs) to watch different branches or events.
 
-If you haven't configured a provider previously, it will follow up with
-questions if you want to configure a webhook for your provider of choice.
+If you haven't set up a provider before, it'll ask you if you want to configure a webhook for your chosen provider.  Easy peasy!
+
 {{< /details >}}
 
 {{< details "tkn pac delete repo" >}}
 
-### Repository Deletion
+### `delete repo` Command
 
-`tkn pac delete repo` -- will delete a Pipelines-as-Code Repository definition.
+`tkn pac delete repo` -  This one's straightforward: it deletes a Pipelines-as-Code Repository definition.
 
-You can specify the flag `--cascade` to optionally delete the attached secrets
-(ie: webhook or provider secret) to the Pipelines-as-Code Repository definition.
+Want to clean up completely? Use the `--cascade` flag to also delete the associated secrets (like webhook or provider secrets) along with the Repository definition.
 
 {{< /details >}}
 
 {{< details "tkn pac list" >}}
 
-### Repository Listing
+### `list` Command
 
-`tkn pac list` -- will list all the Pipelines-as-Code Repositories
-definition and display the last or the current status (if it's running) of the
-PipelineRun associated with it.
+`tkn pac list` -  Need a quick overview of your Pipelines-as-Code Repositories? This command lists them all, showing you the last or current status (if it's running) of the PipelineRun connected to each one.
 
-You can add the option `-A/--all-namespaces` to list all repositories across the
-cluster. (you need to have the right for it).
+Want to see everything across all namespaces?  `-A/--all-namespaces` is your flag (you'll need the right permissions for that, naturally).
 
-You can select the repositories by labels with the `-l/--selectors` flag.
+You can also filter repositories by labels using the `-l/--selectors` flag.
 
-You can choose to display the real time as RFC3339 rather than the relative time
-with the `--use-realtime` flag.
+By default, it shows time in a friendly relative format (like "5 minutes ago").  If you prefer the precise RFC3339 timestamp, use the `--use-realtime` flag.
 
-On modern terminals (ie: OSX Terminal, [iTerm2](https://iterm2.com/), [Windows
-Terminal](https://github.com/microsoft/terminal), GNOME-terminal, kitty, and so
-on...) the links become clickable with control+click or ⌘+click (see the
-documentation of your terminal for more details) and will open the browser
-to the console/dashboard URL to see the details of the Pipelinerun associated
-with it.
+Cool feature for modern terminals (like OSX Terminal, [iTerm2](https://iterm2.com/), [Windows Terminal](https://github.com/microsoft/terminal), GNOME-terminal, kitty, etc.):  links become clickable! Just control+click or ⌘+click (check your terminal's docs for the exact combo) and it'll open your browser to the console/dashboard URL to see the PipelineRun details. Nice, right?
 
 {{< /details >}}
 
 {{< details "tkn pac describe" >}}
 
-### Repository Describe
+### `describe` Command
 
-`tkn pac describe` -- will describe a Pipelines-as-Code Repository
-definition and the runs associated with it.
+`tkn pac describe` -  This command gives you a detailed look at a Pipelines-as-Code Repository definition and the PipelineRuns linked to it.
 
-You can choose to display the real time as RFC3339 rather than the relative time
-with the `--use-realtime` flag.
+Like `list`, it uses relative time by default. Use `--use-realtime` if you want RFC3339 timestamps instead.
 
-When the last PipelineRun has a failure it will print the last 10 lines of every
-task associated with the PipelineRun that has failed highlighting the
-`ERROR` or `FAILURE` and other patterns.
+If the last PipelineRun failed, it'll helpfully print the last 10 lines of each failed task, highlighting `ERROR` or `FAILURE` messages and other relevant patterns to help you debug.
 
-If you want to show the failures of another PipelineRun rather than the last
-one you can use the `--target-pipelinerun` or `-t` flag for that.
+Want to see failures from a different PipelineRun than the latest one? The `--target-pipelinerun` or `-t` flag lets you pick which one to focus on.
 
-On modern terminals (ie: OSX Terminal, [iTerm2](https://iterm2.com/), [Windows
-Terminal](https://github.com/microsoft/terminal), GNOME-terminal, kitty, and so
-on...) the links become clickable with control+click or ⌘+click (see the
-documentation of your terminal for more details) and will open the browser
-to the console/dashboard URL to see the details of the Pipelinerun associated
-with it.
+And yes, those clickable links in modern terminals work here too! Control+click or ⌘+click to jump to the console/dashboard URL and get more context.
 
 {{< /details >}}
 
 {{< details "tkn pac logs" >}}
 
-### Logs
+### `logs` Command
 
-`tkn pac logs` -- will show the logs attached to a Repository.
+`tkn pac logs` -  Want to see the logs for a Repository? This command is your ticket.
 
-If you don't specify a repository on the command line it will ask you to choose
-one or auto-select it if there is only one.
+If you don't specify a repository name, it'll ask you to choose one, or automatically select it if there's only one option.
 
-If there are multiple PipelineRuns attached to the Repo it will ask you to choose
-one or auto-select it if there is only one.
+If there are multiple PipelineRuns for the Repo, it'll ask you to pick one, or auto-select if there's just one.
 
-If you add the `-w` flag it will open the console or the dashboard URL to the log.
+Add the `-w` flag and it'll open the console or dashboard URL directly to the logs in your browser.
 
-The [`tkn`](https://github.com/tektoncd/cli) binary needs to be installed to show
-the logs.
+Heads up:  You'll need the [`tkn`](https://github.com/tektoncd/cli) binary installed for `tkn pac logs` to work its magic.
+
 {{< /details >}}
 
 {{< details "tkn pac generate" >}}
 
-### Generate
+### `generate` Command
 
-`tkn pac generate`: will generate a simple pipelinerun to get you started with
-Pipelines-as-Code. It will try to be as smart as possible by detecting the
-current Git information if you run the command from your source code.
+`tkn pac generate` -  Need a starting point? This command generates a basic PipelineRun to get you started with Pipelines-as-Code. It tries to be clever and figure out Git info if you run it from your source code directory.
 
-It has some basic language detection and adds extra tasks depending on the
-language. For example, if it detects a file named `setup.py` at the repository
-root it will add the [pylint task](https://hub.tekton.dev/tekton/task/pylint) to
-the generated pipelinerun.
+It even does some basic language detection and adds extra tasks based on the language.  For example, if it spots a `setup.py` file at the root of your repo, it'll add the [pylint task](https://hub.tekton.dev/tekton/task/pylint) to the generated PipelineRun.  Pretty neat, huh?
+
 {{< /details >}}
 
 {{< details "tkn pac resolve" >}}
 
-### Resolve
+### `resolve` Command
 
-`tkn-pac resolve`: will run a pipelinerun as if it were executed by pipelines
-as code on service.
+`tkn-pac resolve` - Ever wondered how Pipelines-as-Code would run your pipeline? This command lets you test it out locally!
 
-For example, if you have a pipelinerun in the `.tekton/pull-request.yaml` file
-you can run the command `tkn-pac resolve` to see it running:
+For instance, if you have a PipelineRun in `.tekton/pull-request.yaml`, you can run:
 
 ```yaml
 tkn pac resolve -f .tekton/pull-request.yaml -o /tmp/pull-request-resolved.yaml && kubectl create -f /tmp/pull-request-resolved.yaml
 ```
 
-Combined with a Kubernetes install running on your local machine (like[Code
-Ready
-Containers](https://developers.redhat.com/products/codeready-containers/overview)
-or [Kubernetes Kind](https://kind.sigs.k8s.io/docs/user/quick-start/) ) you can
-see your run in action without having to generate a new commit.
+Combine this with a local Kubernetes setup (like [Code Ready Containers](https://developers.redhat.com/products/codeready-containers/overview) or [Kubernetes Kind](https://kind.sigs.k8s.io/docs/user/quick-start/)) and you can see your pipeline in action without even committing any code!
 
-If you run the command from your source code repository it will try to detect
-the parameters (like the revision or branch_name) using the information from the
-Git repository.
+Run the command from your source code repo, and it'll try to grab parameters (like revision or branch name) from your Git info.
 
-You can override the parameters with the `-p` flag.
+Need to tweak things? Override parameters with the `-p` flag.
 
-For example, if you want to use a Git branch as a revision and another repo name
-than the current repo name you can just use:
+For example, to use the `main` branch as the revision and a different repo name:
 
 `tkn pac resolve -f .tekton/pr.yaml -p revision=main -p repo_name=othername`
 
-`-f` can as well accept a directory path rather than just a filename and grab
-every `yaml` or `yml` file from that directory.
+The `-f` flag can take a directory path too, not just a filename. It'll grab all `.yaml` or `.yml` files in that directory. You can also use multiple `-f` flags to specify multiple files.
 
-Multiple `-f` arguments are accepted to provide multiple files on the command line.
+Important:  Make sure the `git-clone` task (if you're using it) can access the repo at the specified SHA.  If you're testing local code, you'll need to push it first before using `tkn pac resolve | kubectl create -`.
 
-You need to verify that the `git-clone` task (if you use it) can access the
-repository to the SHA. Which means if you test your current source code you need
-to push it first before using `tkn pac resolve|kubectl create -`.
+Keep in mind, when running locally, you need to explicitly tell it which files or directories contain your templates.
 
-Compared with running directly on CI, you need to explicitly specify the list of
-filenames or directories where you have the templates.
+On some clusters, Tekton might have issues converting from v1beta1 to v1, which can cause errors when applying the resolved PipelineRun on a cluster without the bundle feature.  If you run into this, use the `--v1beta1` flag (or `-B` for short) to output the PipelineRun as v1beta1 and sidestep the issue.
 
-On certain clusters, the conversion from v1beta1 to v1 in Tekton may not
-function correctly, leading to errors when applying the resolved PipelineRun on
-a different cluster that doesn't have the bundle feature enabled. To resolve
-this issue, you can use the `--v1beta1` flag (or `-B` for short) to explicitly
-output the PipelineRun as v1beta1 and work around the error.
+The resolver is also smart about secrets!  If it finds `{{ git_auth_secret }}` in your template, it'll ask you for a Git provider token.
 
-When you run the resolver it will try to detect if you have a `{{
-git_auth_secret }}` string inside your template and if there is a match it will
-ask you to provide a Git provider token.
+If you already have a secret matching your repo URL in your namespace, it'll use that.
 
-If you already have an existing secret created in your namespace matching your
-repository URL it will use it.
+You can also provide a token directly with the `-t` or `--providerToken` flag, or set the `PAC_PROVIDER_TOKEN` environment variable.
 
-You can explicitly provide a token on the command line with the `-t` or
-`--providerToken` flag, or you can set the environment variable
-`PAC_PROVIDER_TOKEN` and it will use it instead of asking you.
+Want to skip secret generation altogether? Use the `--no-secret` flag.
 
-With the `--no-secret` flag, you can completely skip any secret generation.
-
-There is no clean-up of the secret after the run.
+Just a heads-up:  Secrets created during `resolve` aren't automatically cleaned up after the run.
 
 {{< /details >}}
 
 {{< details "tkn pac webhook add" >}}
 
-### Configure and create webhook secret for GitHub, GitLab, and Bitbucket Cloud provider
+### `webhook add` Command
 
-`tkn-pac webhook add [-n namespace]`: Allows you to add a new webhook secret for a given provider and update the value of the new webhook secret in the existing `Secret` object used to interact with Pipelines-as-Code
+`tkn-pac webhook add [-n namespace]` -  Need to add a new webhook secret for GitHub, GitLab, or Bitbucket Cloud? This command helps you create one and update the existing `Secret` object Pipelines-as-Code uses.
 
 {{< /details >}}
 
 {{< details "tkn pac webhook update-token" >}}
 
-### Update provider token for existing webhook
+### `webhook update-token` Command
 
-`tkn pac webhook update-token [-n namespace]`: Allows you to update the provider token for an existing `Secret` object to interact with Pipelines-as-Code.
+`tkn pac webhook update-token [-n namespace]` -  Time to update your provider token for an existing webhook? This command lets you update the token in the `Secret` object that Pipelines-as-Code uses.
 
 {{< /details >}}
 
 {{< details "tkn pac info install" >}}
 
-### Installation Info
+### `info install` Command
 
-The `tkn pac info` command provides information about your Pipelines-as-Code
-installation, including its location and version.
+The `tkn pac info` command is like a health check for your Pipelines-as-Code installation. It gives you key details like its location and version.
 
-By default, it displays the version of the Pipelines-as-Code controller and the
-namespace where Pipelines-as-Code is installed. This information is accessible
-to all users on the cluster through a special ConfigMap named
-`pipelines-as-code-info`. This ConfigMap has broad read access in the namespace
-where Pipelines-as-Code is installed.
+By default, it shows you the version of the Pipelines-as-Code controller and the namespace where it's installed.  This info is publicly available to everyone on the cluster through a special ConfigMap called `pipelines-as-code-info`.
 
-If you are a cluster admin, you can also view an overview of all created
-Repositories CR on the cluster, along with their associated URLs.
+If you're a cluster admin, you get the bonus of seeing an overview of all created Repository CRs on the cluster, along with their URLs.
 
-As an admin, if your installation is set up with a [GitHub
-App](../../install/github_apps), you can see the details of the installed
-application and other relevant information, such as the URL endpoint configured
-for your GitHub App. By default, this will display information from the public
-GitHub API, but you can specify a custom GitHub API URL using the
-`--github-api-url` argument.
+Admins with a [GitHub App](../../install/github_apps) setup can also see details about the app and other useful info, like the URL endpoint configured for it.  By default, it pulls data from the public GitHub API, but you can point it to a custom GitHub API URL using the `--github-api-url` argument.
 
 {{< /details >}}
 
 {{< details "tkn pac info globbing" >}}
 
-### Test globbing pattern
+### `info globbing` Command
 
-The `tkn pac info globbing` command allows you to test glob patterns to see if
-they match, for example, when using the `on-patch-change` annotation.
+Want to test out your glob patterns? The `tkn pac info globbing` command is your testing ground, especially handy when using annotations like `on-patch-change`.
 
-Here is how it works, this example:
+Here's how it works (example):
 
 ```bash
 tkn pac info globbing 'docs/***/*.md'
 ```
 
-will match all markdown files in the docs directory and its subdirectories if
-present in the current directory.
+This will check if the glob pattern `'docs/***/*.md'` matches any markdown files in the `docs` directory and its subdirectories in your current location.
 
-By default, it tests the glob pattern against the current directory unless you
-specify the `-d` or `--dir` flag to test against a different directory.
+It defaults to testing against your current directory unless you use the `-d` or `--dir` flag to specify a different directory.
 
-The first argument is the glob pattern to test (you will be prompted for it if
-you don't provide one) as specified by the [glob
-library](https://github.com/gobwas/glob?tab=readme-ov-file#example).
+The first argument is the glob pattern itself (it'll prompt you if you don't provide one).  It uses the [glob library](https://github.com/gobwas/glob?tab=readme-ov-file#example) pattern syntax.
 
-If you want to test against a string to test other annotations that use globbing
-patterns (like `on-target-branch` annotation) you can use the `-s` or `--string`
-flag.
+Need to test against a specific string for annotations like `on-target-branch`? Use the `-s` or `--string` flag.
 
-For example, this will test if the globbing expression `refs/heads/*` matches
-`refs/heads/main`:
+Example:  Does the glob `'refs/heads/*'` match `'refs/heads/main'`?
 
 ```bash
 tkn pac info globbing -s "refs/heads/main" "refs/heads/*"
 ```
 
-#### Example
+#### Example in action
 
 ```bash
-tkn pac info globbing 'docs/***/*.md'
+tkn pac info globbing 'docs/**/*.md'
 ```
 
-This will match all markdown files in the docs directory and its subdirectories if
-present in the current directory.
+This will find all markdown files in the `docs` directory and any folders inside it, assuming they're in your current directory.
 
-You can specify a different directory than the current one by using the -d/--dir flag.
+To test against a different directory, use the `-d/--dir` flag.
 
 {{< /details >}}
 
-## Screenshot
+## `tkn pac` in Action!
 
 ![tkn-plug-in](/images/tkn-pac-cli.png)

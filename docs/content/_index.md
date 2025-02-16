@@ -4,74 +4,55 @@ title: An opinionated CI based on OpenShift Pipelines / Tekton
 ---
 # Pipelines-as-Code
 
-An opinionated CI based on OpenShift Pipelines / Tekton.
+An opinionated CI built on top of OpenShift Pipelines / Tekton.
 
 ## Introduction
 
-Pipelines as code is a project allowing you to define your CI/CD using
-[Tekton](https://tekton.dev) PipelineRuns and Tasks in a file located in your
-source control management (SCM) system, such as GitHub or GitLab. This file is
-then used to automatically create a pipeline for a Pull Request or a Push to a
-branch.
+Pipelines as code is all about defining your CI/CD pipelines with [Tekton](https://tekton.dev) PipelineRuns and Tasks, right in a file within your source code repository (like GitHub or GitLab).  This file then automatically sets up a pipeline whenever you create a Pull Request or push code to a branch.
 
-By storing the pipeline definition in code, it becomes easier to version,
-review, and collaborate on pipeline changes with code changes. Additionally, it
-allows you to view the pipeline status and control its execution directly from
-your SCM, rather than having to switch between multiple systems.
+Think of it this way: your pipeline definition lives alongside your code.  This makes it way easier to track changes, review updates, and collaborate on pipeline tweaks just like you do with your application code. Plus, you can see how your pipelines are doing and control them directly from your code platform – no more jumping between different systems!
 
-This approach enables automation, repeatability, collaboration, and change
-tracking using a Git workflow.
+Basically, it brings automation, consistency, teamwork, and version control to your CI/CD using the Git workflow you already know and love.
 
 ## Features
 
 {{< columns >}} <!-- begin columns block -->
 
-- Pull-request status support: When iterating over a Pull Request. Statuses and
-  Control is done on GitHub.
+- **Pull Request Statuses:**  See the status of your pipeline right in GitHub as you work on your pull request.  No more guessing if your changes are passing CI!
 
-- GitHub Checks API support to set the status of a PipelineRun including rechecks
+- **GitHub Checks API:** Pipeline status updates (including re-checks) are powered by the GitHub Checks API, giving you detailed feedback.
 
-- GitHub Pull Request and Push event support
-
-<--->
-
-- Pull-request "*GitOps*" actions through comments with  `/retest`, `/test <pipeline-name>` and so on.
-
-- Automatic Task resolution in Pipelines (local Tasks, Tekton Hub, and remote URLs)
-
-- Efficient use of GitHub blobs and objects API for retrieving configurations
+- **GitHub Event Support:** Works with both Pull Request and Push events.  Whatever your workflow, we've got you covered.
 
 <--->
 
-- Git events Filtering and support for separate pipelines for each event
+- **GitOps Style PR Actions:**  Want to re-run a test? Just use comments like `/retest` or `/test <pipeline-name>` directly in your pull requests to trigger actions.
 
-- GitLab, Bitbucket Server, Bitbucket Cloud and GitHub Webhook support.
+- **Automatic Task Resolution:** Pipelines automatically find the Tasks they need, whether they are defined locally in your repo, available on Tekton Hub, or living at a remote URL.
 
-- `tkn-pac` plug-in for Tekton CLI for managing pipelines-as-code repositories and bootstrapping.
+- **Efficient Configuration Retrieval:** Smartly uses GitHub's API to grab just the configurations it needs, making things fast.
+
+<--->
+
+- **Git Event Filtering:** Set up different pipelines for different Git events – giving you more control over what runs when.
+
+- **More than just GitHub:** Also supports GitLab, Bitbucket Server, Bitbucket Cloud, and webhooks from other Git platforms. So, wherever your code lives, Pipelines-as-Code can likely work with it.
+
+- **`tkn-pac` CLI Plugin:** Comes with a handy `tkn-pac` plugin for the Tekton CLI to help you manage your pipelines-as-code and get started quickly. It's like having a toolbox specifically for Pipelines-as-Code!
 
 {{< /columns >}}
 
 ## Getting Started
 
-The easiest way to get started is to use the `tkn pac` CLI and its
-[bootstrap](/docs/guide/cli/#commands) command. We recommend you to start
-playing with Pipelines-as-Code with your personal [GitHub](https://github.com/)
-user by installing Pipelines-as-Code on your laptop with
-[Kind](https://kind.sigs.k8s.io/) or [OpenShift
-Local](https://developers.redhat.com/products/openshift-local/overview) and
-explore how it works before installing it on your own cluster.
+The easiest way to dive in? Use the `tkn pac` CLI and its [bootstrap](/docs/guide/cli/#commands) command!  Seriously, it's super simple.
 
-- This [Guide]({{< relref "/docs/install/getting-started.md" >}}) will help you
-  get started by creating a GitHub Application, configuring Pipelines-as-Code,
-  and creating your first PipelineRun from a Pull Request.
-- If you prefer a video, this [walkthrough video](https://youtu.be/cNOqPgpRXQY)
-  will guide you through the process.
+We suggest playing around with Pipelines-as-Code using your personal [GitHub](https://github.com/) account first.  Install it on your laptop using [Kind](https://kind.sigs.k8s.io/) or [OpenShift Local](https://developers.redhat.com/products/openshift-local/overview) and see how it all works before setting it up on your main cluster. Think of it as your personal sandbox to experiment in.
+
+- Check out this [Getting Started Guide]({{< relref "/docs/install/getting-started.md" >}}) to walk through creating a GitHub App, setting up Pipelines-as-Code, and running your first Pipeline from a Pull Request. We promise it's not as scary as it sounds!
+- Prefer watching instead of reading?  This [walkthrough video](https://youtu.be/cNOqPgpRXQY) will show you the ropes.  Grab some popcorn!
 
 ## Documentation
 
-For more details on the different installation methods please follow [the
-installation document](/docs/install/overview) detailing the Pipelines-as-Code
-installation steps.
+Want to know more about different ways to install?  Head over to [the installation document](/docs/install/overview) for all the details and steps. We've got options for everyone.
 
-If you need to use `Pipelines-as-Code` and author `PipelineRuns` you can follow
-the [usage guide](/docs/guide)
+Ready to use Pipelines-as-Code and create your own PipelineRuns?  The [usage guide](/docs/guide) is your friend! It's packed with everything you need to know to get up and running.

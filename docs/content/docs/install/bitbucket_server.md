@@ -2,45 +2,39 @@
 title: Bitbucket Server
 weight: 15
 ---
-# Install Pipelines-As-Code on Bitbucket Server
+# Get Pipelines-as-Code Running on Bitbucket Server
 
-Pipelines-As-Code has a full support of [Bitbucket
-Server](https://www.atlassian.com/software/bitbucket/enterprise).
+Good news! Pipelines-as-Code totally plays nice with [Bitbucket Server](https://www.atlassian.com/software/bitbucket/enterprise).  Let's get you set up.
 
-After following the [installation](/docs/install/installation):
+Assuming you've already gone through the main [installation](/docs/install/installation) steps, here's what's next for Bitbucket Server:
 
-* You will have to generate a personal token as the manager of the Project,
-  follow the steps here:
+* **First things first, you'll need a personal token.**  Think of it as your special key to let Pipelines-as-Code talk to Bitbucket Server.  If you're the project manager, you can create one by following these steps:
 
 <https://confluence.atlassian.com/bitbucketserver/personal-access-tokens-939515499.html>
 
-The token will need to have the `PROJECT_ADMIN` and `REPOSITORY_ADMIN` permissions.
+Make sure this token has both `PROJECT_ADMIN` and `REPOSITORY_ADMIN` permissions.  Why? Because Pipelines-as-Code needs to tinker with project settings and repo stuff.
 
-Note that the token needs to be able to have access to the forked repository in
-pull requests, or it would not be able to process and access the pull request.
+**Important Note:** This token needs to be able to see forked repositories in pull requests.  Otherwise, it'll be blind to changes in those pull requests, and things won't work as expected.
 
-You may want to note somewhere the generated token, or otherwise you will have to
-recreate it.
+Pro-tip: Jot down that token somewhere safe!  If you lose it, you'll have to create a new one.
 
-* Create a Webhook on the repository following this guide :
+* **Next up, let's set up a Webhook in your repository.**  Webhooks are like little messengers that tell Pipelines-as-Code whenever something interesting happens in your repo (like code being pushed or a pull request opening).  Here’s Atlassian's guide on how to create one:
 
 <https://support.atlassian.com/bitbucket-cloud/docs/manage-webhooks/>
 
-* Add a Secret or generate a random one with :
+* **Time for a Secret!**  You can either use a secret you already have or generate a random one.  If you're going random, this command will do the trick:
 
 ```shell
   head -c 30 /dev/random | base64
 ```
 
-* Set the payload URL to Pipelines-as-Code public URL. On OpenShift, you can get the
-  public URL of the Pipelines-as-Code route like this :
+* **Point that Webhook to Pipelines-as-Code.** You'll need to give the Webhook the public URL of your Pipelines-as-Code setup.  If you're running on OpenShift, you can grab that URL with this command:
 
   ```shell
   echo https://$(oc get route -n pipelines-as-code pipelines-as-code-controller -o jsonpath='{.spec.host}')
   ```
 
-* [Refer to this screenshot](/images/bitbucket-server-create-webhook.png) on
-  which events to handle on the Webhook. The individual events to select are :
+* **Check out [this screenshot](/images/bitbucket-server-create-webhook.png)** to see which events your Webhook needs to watch out for.  Specifically, you'll want to select these:
 
   * Repository -> Push
   * Repository -> Modified
@@ -48,7 +42,9 @@ recreate it.
   * Pull Request -> Source branch updated
   * Pull Request -> Comments added
 
-  * Create a secret with personal token in the `target-namespace`
+  Basically, we want to know when code is pushed, repos are tweaked, pull requests pop up, branches in pull requests change, and when people comment on pull requests.
+
+  * **Now, let's create a secret in your `target-namespace`** to store that personal token we made earlier.  Run this command, replacing `TOKEN_AS_GENERATED_PREVIOUSLY` and `SECRET_AS_SET_IN_WEBHOOK_CONFIGURATION` with your actual token and webhook secret:
 
   ```shell
   kubectl -n target-namespace create secret generic bitbucket-server-webhook-config \
@@ -56,9 +52,9 @@ recreate it.
     --from-literal webhook.secret="SECRET_AS_SET_IN_WEBHOOK_CONFIGURATION"
   ```
 
-* And finally create Repository CRD with the secret field referencing it.
+* **Last step: create a Repository CRD and tell it to use that secret.**  This is how Pipelines-as-Code knows where to find your Bitbucket Server details.
 
-  * Here is an example of a Repository CRD :
+  * Here’s an example of what your Repository CRD might look like:
 
 ```yaml
   ---
@@ -70,30 +66,28 @@ recreate it.
   spec:
     url: "https://bitbucket.com/workspace/repo"
     git_provider:
-      # make sure you have the right bitbucket server api url without the
-      # /api/v1.0 usually the # default install will have a /rest suffix
+      # Double-check your Bitbucket Server API URL. It's usually your base URL with "/rest" at the end, *not* "/api/v1.0".
+      # A default install will often have a "/rest" suffix.
       url: "https://bitbucket.server.api.url/rest"
       user: "your-bitbucket-username"
       secret:
         name: "bitbucket-server-webhook-config"
-        # Set this if you have a different key in your secret
+        # If your token key in the secret is different from "provider.token", specify it here:
         # key: "provider.token"
       webhook_secret:
         name: "bitbucket-server-webhook-config"
-        # Set this if you have a different key for your secret
+        # If your webhook secret key in the secret is different from "webhook.secret", specify it here:
         # key: "webhook.secret"
 ```
 
-## Notes
+## Quick Notes
 
-* `git_provider.secret` cannot reference a secret in another namespace,
-  Pipelines as code always assumes it will be the same namespace as where the
-  repository has been created.
+* Heads up! The `git_provider.secret` needs to be in the *same namespace* as your Repository CRD. Pipelines-as-Code always assumes they're neighbors.
 
-* `tkn-pac create` and `bootstrap` is not supported on Bitbucket Server.
+* Just so you know, the `tkn-pac create` and `bootstrap` commands aren't currently supported on Bitbucket Server. You'll need to set things up manually as described above.
 
 {{< hint danger >}}
 
-* You can only reference user by the `ACCOUNT_ID` in owner file.
+* One more thing about owners:  When you're setting up owners, you can only refer to users by their `ACCOUNT_ID`. Keep that in mind!
 
 {{< /hint >}}

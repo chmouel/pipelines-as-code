@@ -5,42 +5,19 @@ weight: 50
 
 # Incoming webhook
 
-Pipelines-as-Code support the concept of incoming webhook URL. It let you
-trigger PipelineRun in a Repository using a shared secret and URL,
-instead of creating a new code iteration.
+Want to kick off your Tekton pipelines without pushing code every time? Incoming webhooks in Pipelines as Code are your friend! They let you trigger a pipeline run in your repository using a secret URL – no new code commit needed.
 
 ## Incoming Webhook URL
 
-To use incoming webhooks in Pipelines-as-Code, you must configure the
-incoming field in your Repository CRD. This field references a `Secret`, which
-serves as the shared secret, as well as the branches targeted by the incoming
-webhook. Once configured, Pipelines-as-Code will match `PipelineRuns` located in
-your `.tekton` directory if the `on-event` annotation of the targeted pipelinerun is
-targeting a push or incoming event.
+To get started with incoming webhooks, you need to tweak your Repository Custom Resource Definition (CRD).  In the `incoming` section, you'll point to a `Secret` (that's your shared password!) and tell Pipelines as Code which branches should respond to these webhook calls.  Once that's set, Pipelines as Code will look in your `.tekton` directory for `PipelineRuns` that are set up to respond to `incoming` or `push` events using the `on-event` annotation.
 
 {{< hint info >}}
-If you are not using the github app provider (ie: webhook based provider) you
-will need to have a `git_provider` spec to specify a token.
-
-Additionally since we are not able to detect automatically the type of provider
-on URL. You will need to add it to the `git_provider.type` spec. Supported
-values are:
-
-- github
-- gitlab
-- bitbucket-cloud
-
-Whereas for `github-apps` this doesn't need to be added.
+**Heads up!** If you're not using the GitHub App (i.e., you're using webhook-based providers), you'll need to add a `git_provider` section in your Repository CRD and specify a token. Also, because Pipelines as Code can't always guess your provider from the URL, you'll need to tell it what type it is in `git_provider.type`.  The options are: `github`, `gitlab`, or `bitbucket-cloud`.  If you *are* using GitHub Apps, you can skip this part.
 {{< /hint >}}
 
 ### GithubApp
 
-The example below illustrates the use of GithubApp to trigger a PipelineRun
-based on an incoming webhook URL.
-
-The Repository Custom Resource (CR) specifies the target branch as
-main and includes an incoming webhook URL with a shared password stored in a
-Secret called `repo-incoming-secret`:
+Let's see how this works with GitHub Apps.  Imagine you want to trigger a PipelineRun when something happens (but not a code push!).  First, in your Repository CR, you tell Pipelines as Code you're watching the `main` branch and setting up an incoming webhook with a secret password stored in a Secret called `repo-incoming-secret`:
 
 ```yaml
 ---
@@ -59,7 +36,7 @@ spec:
       type: webhook-url
 ```
 
-A PipelineRun is then annotated to target the incoming event and the main branch:
+Next, you need a `PipelineRun` that knows to listen for these incoming webhook events on the `main` branch:
 
 ```yaml
 apiVersion: tekton.dev/v1
@@ -71,8 +48,7 @@ metadata:
     pipelinesascode.tekton.dev/on-target-branch: "[main]"
 ```
 
-A secret called repo-incoming-secret is utilized as a shared password to ensure
-that only authorized users can initiate the `PipelineRun`:
+And of course, you need that `repo-incoming-secret` Secret with your super-secret password to keep things secure:
 
 ```yaml
 apiVersion: v1
@@ -85,42 +61,19 @@ stringData:
   secret: very-secure-shared-secret
 ```
 
-After setting this up, you will be able to start the PipelineRun with a POST
-request sent to the controller URL appended with /incoming. The request
-includes the very-secure-shared-secret, the repository name (repo), the target
-branch (main), and the PipelineRun name.
-
-You can use the `generateName` field as the PipelineRun name but you will need to make sure to specify the hyphen (-) at the end.
-
-As an example here is a curl snippet starting the PipelineRun:
+Once all that's in place, you can trigger your `PipelineRun` by sending a `POST` request to the Pipelines as Code controller URL, adding `/incoming` at the end.  Make sure to include your secret, repository name (`repo`), branch (`main`), and the name of your `PipelineRun` in the request.  If you want Pipelines as Code to generate a name for your `PipelineRun`, you can use `generateName` but remember to add a hyphen at the end!  Here’s a `curl` example to get you started:
 
 ```shell
 curl -X POST 'https://control.pac.url/incoming?secret=very-secure-shared-secret&repository=repo&branch=main&pipelinerun=target_pipelinerun'
 ```
 
-in this snippet, note two things the `"/incoming"` path to the controller URL
-and the `"POST"` method to the URL rather than a simple `"GET"`.
+Notice a couple of things in that command: we're using `"/incoming"` in the URL, and it's a `POST` request, not a `GET`.
 
-It is important to note that when the PipelineRun is triggered, Pipelines as
-Code will treat it as a push event and will have the capability to report the
-status of the PipelineRuns. To obtain a report or a notification, a finally
-task can be added directly to the Pipeline, or the Repo CRD can be inspected
-using the tkn pac CLI. The [statuses](/docs/guide/statuses) documentation
-provides guidance on how to achieve this.
+**Important:** When your webhook triggers a `PipelineRun`, Pipelines as Code treats it *just like* a regular code push event.  This means you still get all the cool status reporting features!  Want to get notified or see the status? You can add a `finally` task to your Pipeline, or check the Repository CR using the `tkn pac CLI`.  Check out the [statuses](/docs/guide/statuses) docs for all the details.
 
 ### Passing dynamic parameter value to incoming webhook
 
-You can define the value of a any Pipelines-as Code Parameters (including
-redefining the [builtin ones](../authoringprs#default-parameters).
-
-You need to list the overridden or added params in the params section of the
-Repo CR configuration and pass the value in the json body of the incoming webhook
-request.
-
-You will need to pass the `content-type` as `application/json` in the header of
-your URL request.
-
-Here is a Repository CR letting passing the `pull_request_number` dynamic variable:
+Want to get fancy and pass in custom values to your `PipelineRun` when you trigger it with a webhook?  No problem! You can set values for *any* Pipelines as Code parameters, even the built-in ones.  Just list the parameters you want to use in the `params` section of your Repository CR configuration. Then, when you send your webhook request, include those values in JSON format in the request body.  Don't forget to set the `Content-Type` header to `application/json`.  Here's an example Repository CR that lets you pass in a `pull_request_number`:
 
 ```yaml
 ---
@@ -141,19 +94,17 @@ spec:
       type: webhook-url
 ```
 
-and here is a curl snippet passing the `pull_request_number` value:
+And here's how you'd send that `pull_request_number` value with `curl`:
 
 ```shell
 curl -H "Content-Type: application/json" -X POST "https://control.pac.url/incoming?repository=repo&branch=main&secret=very-secure-shared-secret&pipelinerun=target_pipelinerun" -d '{"params": {"pull_request_number": "12345"}}'
 ```
 
-The parameter value of `pull_request_number` will be set to `12345` when using the variable `{{pull_request_number}}` in your PipelineRun.
+Now, anywhere in your `PipelineRun` you use `{{pull_request_number}}`, it'll be replaced with `12345`.  Cool, right?
 
 ### Using incoming webhook with GitHub Enterprise application
 
-When using a GitHub application over to a GitHub Enterprise, you will need to
-specify the `X-GitHub-Enterprise-Host` header when making the incoming webhook
-request. For example when using curl:
+Using a GitHub App with GitHub Enterprise?  No sweat.  Just need to add one extra header to your webhook requests: `X-GitHub-Enterprise-Host`.  For example, with `curl`:
 
 ```shell
 curl -H "X-GitHub-Enterprise-Host: github.example.com" -X POST "https://control.pac.url/incoming?repository=repo&branch=main&secret=very-secure-shared-secret&pipelinerun=target_pipelinerun"
@@ -161,10 +112,7 @@ curl -H "X-GitHub-Enterprise-Host: github.example.com" -X POST "https://control.
 
 ### Using incoming webhook with webhook based providers
 
-Webhook based providers (i.e: GitHub Webhook, GitLab, Bitbucket etc..) supports
-incoming webhook, using the token provided in the git_provider section.
-
-Here is an example of a Repository CRD matching the target branch main with a GitHub webhook provider:
+If you're using webhook-based providers like GitHub Webhooks, GitLab, or Bitbucket, incoming webhooks work great too!  They'll use the token you already set up in the `git_provider` section.  Here’s a Repository CR example for a GitHub webhook provider, targeting the `main` branch:
 
 ```yaml
 apiVersion: "pipelinesascode.tekton.dev/v1alpha1"
@@ -186,5 +134,4 @@ spec:
       type: webhook-url
 ```
 
-As noted in the section above, you need to specify a incoming secret inside
-the `repo-incoming-secret` Secret.
+And just like we said before, you'll still need to set up that `repo-incoming-secret` Secret.

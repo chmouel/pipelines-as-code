@@ -2,25 +2,20 @@
 title: PipelineRuns Cleanup
 weight: 8
 ---
-# PipelineRuns Cleanups
+# Cleaning Up Old PipelineRuns
 
-There can be many PipelineRuns into a user namespace and Pipelines-as-Code has
-the ability to only keep a certain amount of PipelineRuns and cleaning the old
-ones.
+Over time, you might end up with tons of PipelineRuns in your namespace. Pipelines-as-Code can help you keep things manageable by automatically deleting older runs, so you only keep a certain number around.
 
-When your PipelineRun has this annotation :
+To tell Pipelines-as-Code how many PipelineRuns to keep, just add this annotation to your PipelineRun:
 
 ```yaml
 pipelinesascode.tekton.dev/max-keep-runs: "maxNumber"
 ```
 
-Pipelines-as-Code sees this and will start cleaning up right after one of the
-PipelineRun finishes to a successful execution keeping only the last `maxNumber` of
-PipelineRuns.
+Once you do that, Pipelines-as-Code will kick in after each successful PipelineRun and clean up the older ones, making sure you only have the last `maxNumber` of runs.
 
-It will skip the `Running` or `Pending` PipelineRuns but will not skip the
-PipelineRuns with `Unknown` status.
+It's smart enough to leave any PipelineRuns that are currently `Running` or `Pending` alone. However, it *will* cleanup PipelineRuns with an `Unknown` status.
 
 {{< hint info >}}
-The setting can be as well configured globally for a cluster via the [Pipelines-as-Code ConfigMap]({{< relref "/docs/install/settings.md" >}})
+ Heads up! You can also set this up for your whole cluster in the [Pipelines-as-Code ConfigMap]({{< relref "/docs/install/settings.md" >}}) if you want it to apply to everyone.
 {{< /hint >}}

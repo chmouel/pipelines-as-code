@@ -2,67 +2,72 @@
 title: Kubernetes
 weight: 20
 ---
-# Kubernetes
+# Kubernetes - Running Pipelines as Code on Kube
 
-Pipelines-as-Code works on kubernetes/minikube/kind.
+Pipelines as Code is built to run just about anywhere Kubernetes goes - whether that's Kubernetes itself, minikube for local testing, or kind for spinning up clusters in Docker.  It's pretty flexible!
 
-## Prerequisites
+## First Things First: Prerequisites
 
-You will need to pre-install the
-[pipeline](https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml)
-`release.yaml` file on your kubernetes cluster.
+Before we get rolling, you'll need a couple of things prepped and ready:
 
-You will need at least a kubernetes version greater than 1.23
+*   **Tekton Pipelines:** You gotta have Tekton Pipelines installed on your Kubernetes cluster. Think of it as the engine that powers Pipelines as Code.  Grab the [release.yaml](https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml) file and apply it to your cluster.
 
-## Install
+*   **Kubernetes Version:** Make sure your Kubernetes is up to date. You'll need at least version 1.23 or newer to play nicely with Pipelines as Code.
 
-The release YAML to install pipelines are for the released version :
+## Let's Get it Installed!
+
+Ready to get Pipelines as Code up and running?  Choose your flavor:
+
+For the **stable release** (recommended for most folks):
 
 ```shell
 kubectl apply -f https://raw.githubusercontent.com/openshift-pipelines/pipelines-as-code/stable/release.k8s.yaml
 ```
 
-and for the nightly :
+Want to live on the edge and try out the **nightly build** (for testing latest features, might be a bit rough around the edges):
 
 ```shell
 kubectl apply -f https://raw.githubusercontent.com/openshift-pipelines/pipelines-as-code/nightly/release.k8s.yaml
 ```
 
-## Verify
+## Quick Check: Is it Working?
 
-Ensure that the pipelines-as-code controller, webhook, and watcher have come up healthy, for example:
+Let's make sure everything spun up correctly.  Run this command to see the status of the Pipelines as Code components:
 
 ```shell
 $ kubectl get deployment -n pipelines-as-code
+```
+
+You should see something like this, with all deployments showing `READY   1/1`:
+
+```
 NAME                           READY   UP-TO-DATE   AVAILABLE   AGE
 pipelines-as-code-controller   1/1     1            1           43h
 pipelines-as-code-watcher      1/1     1            1           43h
 pipelines-as-code-webhook      1/1     1            1           43h
 ```
 
-All three deployments should have all pods ready before moving on to ingress setup.
+Make sure all three are reporting `READY` before moving on to the next step – setting up Ingress.
 
-## Ingress
+## Making it Public: Ingress Setup
 
-You will need a
-[`Ingress`](https://kubernetes.io/docs/concepts/services-networking/ingress/)
-setup to point to make your pipelines-as-code controller available to `Github`,
-`Gitlab` or other `Git` providers.
+To let GitHub, GitLab, or other Git providers talk to your Pipelines as Code controller, you'll need to set up an [`Ingress`](https://kubernetes.io/docs/concepts/services-networking/ingress/).  Think of it as creating a public doorway to your controller.
 
-The ingress configuration depends on your Kubernetes provider. See below for
-some examples.
+The exact way you configure Ingress depends on your Kubernetes setup.  Here are a couple of examples to give you a head start.
 
-Either the ingress hostname or its IP address may be used as the webhook URL.
-You'll have to provide this URL when connecting Pipelines-as-Code to
-your Git provider. You can find the ingress's address via
-`kubectl get ingress pipelines-as-code -n pipelines-as-code`.
+You'll need either the hostname or the IP address of your Ingress to use as the webhook URL later.  You can usually find this by running: `kubectl get ingress pipelines-as-code -n pipelines-as-code`.
 
-If you are quickly trying pipelines-as-code and do not want to setup the Ingress
-access, the `tkn pac bootstrap` [cli](../../guide/cli) command will let you
-set-up a [gosmee](https://github.com/chmouel/gosmee) deployment using the
-webhook URL remote forwarder `https://hook.pipelinesascode.com`.
+**Quick & Dirty Testing (No Ingress Needed)**
 
-### [GKE](https://cloud.google.com/kubernetes-engine)
+If you're just kicking the tires and don't want to mess with Ingress just yet, the `tkn pac bootstrap` [cli](../../guide/cli) command has a neat trick. It can set up a [gosmee](https://github.com/chmouel/gosmee) deployment for you, using `https://hook.pipelinesascode.com` as a webhook forwarder.  Handy for quick experiments!
+
+### Example Ingress Configs
+
+Here are a couple of common Ingress examples to get you going:
+
+### Google Kubernetes Engine (GKE)
+
+If you're running on GKE, this should get you started:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -82,7 +87,9 @@ spec:
         number: 8080
 ```
 
-### [Nginx Ingress Controller](https://kubernetes.github.io/ingress-nginx/)
+### Nginx Ingress Controller
+
+Using the popular Nginx Ingress Controller?  Here's a sample config:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -107,11 +114,8 @@ spec:
         pathType: Prefix
 ```
 
-In this example `webhook.host.tld` is the hostname for your pipeline's
-controller to fill as the webhook URL in the Git provider.
+**Important:**  In this example, `webhook.host.tld` is just a placeholder! You'll need to replace it with the actual hostname you're using for your Pipelines as Code controller.  This is the URL you'll punch in when setting up webhooks in your Git provider.
 
-## Tekton Dashboard integration
+## Tekton Dashboard Love
 
-If you have [Tekton Dashboard](https://github.com/tektoncd/dashboard). You can
-just add the key `tekton-dashboard-url` in the `pipelines-as-code` config map
-set to the full URL of the `Ingress` host to get tekton dashboard logs URL.
+If you're using the [Tekton Dashboard](https://github.com/tektoncd/dashboard) (and you totally should, it's awesome!), you can make Pipelines as Code even better!  Just add the `tekton-dashboard-url` key to the `pipelines-as-code` config map.  Point it to the full URL of your Ingress for the dashboard, and bam! You'll get direct links to Tekton Dashboard logs right from Pipelines as Code.  Sweet, right?

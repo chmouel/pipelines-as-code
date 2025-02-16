@@ -3,41 +3,31 @@ title: GitHub Webhook
 weight: 12
 ---
 
-# Use Pipelines-as-Code with GitHub Webhook
+# Pipelines-as-Code with GitHub Webhooks (No App Needed!)
 
-If you are not able to create a GitHub application you can use Pipelines-as-Code with [GitHub Webhook](https://docs.github.com/en/developers/webhooks-and-events/webhooks/creating-webhooks) on your repository.
+Want to use Pipelines-as-Code but can't (or don't want to) set up a full GitHub Application? No problem! You can totally get things rolling using good ol' [GitHub Webhooks](https://docs.github.com/en/developers/webhooks-and-events/webhooks/creating-webhooks) directly on your repository.
 
-Using Pipelines-as-Code through GitHub webhook does not give you access to the
-[GitHub CheckRun
-API](https://docs.github.com/en/rest/guides/getting-started-with-the-checks-api),
-therefore the status of
-the tasks will be added as a Comment on the PullRequest and not through the **Checks** Tab.
+Now, heads up: going the webhook route means you won't have access to the fancy [GitHub CheckRun API](https://docs.github.com/en/rest/guides/getting-started-with-the-checks-api).  Instead of seeing your task statuses in the "Checks" tab, they'll show up as good old comments right on your Pull Request.  Still easy to follow, just a bit different.
 
-gitops comment (ie: /retest /ok-to-test) with GitHub webhook is
-not supported. If you need to restart the CI you will need to generate a new
-commit. You can make it quick with this command line snippet (adjust branchname to the name of
-the branch) :
+Also, those handy `gitops` commands like `/retest` or `/ok-to-test`?  They won't work with webhooks, unfortunately.  If you need to kick off your CI again, you'll need to make a fresh commit.  Don't worry, it can be super quick!  Here's a little command snippet to speed things up (just swap out `branchname` with your actual branch name):
 
 ```console
 git commit --amend -a --no-edit && git push --force-with-lease origin branchname
 ```
 
-## Create GitHub Personal Access Token
+## First Step: Grab a GitHub Personal Access Token
 
-After Pipelines-as-Code [installation](/docs/install/installation), you will
-need to create a GitHub personal access token for Pipelines-as-Code GitHub API
-operations.
+After you've got Pipelines-as-Code [installed](/docs/install/installation), you're going to need a GitHub personal access token.  This is basically a key that lets Pipelines-as-Code talk to the GitHub API and do its thing.
 
-Follow this guide to create a personal token:
+GitHub has a guide to walk you through creating one of these tokens right here:
 
 <https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token>
 
-### [Fine grained token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token#creating-a-fine-grained-personal-access-token)
+### Fancy Fine-Grained Tokens (Recommended!)
 
-If you want to generate a fine grained token (which is more secure), you can
-scope your token to the repository you want tested.
+If you're all about extra security (and who isn't?), you can create a "fine-grained" token.  These are cooler because you can limit them to only work on the specific repository you want to test.
 
-The permissions needed are :
+Here's the permission checklist you'll need:
 
 | Name            | Access         |
 |:---------------:|:--------------:|
@@ -48,44 +38,35 @@ The permissions needed are :
 | Pull request    | Read and Write |
 | Webhooks        | Read and Write |
 
-### [Classic Tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token#creating-a-personal-access-token-classic)
+### Old-School "Classic" Tokens
 
-Depending on the Repository access scope, the token will need different
-permissions. For public repositories the scope are:
+If you're going with the "classic" token route, the permissions depend on whether your repository is public or private:
 
-* `public_repo` scope
-
-For private repositories the scope are:
-
-* The whole `repo` scope
+* **Public Repos:** You just need the `public_repo` scope. Easy peasy!
+* **Private Repos:** You'll need the full `repo` scope.
 
 {{< hint info >}}
-You can click directly on this link to prefill the permissions needed
+Want to skip a step?  Click this link – it'll pre-select the permissions you need for a classic token!
 <https://github.com/settings/tokens/new?description=pipelines-as-code-token&scopes=repo>
 {{< /hint  >}}
 
-You will have to note the generated token somewhere, or otherwise you will have to recreate it.
+Make sure you jot down that token somewhere safe right after you create it. GitHub only shows it to you once! If you lose it, you'll have to make a new one.
 
-For best security practice you will probably want to have a short token
-expiration (like the default 30 days). GitHub will send you a notification email
-if your token expires. Follow [Update Token](#update-token) to replace expired token with a new one.
+For better security, you probably want to set your token to expire after a while (like the default 30 days). GitHub will send you a heads-up email when it's about to expire.  Don't worry, we'll cover how to [update your token](#update-token) when that happens.
 
-**NOTE:** If you are going to configure webhook through CLI, you must also add a scope `admin:repo_hook`
+**Important Note:**  Planning to use the command-line tool (`tkn pac`) to set up your webhook?  Then you'll also need to add the `admin:repo_hook` scope to your token.
 
-## Create a `Repository` and configure webhook
+## Setting Up Your Repository and Webhook
 
-There are two ways to create the `Repository` and configure the webhook:
+Alright, let's get your repository hooked up! You've got two main ways to do this:
 
-### Create a `Repository` and configure webhook using the `tkn pac` tool
+### Option 1: The Speedy `tkn pac` Tool Method
 
-* Use the [`tkn pac create repo`](/docs/guide/cli) command to
-  configure a webhook and create the `Repository` CR.
+* The easiest way is to use the [`tkn pac create repo`](/docs/guide/cli) command.  This handy tool will not only create the `Repository` resource in Kubernetes but also automatically configure the webhook for you!
 
-  You need to have a personal access token created with `admin:repo_hook` scope. `tkn pac` will use this token to configure the
-webhook, and add it in a secret in the cluster which will be used by Pipelines-As-Code controller for accessing the `Repository`.
-After configuring the webhook, you will be able to update the token in the secret with just the scopes mentioned [here](#create-github-personal-access-token).
+  Remember that personal access token you made earlier?  If you're using `tkn pac create repo`, you'll need one with the `admin:repo_hook` scope.  `tkn pac` uses this to set up the webhook initially and then stores it securely in your cluster.  After the webhook is set up, you can actually switch to a token with fewer permissions (just the ones we talked about in the [token section](#create-github-personal-access-token)).
 
-Below is the sample format for `tkn pac create repo`
+Here's a sneak peek at what using `tkn pac create repo` looks like:
 
 ```shell script
 $ tkn pac create repo
@@ -111,50 +92,51 @@ $ tkn pac create repo
 
 ```
 
-### Create a `Repository` and configure webhook manually
+### Option 2: The Manual Webhook Setup
 
-* Go to your repository or organization **Settings** --> **Webhooks** and click on **Add webhook** button.
+* If you prefer to do things by hand, head over to your repository (or organization) **Settings** then **Webhooks** and hit that **Add webhook** button.
 
-  * Set the **Payload URL** to Pipelines-as-Code controller public URL. On OpenShift, you can get the public URL of the Pipelines-as-Code controller like this:
+  * For the **Payload URL**, you'll need the public address of your Pipelines-as-Code controller.  If you're on OpenShift, you can grab it with this command:
 
     ```shell
     echo https://$(oc get route -n pipelines-as-code pipelines-as-code-controller -o jsonpath='{.spec.host}')
     ```
 
-  * Choose Content type as **application/json**
+  * Make sure to set the **Content type** to **application/json**.
 
-  * Add a Webhook secret or generate a random one with this command (and note it, we will need it later):
+  * Now for the **Webhook secret**. You can either type in your own secret or generate a random one using this command (and remember to keep it safe!):
 
     ```shell
     head -c 30 /dev/random | base64
     ```
 
-  * Click "Let me select individual events" and select these events:
+  * Under "Which events would you like to trigger this webhook?", choose "Let me select individual events" and check these boxes:
     * Commit comments
     * Issue comments
     * Pull request
     * Pushes
 
     {{< hint info >}}
-    [Refer to this screenshot](/images/pac-direct-webhook-create.png) to verify you have properly configured the webhook.
+    Double-check your webhook settings against [this screenshot](/images/pac-direct-webhook-create.png) just to be sure everything is set up right.
     {{< /hint >}}
 
-  * Click on **Add webhook**
+  * Finally, click **Add webhook**.
 
-* You can now create a [`Repository CRD`](/docs/guide/repositorycrd).
-  It will have:
+* Next up, you need to create a [`Repository CRD`](/docs/guide/repositorycrd) in Kubernetes. This tells Pipelines-as-Code about your repository and how to connect to it.
 
-  A reference to a Kubernetes **Secret** containing the Personal token as generated previously and another reference to a Kubernetes **Secret** to validate the webhook payload as set previously in your webhook configuration.
+  This `Repository` resource will need to point to two Kubernetes **Secrets**: one holding your personal access token and the other holding the webhook secret you just set up.
 
-* Create the `Secret` with the personal token and webhook secret in the `target-namespace` (where you are planning to run your pipeline CI):
+* Let's create those Secrets in the namespace where you want your pipelines to run (we'll call it `target-namespace`):
 
   ```shell
   kubectl -n target-namespace create secret generic github-webhook-config \
-    --from-literal provider.token="TOKEN_AS_GENERATED_PREVIOUSLY" \
-    --from-literal webhook.secret="SECRET_AS_SET_IN_WEBHOOK_CONFIGURATION"
+    --from-literal provider.token="YOUR_GITHUB_TOKEN_HERE" \
+    --from-literal webhook.secret="YOUR_WEBHOOK_SECRET_HERE"
   ```
 
-* Create `Repository CRD` referencing everything :
+  **(Replace `YOUR_GITHUB_TOKEN_HERE` and `YOUR_WEBHOOK_SECRET_HERE` with the actual values!)**
+
+* Now, create the `Repository CRD` itself.  Here's a basic example:
 
   ```yaml
   ---
@@ -168,25 +150,23 @@ $ tkn pac create repo
     git_provider:
       secret:
         name: "github-webhook-config"
-        # Set this if you have a different key in your secret
+        # Uncomment and set this if your token key in the secret is different
         # key: "provider.token"
       webhook_secret:
         name: "github-webhook-config"
-        # Set this if you have a different key for your secret
+        # Uncomment and set this if your webhook secret key is different
         # key: "webhook.secret"
   ```
 
-## GitHub webhook Notes
+## Webhook Secret Notes
 
-* Pipelines as code always assumes that the `Secret` is in the same namespace where the `Repository` has been created.
+* Just a heads-up: Pipelines-as-Code always expects the `Secret` to be in the same namespace as the `Repository` resource. Keep that in mind when you're setting things up!
 
-## Add webhook secret
+## Adding a Webhook Secret Later
 
-* For an existing `Repository`, if webhook secret has been deleted (or you want to add a new webhook to project settings) for GitHub,
-  use `tkn pac webhook add` command to add a webhook to project repository settings, as well as update the `webhook.secret`
-  key in the existing `Secret` object without updating `Repository`.
+* Oops, forgot to add a webhook secret, or need to update it?  No sweat!  If you've already got a `Repository` set up, you can use the `tkn pac webhook add` command.  This will add a webhook to your GitHub project settings and update the `webhook.secret` key in your existing Kubernetes `Secret` – all without messing with your `Repository` resource.
 
-Below is the sample format for `tkn pac webhook add`
+Here's how `tkn pac webhook add` works:
 
 ```shell script
 $ tkn pac webhook add -n repo-pipelines
@@ -200,20 +180,17 @@ $ tkn pac webhook add -n repo-pipelines
 
 ```
 
-**Note:** If `Repository` exist in a namespace other than the `default` namespace, use `tkn pac webhook add [-n namespace]`.
-  In the above example, `Repository` exist in the `repo-pipelines` namespace rather than the `default` namespace; therefore
-  the webhook was added in the `repo-pipelines` namespace.
+**Important:** If your `Repository` isn't in the `default` namespace, remember to use `tkn pac webhook add [-n namespace]`.  In the example above, the `Repository` was in the `repo-pipelines` namespace, so that's where the webhook got added.
 
-## Update token
+## Updating Your GitHub Token
 
-There are two ways to update the provider token for the existing `Repository`:
+Tokens expire, it happens!  When yours does, here's how to update it:
 
-### Update using tkn pac cli
+### Easy Update with `tkn pac`
 
-* Use the [`tkn pac webhook update-token`](/docs/guide/cli) command which
-  will update provider token for the existing `Repository` CR.
+* The simplest way is to use the [`tkn pac webhook update-token`](/docs/guide/cli) command.  It'll update the token in your existing `Repository` resource in a flash.
 
-Below is the sample format for `tkn pac webhook update-token`
+Here's a quick example:
 
 ```shell script
 $ tkn pac webhook update-token -n repo-pipelines
@@ -223,16 +200,13 @@ $ tkn pac webhook update-token -n repo-pipelines
 
 ```
 
-**NOTE:** If `Repository` exist in a namespace other than the `default` namespace, use `tkn pac webhook update-token [-n namespace]`.
-  In the above example, `Repository` exist in the `repo-pipelines` namespace rather than the `default` namespace; therefore
-  the webhook token updated in the `repo-pipelines` namespace.
+**Remember:** If your `Repository` isn't in the `default` namespace, use `tkn pac webhook update-token [-n namespace]`.  Just like before, the example above shows updating the token in the `repo-pipelines` namespace.
 
-### Update by changing `Repository` YAML or using `kubectl patch` command
+### Manual Update via YAML or `kubectl patch`
 
-When you have regenerated a new token, you must update it in the cluster.
-For example, you can replace `$NEW_TOKEN` and `$target_namespace` with their respective values:
+If you're more of a hands-on type, or just prefer using `kubectl`, you can update the token directly.
 
-You can find the secret name in the `Repository` CR.
+First, find the name of the Secret in your `Repository` resource's YAML:
 
   ```yaml
   spec:
@@ -241,6 +215,11 @@ You can find the secret name in the `Repository` CR.
         name: "github-webhook-config"
   ```
 
+Then, replace `$NEW_TOKEN` and `$target_namespace` in the command below with your new token and the correct namespace, and run this:
+
 ```shell
 kubectl -n $target_namespace patch secret github-webhook-config -p "{\"data\": {\"provider.token\": \"$(echo -n $NEW_TOKEN|base64 -w0)\"}}"
 ```
+
+That should get you all set! Let me know if anything is unclear or if you have
+more questions.

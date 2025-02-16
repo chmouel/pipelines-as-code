@@ -1,46 +1,45 @@
 ---
-title: Custom certificates
+title: Custom Certificates for Private Git Repos
 weight: 4
 ---
-# Custom certificates
+# Dealing with Custom Certificates
 
-If you need to configure Pipelines-as-Code with a Git repository that
-requires a privately signed or custom certificate to access, then you will
-need to expose the certificate to Pipelines-as-Code.
+Got a private Git repo that needs a special certificate to access?  No problem! If you're using Pipelines as Code and your Git repository uses a privately signed or custom certificate, you'll need to let Pipelines as Code know about it. This guide will show you how.
 
-## OpenShift
+## OpenShift Users
 
-If you have installed Pipelines-as-Code through the OpenShift Pipelines
-operator, then you will need to [add your custom certificate to the cluster via
-the Proxy object.](https://docs.openshift.com/container-platform/4.11/networking/configuring-a-custom-pki.html#nw-proxy-configure-object_configuring-a-custom-pki)
-The operator will expose the certificate in all OpenShift Pipelines
-components and workloads, including Pipelines-as-Code.
+Using OpenShift? Awesome! If you installed Pipelines as Code using the OpenShift Pipelines operator, the easiest way to handle custom certificates is through OpenShift itself.  Just [add your certificate to your cluster's Proxy object](https://docs.openshift.com/container-platform/4.11/networking/configuring-a-custom-pki.html#nw-proxy-configure-object_configuring-a-custom-pki).  OpenShift will then make sure that certificate is available everywhere, including Pipelines as Code.  Easy peasy!
 
-## Kubernetes
+## Kubernetes Folks
 
-### Create a ConfigMap containing the certificate
+If you're running Kubernetes directly, here's how to get those custom certificates working.  It's a few more steps than OpenShift, but still straightforward:
+
+### Step 1: Create a ConfigMap for your Certificate
+
+First, we need to get your certificate into Kubernetes.  Think of a ConfigMap as a place to store configuration files. Run this command, replacing `<path to ca.crt>` with the actual path to your certificate file:
 
 ```shell
 kubectl -n pipelines-as-code create configmap git-repo-cert --from-file=git.crt=<path to ca.crt>
 ```
 
-### Mount the ConfigMap in the pods
+This creates a ConfigMap named `git-repo-cert` in the `pipelines-as-code` namespace.
 
-Follow [this guide](https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/#add-configmap-data-to-a-volume)
-to mount the ConfigMap in the `pipelines-as-code-controller` and
-`pipelines-as-code-watcher` Deployments in the cluster in the
-`pipelines-as-code` namespace.
+### Step 2: Mount that ConfigMap into Pipelines as Code Pods
 
-### Include `mountPath` in `SSL_CERT_DIR`
+Now, we need to tell Pipelines as Code where to find this certificate. We do this by mounting the ConfigMap into the `pipelines-as-code-controller` and `pipelines-as-code-watcher` pods.  Kubernetes has a great guide on [how to mount ConfigMaps](https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/#add-configmap-data-to-a-volume) if you need a refresher. You'll want to mount it in the `pipelines-as-code` namespace.
 
-Say, you mounted the ConfigMap with the `mountPath` as `/pac-custom-certs`.
-To include this directory in the paths where the certificates are looked up,
-set the environment variable `SSL_CERT_DIR` in the relevant Pipelines-as-Code
-Deployments.
+### Step 3: Point Pipelines as Code to Your Certificate Directory
+
+Let's say you mounted the ConfigMap at `/pac-custom-certs` inside the pods (you pick the location when mounting).  We need to tell Pipelines as Code to look there for certificates.  We do this by setting the `SSL_CERT_DIR` environment variable in the `pipelines-as-code-controller` and `pipelines-as-code-watcher` deployments.
+
+Run this command, making sure `/pac-custom-certs` matches where you mounted your ConfigMap:
 
 ```shell
 kubectl set env deployment pipelines-as-code-controller pipelines-as-code-watcher -n pipelines-as-code SSL_CERT_DIR=/pac-custom-certs:/etc/ssl/certs:/etc/pki/tls/certs:/system/etc/security/cacerts
 ```
 
-Pipelines-as-Code should now be able to access the repository using the
-custom certificate.
+This command updates the deployments to include your custom certificate directory in the list of places where certificates are checked.
+
+### All Set!
+
+That's it! Pipelines as Code should now be able to access your repository using your custom certificate.  If you run into any issues, double-check the paths and make sure the ConfigMap is mounted correctly. Good luck!

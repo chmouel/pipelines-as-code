@@ -1,262 +1,198 @@
 ---
-title: Matching a PipelineRun
+title: Hooking up PipelineRuns to Git Events
 weight: 3
 ---
 
-# Matching a PipelineRun to a Git provider Event
+# Making Your Pipelines React to Git Events
 
-A `PipelineRun` can be matched to a Git provider event by using specific
-annotations in the `PipelineRun` metadata.
+Want your `PipelineRuns` to kick off automatically when something cool happens in your Git repo?  Like, say, when someone opens a pull request or pushes code? You got it! Pipelines as Code lets you do just that by using special annotations in your `PipelineRun`'s metadata. Think of it as setting up triggers for your pipelines.
 
-For example, when you have these as metadata in your `PipelineRun`:
+For example, imagine you want a pipeline to run whenever there's a pull request targeting your `main` branch.  You'd set up your `PipelineRun` like this:
 
 ```yaml
 metadata:
-  name: pipeline-pr-main
+  name: pipeline-pr-main # A descriptive name for your pipeline
 annotations:
-  pipelinesascode.tekton.dev/on-target-branch: "[main]"
-  pipelinesascode.tekton.dev/on-event: "[pull_request]"
+  pipelinesascode.tekton.dev/on-target-branch: "[main]" # Run on the 'main' branch
+  pipelinesascode.tekton.dev/on-event: "[pull_request]" # Triggered by pull requests
 ```
 
-`Pipelines-as-Code` will match the PipelineRun `pipeline-pr-main` if the Git
-provider events target the branch `main` and it's coming from a `[pull_request]`
+With this setup, Pipelines as Code is smart enough to watch for Git events. If a pull request comes in and it's aimed at the `main` branch, bam!  Your `pipeline-pr-main` will spring into action.
 
-Multiple target branches can be specified, separated by commas, e.g.:
+You can even specify multiple branches to watch.  Just list them out, separated by commas, like so:
 
 ```yaml
-pipelinesascode.tekton.dev/on-target-branch: [main, release-nightly]
+pipelinesascode.tekton.dev/on-target-branch: [main, release-nightly] # Watch both 'main' and 'release-nightly'
 ```
 
-You can match on `pull_request` events as above, and you can also match
-PipelineRuns on `push` events to a repository.
-
-For example, this will match the pipeline when there is a push to a commit in the
-`main` branch:
+Pull requests aren't the only thing you can react to. You can also trigger pipelines on `push` events.  Let's say you want a pipeline to run every time someone pushes a commit to the `main` branch. Here's how you'd configure it:
 
 ```yaml
 metadata:
-  name: pipeline-push-on-main
+  name: pipeline-push-on-main # Pipeline for pushes to main
   annotations:
-    pipelinesascode.tekton.dev/on-target-branch: "[refs/heads/main]"
-    pipelinesascode.tekton.dev/on-event: "[push]"
+    pipelinesascode.tekton.dev/on-target-branch: "[refs/heads/main]" # Specifically 'refs/heads/main' branch
+    pipelinesascode.tekton.dev/on-event: "[push]" # Triggered by pushes
 ```
 
-You can specify the full refs like `refs/heads/main` or the short ref like
-`main`. You can also specify globs, for example, `refs/heads/*` will match any
-target branch or `refs/tags/1.*` will match all the tags starting from `1.`.
+Notice you can use the full branch ref like `refs/heads/main` or just the short name like `main`.  And guess what? You can even use globs!  For example, `refs/heads/*` will catch any branch, and `refs/tags/1.*` will match any tag starting with `1.`.
 
-A full example for a push of a tag:
+Here's a cool example for when you push a tag, like version `1.0`:
 
 ```yaml
 metadata:
-name: pipeline-push-on-1.0-tags
+name: pipeline-push-on-1.0-tags # Pipeline for pushing 1.0 tags
 annotations:
-  pipelinesascode.tekton.dev/on-target-branch: "[refs/tags/1.0]"
-  pipelinesascode.tekton.dev/on-event: "[push]"
+  pipelinesascode.tekton.dev/on-target-branch: "[refs/tags/1.0]" # Triggered by tags like 'refs/tags/1.0'
+  pipelinesascode.tekton.dev/on-event: "[push]" # On push events
 ```
 
-This will match the pipeline `pipeline-push-on-1.0-tags` when you push the 1.0
-tags into your repository.
+This `pipeline-push-on-1.0-tags` pipeline will kick off the moment you push a tag that matches `1.0` to your repo. Neat, huh?
 
-Matching annotations are currently required; otherwise, `Pipelines-as-Code` will not
-match your `PipelineRun`.
+Heads up:  You need to have these matching annotations in place. If they're not there, Pipelines as Code won't automatically run your `PipelineRun`.
 
-When multiple PipelineRuns match an event, it will run them in parallel
-and post the results to the provider as soon as the PipelineRun finishes.
+If more than one `PipelineRun` matches a Git event, don't worry, Pipelines as Code is smart enough to run them all at the same time! You'll get results posted back to your Git provider as each one finishes.
 
 {{< hint info >}}
-Payload matching only occurs for events that `Pipelines-as-Code` supports, such as
-when a `Pull Request` is opened, updated, or when a branch receives a `Push`.
+Just so you know, Pipelines as Code only pays attention to Git events it understands, like when a pull request is opened or updated, or when someone pushes to a branch.  Other types of Git events won't trigger these pipelines.
 {{< /hint >}}
 
-## Matching a PipelineRun to Specific Path Changes
+## Only Run Pipelines When Specific Files Change
 
 {{< tech_preview "Matching a PipelineRun to specific path changes via annotation" >}}
 
-To trigger a `PipelineRun` based on specific path changes in an event, use the
-annotation `pipelinesascode.tekton.dev/on-path-change`.
+Want even more control? You can tell your `PipelineRun` to only run if *specific files* are changed in a Git event.  That's where the `pipelinesascode.tekton.dev/on-path-change` annotation comes in.
 
-Multiple paths can be specified, separated by commas. The first glob matching
-the files changes in the PR will trigger the `PipelineRun`. If you want to match
-a file or path that has a comma, you can HTML escape it with the `&#44;` HTML
-entity.
+You can list multiple paths, separated by commas.  The first path pattern that matches the changed files in a pull request will trigger the `PipelineRun`.  If you have a comma in your file path and it's messing things up, you can use `&#44;` instead of a comma – it's like a secret code for commas!
 
-You still need to specify the event type and target branch. If you have a [CEL
-expression](#matching-pipelinerun-by-path-change) the `on-path-change`
-annotation will be ignored.
+Remember, you still need to specify the event type (`on-event`) and target branch (`on-target-branch`).  If you're using a fancy [CEL expression](#matching-pipelinerun-by-path-change) (we'll get to that later!), the `on-path-change` annotation will be ignored.
 
-Example:
+Here's an example:
 
 ```yaml
 metadata:
-  name: pipeline-docs-and-manual
+  name: pipeline-docs-and-manual # Pipeline for docs and manual changes
   annotations:
-    pipelinesascode.tekton.dev/on-target-branch: "[main]"
-    pipelinesascode.tekton.dev/on-event: "[pull_request]"
-    pipelinesascode.tekton.dev/on-path-change: "[docs/**.md, manual/**.rst]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main]" # Target branch is 'main'
+    pipelinesascode.tekton.dev/on-event: "[pull_request]" # On pull requests
+    pipelinesascode.tekton.dev/on-path-change: "[docs/**.md, manual/**.rst]" # Only if .md files in 'docs' or .rst in 'manual' change
 ```
 
-This configuration will match and trigger the `PipelineRun` named
-`pipeline-docs-and-manual` when a `pull_request` event targets the `main` branch
-and includes changes to files with a `.md` suffix in the `docs` directory (and
-its subdirectories) or files with a `.rst` suffix in the `manual` directory.
+This `pipeline-docs-and-manual` pipeline will only fire up when a pull request targets the `main` branch *and* includes changes to Markdown files (`.md`) in the `docs` directory (or any subfolders within it), *or* reStructuredText files (`.rst`) in the `manual` directory. Pretty specific, right?
 
 {{< hint info >}}
-The patterns used are [glob](https://en.wikipedia.org/wiki/Glob_(programming))
-patterns, not regex. Here are some
-[examples](https://github.com/gobwas/glob?tab=readme-ov-file#example) from the
-library used for matching.
+Just a heads-up: these path patterns are [glob](https://en.wikipedia.org/wiki/Glob_(programming)) patterns, not regular expressions.  Think of them as simplified wildcards.  Need some examples?  Check out [this page](https://github.com/gobwas/glob?tab=readme-ov-file#example) from the library we use for matching.
 
-The `tkn pac` CLI provides a handy [globbing command]({{< relref "/docs/guide/cli.md#test-globbing-pattern" >}})
-to test the glob pattern matching:
+Want to test your glob patterns? The `tkn pac` CLI has a handy [command]({{< relref "/docs/guide/cli.md#test-globbing-pattern" >}}) just for that:
 
 ```bash
-tkn pac info globbing "[PATTERN]"
+tkn pac info globbing "[PATTERN]" # Test your glob pattern
 ```
 
-will match the files with `[PATTERN]` in the current directory.
+This command will see if `[PATTERN]` matches any files in your current directory. Super useful for debugging!
 
 {{< /hint >}}
 
-### Matching a PipelineRun by Ignoring Specific Path Changes
+### Ignoring Path Changes for Pipeline Triggers
 
 {{< tech_preview "Matching a PipelineRun to ignore specific path changes via annotation" >}}
 
-Following the same principle as the `on-path-change` annotation, you can use the
-reverse annotation `pipelinesascode.tekton.dev/on-path-change-ignore` to trigger
-a `PipelineRun` when the specified paths have not changed.
+Following the same idea, you can use `pipelinesascode.tekton.dev/on-path-change-ignore`. This is like the reverse of `on-path-change` – it triggers a `PipelineRun` when changes happen *outside* of the paths you specify.
 
-You still need to specify the event type and target branch. If you have a [CEL
-expression](#matching-pipelinerun-by-path-change) the `on-path-change-ignore`
-annotation will be ignored.
+You still need `on-event` and `on-target-branch`. And just like before, if you're using a [CEL expression](#matching-pipelinerun-by-path-change), `on-path-change-ignore` is ignored.
 
-This PipelineRun will run when there are changes outside the docs
-folder:
+Here’s a pipeline that runs when changes are made *outside* the `docs` folder:
 
 ```yaml
 metadata:
-  name: pipeline-not-on-docs-change
+  name: pipeline-not-on-docs-change # Pipeline that runs when docs *aren't* changed
   annotations:
-    pipelinesascode.tekton.dev/on-target-branch: "[main]"
-    pipelinesascode.tekton.dev/on-event: "[pull_request]"
-    pipelinesascode.tekton.dev/on-path-change-ignore: "[docs/***]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main]" # Target: main branch
+    pipelinesascode.tekton.dev/on-event: "[pull_request]" # On pull requests
+    pipelinesascode.tekton.dev/on-path-change-ignore: "[docs/***]" # Ignore changes in 'docs' directory
 ```
 
-Furthermore, you can combine `on-path-change` and `on-path-change-ignore`
-annotations:
+You can even use `on-path-change` and `on-path-change-ignore` together!
 
 ```yaml
 metadata:
-  name: pipeline-docs-not-generated
+  name: pipeline-docs-not-generated # Pipeline for docs, but not generated docs
   annotations:
-    pipelinesascode.tekton.dev/on-target-branch: "[main]"
-    pipelinesascode.tekton.dev/on-event: "[pull_request]"
-    pipelinesascode.tekton.dev/on-path-change: "[docs/***]"
-    pipelinesascode.tekton.dev/on-path-change-ignore: "[docs/generated/***]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main]" # Target: main branch
+    pipelinesascode.tekton.dev/on-event: "[pull_request]" # On pull requests
+    pipelinesascode.tekton.dev/on-path-change: "[docs/***]" # Run if there are changes in 'docs'
+    pipelinesascode.tekton.dev/on-path-change-ignore: "[docs/generated/***]" # ...but *not* in 'docs/generated'
 ```
 
-This configuration triggers the `PipelineRun` when there are changes in the
-`docs` directory but not in the `docs/generated` directory.
+This setup will trigger `pipeline-docs-not-generated` when there are changes in the `docs` directory, but *only if* those changes are *not* in the `docs/generated` subdirectory.  Clever, right?
 
-The `on-path-change-ignore` annotation will always take precedence over the
-`on-path-change` annotation. It means if you have these annotations:
+Keep in mind: `on-path-change-ignore` always wins over `on-path-change`.  So, if you have this:
 
 ```yaml
 metadata:
-  name: pipelinerun-go-only-no-markdown-or-yaml
-    pipelinesascode.tekton.dev/on-target-branch: "[main]"
-    pipelinesascode.tekton.dev/on-event: "[pull_request]"
-    pipelinesascode.tekton.dev/on-path-change: "[***.go]"
-    pipelinesascode.tekton.dev/on-path-change-ignore: "[***.md, ***.yaml]"
+  name: pipelinerun-go-only-no-markdown-or-yaml # Pipeline for Go changes, but no markdown or YAML
+    pipelinesascode.tekton.dev/on-target-branch: "[main]" # Target: main branch
+    pipelinesascode.tekton.dev/on-event: "[pull_request]" # On pull requests
+    pipelinesascode.tekton.dev/on-path-change: "[***.go]" # Run if Go files change
+    pipelinesascode.tekton.dev/on-path-change-ignore: "[***.md, ***.yaml]" # ...but ignore markdown and YAML changes
 ```
 
-and you have a `Pull Request` changing the files `.tekton/pipelinerun.yaml`,
-`README.md`, and `main.go` the `PipelineRun` will not be triggered since the
-`on-path-change-ignore` annotation will ignore the `***.md` and `***.yaml`
-files.
+And you have a pull request that changes `.tekton/pipelinerun.yaml`, `README.md`, and `main.go`, the `PipelineRun` will *not* run.  Why? Because `on-path-change-ignore` is telling it to ignore `.md` and `.yaml` files, even though `on-path-change` says to run for `.go` files.  `Ignore` takes priority!
 
-## Matching a PipelineRun on a Regex in a comment
+## Trigger Pipelines with Comments Using Regex
 
 {{< tech_preview "Matching PipelineRun on regex in comments" >}}
 {{< support_matrix github_app="true" github_webhook="true" gitea="true" gitlab="true" bitbucket_cloud="false" bitbucket_server="false" >}}
 
-You can trigger a PipelineRun based on a comment on a Pull Request or a [Pushed
-Commit]({{< relref
-"/docs/guide/running.md#gitops-commands-on-pushed-commits">}}) using the
-annotation `pipelinesascode.tekton.dev/on-comment`.
+Want to trigger pipelines just by leaving a comment on a pull request or a [pushed commit]({{< relref "/docs/guide/running.md#gitops-commands-on-pushed-commits">}})?  You can do that with the `pipelinesascode.tekton.dev/on-comment` annotation!
 
-The comment is treated as a regular expression (regex). The spaces and newlines
-are stripped at the beginning or the end of the comment before matching so `^`
-will match the beginning of the comment and `$` will match the end of the
-comment without newlines or space.
+The comment you specify is treated as a regular expression (regex).  Don't worry about extra spaces or newlines at the beginning or end of your comment – they're automatically trimmed before matching. So, `^` matches the very start of the comment, and `$` matches the very end, without any extra whitespace.
 
-If a new comment on a Pull Request matches the specified regex, the PipelineRun
-will be triggered and started. This only applies to newly created comments;
-updates or edits to existing comments will not trigger the PipelineRun.
+If a new comment on a pull request matches your regex, boom, the `PipelineRun` gets triggered and starts running.  Important: this only works for *new* comments.  Editing or updating existing comments won't kick off a pipeline.
 
-Example:
+Example time!
 
 ```yaml
 ---
 apiVersion: tekton.dev/v1beta1
 kind: PipelineRun
 metadata:
-  name: "merge-pr"
+  name: "merge-pr" # Pipeline to merge a PR
   annotations:
-    pipelinesascode.tekton.dev/on-comment: "^/merge-pr"
+    pipelinesascode.tekton.dev/on-comment: "^/merge-pr" # Triggered by comments starting with "/merge-pr"
 ```
 
-This will trigger the merge-pr PipelineRun when a comment on a pull request
-starts with `/merge-pr`.
+This `merge-pr` pipeline will start whenever someone adds a comment to a pull request that *starts* with `/merge-pr`.  Handy for GitOps workflows!
 
-When a PipelineRun is getting triggered by the `on-comment` annotation starts,
-the template variable {{ trigger_comment }} is set. For more details, refer to
-the [documentation]({{< relref
-"/docs/guide/gitops_commands.md#accessing-the-comment-triggering-the-pipelinerun"
->}}).
+When a `PipelineRun` is triggered by `on-comment`, a special variable called `{{ trigger_comment }}` is set. You can find out more about this in the [docs]({{< relref "/docs/guide/gitops_commands.md#accessing-the-comment-triggering-the-pipelinerun" >}}).
 
-Note that the on-comment annotation adheres to the pull_request [Policy]({{<
-relref "/docs/guide/policy" >}}) rule. Only users specified in the pull_request
-policy will be able to trigger the PipelineRun.
+Also, keep in mind that `on-comment` respects the pull request [Policy]({{< relref "/docs/guide/policy" >}}) rules. Only users allowed by your policy can trigger a `PipelineRun` with comments.
 
 {{< hint info >}}
-The on-comment annotation is supported for pull_request events. For push events,
-it is only supported [when targeting the main branch without arguments]({{<
-relref "/docs/guide/gitops_commands.md#gitops-commands-on-pushed-commits" >}}).
+The `on-comment` thing works for pull request events. For push events, it's only supported [when targeting the main branch without any extra arguments]({{< relref "/docs/guide/gitops_commands.md#gitops-commands-on-pushed-commits" >}}).
 {{< /hint >}}
 
-## Matching PipelineRun to a Pull Request labels
+## Matching Pipelines to Pull Request Labels
 
 {{< tech_preview "Matching PipelineRun to a Pull-Request label" >}}
 {{< support_matrix github_app="true" github_webhook="true" gitea="true" gitlab="true" bitbucket_cloud="false" bitbucket_server="false" >}}
 
-Using the annotation `pipelinesascode.tekton.dev/on-label`, you can match a
-PipelineRun to a Pull Request label. For example, if you want to match the
-PipelineRun `bugs` whenever a Pull Request has the label `bug` or `defect`, you
-can use this annotation:
+You can use `pipelinesascode.tekton.dev/on-label` to trigger a `PipelineRun` based on pull request labels.  For example, if you want a `bugs` pipeline to run whenever a pull request gets the label `bug` or `defect`, you can set it up like this:
 
 ```yaml
 metadata:
-  name: match-bugs-or-defect
+  name: match-bugs-or-defect # Pipeline for bug or defect labels
   annotations:
-    pipelinesascode.tekton.dev/on-label: [bug, defect]
+    pipelinesascode.tekton.dev/on-label: [bug, defect] # Triggered by 'bug' or 'defect' labels
 ```
 
-- The `on-label` annotation respects the `pull_request` [Policy]({{< relref
-  "/docs/guide/policy" >}}) rules.
-- This annotation is currently supported only on GitHub, Gitea, and GitLab
-  providers. Bitbucket Cloud and Bitbucket Server do not support adding labels
-  to Pull Requests.
-- When you add a label to a Pull Request, the corresponding PipelineRun is
-  triggered immediately, and no other PipelineRun matching the same Pull Request
-  will be activated.
-- If you update the Pull Request by sending a new commit, the PipelineRun
-  with a matching `on-label` annotation will be triggered again if the label is
-  still present.
-- You can access the `Pull Request` labels with the [dynamic variable]({{<
-  relref "/docs/guide/authoringprs#dynamic-variables" >}}) `{{ pull_request_labels }}`.
-  The labels are separated by a Unix newline `\n`.
-  For example, with a shell script, you can do this to print them:
+Things to know about `on-label`:
+
+- It follows the same [Policy]({{< relref "/docs/guide/policy" >}}) rules as pull requests.
+- Right now, it's supported on GitHub, Gitea, and GitLab. Bitbucket Cloud and Server don't support pull request labels.
+- When you add a label to a pull request, the matching `PipelineRun` starts right away.  Only *one* `PipelineRun` matching the labels will be triggered per label event.
+- If you update the pull request with a new commit and the label is still there, the `PipelineRun` with a matching `on-label` will run again.
+- You can grab the pull request labels using the [dynamic variable]({{< relref "/docs/guide/authoringprs#dynamic-variables" >}}) `{{ pull_request_labels }}`.  Labels are separated by newlines (`\n`).  For example, in a shell script, you can print them like this:
 
   ```bash
    for i in $(echo -e "{{ pull_request_labels }}");do
@@ -264,182 +200,157 @@ metadata:
    done
   ```
 
-## Advanced event matching using CEL
+## Advanced Matching with CEL Expressions
 
-If you need to do some advanced matching, `Pipelines-as-Code` supports CEL
-expressions to do advanced filtering on the specific event you need to be matched.
+Need to get *really* specific with your triggers? Pipelines as Code lets you use CEL expressions for super-powered event filtering.
 
-If you have the `pipelinesascode.tekton.dev/on-cel-expression` annotation in
-your PipelineRun, the CEL expression will be used and the `on-target-branch` or
-`on-event` annotations will be skipped.
+If you add the `pipelinesascode.tekton.dev/on-cel-expression` annotation to your `PipelineRun`, Pipelines as Code will use that CEL expression to decide if the pipeline should run.  If you use CEL, the regular `on-target-branch` and `on-event` annotations are ignored.
 
-This example will match a `pull_request` event targeting the branch `main`
-coming from a branch called `wip`:
+Here's an example that triggers on pull requests targeting `main`, but only if they come from a branch called `wip`:
 
 ```yaml
 pipelinesascode.tekton.dev/on-cel-expression: |
-  event == "pull_request" && target_branch == "main" && source_branch == "wip"
+  event == "pull_request" && target_branch == "main" && source_branch == "wip" # Specific conditions for triggering
 ```
 
-The fields available are:
+Here's a rundown of the fields you can use in your CEL expressions:
 
-| **Field**         | **Description**                                                                                                                  |
+| **Field**         | **What it is**                                                                                                                  |
 |-------------------|----------------------------------------------------------------------------------------------------------------------------------|
-| `event`           | `push`, `pull_request` or `incoming`.                                                                                            |
-| `target_branch`   | The branch we are targeting.                                                                                                     |
-| `source_branch`   | The branch where this pull_request comes from. (On `push`, this is the same as `target_branch`.)                                 |
-| `target_url`      | The URL of the repository we are targeting.                                                                                      |
-| `source_url`      | The URL of the repository where this pull_request comes from. (On `push`, this is the same as `target_url`.)                     |
-| `event_title`     | Matches the title of the event. For `push`, it matches the commit title. For PR, it matches the Pull/Merge Request title. (Only supported for `GitHub`, `Gitlab`, and `BitbucketCloud` providers.) |
-| `body`            | The full body as passed by the Git provider. Example: `body.pull_request.number` retrieves the pull request number on GitHub.    |
-| `headers`         | The full set of headers as passed by the Git provider. Example: `headers['x-github-event']` retrieves the event type on GitHub.  |
-| `.pathChanged`    | A suffix function to a string that can be a glob of a path to check if changed. (Supported only for `GitHub` and `Gitlab` providers.) |
-| `files`           | The list of files that changed in the event (`all`, `added`, `deleted`, `modified`, and `renamed`). Example: `files.all` or `files.deleted`. For pull requests, every file belonging to the pull request will be listed. |
+| `event`           | The type of event: `push`, `pull_request`, or `incoming`.                                                                      |
+| `target_branch`   | The branch the event is aimed at.                                                                                                |
+| `source_branch`   | Where the pull request is coming from. (For `push` events, this is the same as `target_branch`.)                                 |
+| `target_url`      | The URL of the repository being targeted.                                                                                        |
+| `source_url`      | The URL of the repository where the pull request is coming from. (For `push` events, same as `target_url`.)                     |
+| `event_title`     | The title of the event. For `push`, it's the commit title. For PRs, it's the pull/merge request title. (GitHub, GitLab, and Bitbucket Cloud only.) |
+| `body`            | The full event data from the Git provider. Example: `body.pull_request.number` gets the pull request number on GitHub.          |
+| `headers`         | All the headers from the Git provider's request. Example: `headers['x-github-event']` gets the event type on GitHub.           |
+| `.pathChanged`    | A special function to check if a path (using glob patterns) has changed. (GitHub and GitLab only.)                               |
+| `files`           | Lists of changed files (`all`, `added`, `deleted`, `modified`, `renamed`). Example: `files.all` or `files.deleted`. For pull requests, it's *all* files in the PR. |
 
-CEL expressions let you do more complex filtering compared to the simple `on-target` annotation matching and enable more advanced scenarios.
+CEL expressions let you do way more complex filtering than just using `on-target` annotations, opening up all sorts of advanced trigger scenarios.
 
-For example, if I want to have a `PipelineRun` targeting a `pull_request` but
-not the `experimental` branch you could have:
+For instance, if you want a `PipelineRun` for pull requests, but *not* for the `experimental` branch, you could use:
 
 ```yaml
 pipelinesascode.tekton.dev/on-cel-expression: |
-  event == "pull_request" && target_branch != experimental"
+  event == "pull_request" && target_branch != experimental" # PRs, but not experimental branch
 ```
 
 {{< hint info >}}
-You can find more information about the CEL language spec here:
+Want to dive deeper into the CEL language? Check out the spec here:
 
 <https://github.com/google/cel-spec/blob/master/doc/langdef.md>
 {{< /hint >}}
 
-### Matching a PipelineRun to a branch with a regex
+### Matching Branches with Regex in CEL
 
-In a CEL expression, you can match a field name using a regular expression. For
-example, if you want to trigger a `PipelineRun` for the`pull_request` event and
-the `source_branch` name containing the substring `feat/`.  you can use the
-following expression:
+Inside a CEL expression, you can use regular expressions to match field names.  Say you want to trigger a `PipelineRun` for `pull_request` events where the `source_branch` name contains `feat/`.  You could use this:
 
 ```yaml
 pipelinesascode.tekton.dev/on-cel-expression: |
-  event == "pull_request" && source_branch.matches(".*feat/.*")
+  event == "pull_request" && source_branch.matches(".*feat/.*") # PRs from branches containing "feat/"
 ```
 
-### Matching PipelineRun by path change
+### Matching Pipelines Based on Path Changes (CEL Style)
 
-> *NOTE*: `Pipelines-as-Code` supports two ways to match files changed in a particular event. The `.pathChanged` suffix function supports [glob
-pattern](https://github.com/gobwas/glob#example) and does not support different types of "changes" i.e. added, modified, deleted and so on. The other option is to use the `files.` property (`files.all`, `files.added`, `files.deleted`, `files.modified`, `files.renamed`) which can target specific types of changed files and supports using CEL expressions i.e. `files.all.exists(x, x.matches('renamed.go'))`.
+> *NOTE*: Pipelines as Code offers two ways to check for file changes. The `.pathChanged` function uses [glob patterns](https://github.com/gobwas/glob#example) and doesn't distinguish between types of changes (added, modified, etc.). The `files.` property (`files.all`, `files.added`, etc.) lets you target specific change types and use more complex CEL expressions, like `files.all.exists(x, x.matches('renamed.go'))`.
 
-If you want to have a PipelineRun running only if a path has
-changed you can use the `.pathChanged` suffix function with a [glob
-pattern](https://github.com/gobwas/glob#example). Here
-is a concrete example matching every markdown file (as files that have the `.md`
-suffix) in the `docs` directory:
+If you only want a PipelineRun to run when specific paths have changed, use the `.pathChanged` function with a [glob pattern](https://github.com/gobwas/glob#example) in your CEL expression. For example, to match any Markdown file (`.md` suffix) in the `docs` directory:
 
 ```yaml
 pipelinesascode.tekton.dev/on-cel-expression: |
-  event == "pull_request" && "docs/*.md".pathChanged()
+  event == "pull_request" && "docs/*.md".pathChanged() # PRs with changes in docs/*.md
 ```
 
-This example will match any changed file (added, modified, removed, or renamed) that was in the `tmp` directory:
+This example matches any change (add, modify, remove, rename) within the `tmp` directory:
 
 ```yaml
     pipelinesascode.tekton.dev/on-cel-expression: |
-      files.all.exists(x, x.matches('tmp/'))
+      files.all.exists(x, x.matches('tmp/')) # Any change in tmp/ directory
 ```
 
-This example will match any added file that was in the `src` or `pkg` directory:
+This one triggers if any *added* file is in the `src` or `pkg` directory:
 
 ```yaml
     pipelinesascode.tekton.dev/on-cel-expression: |
-      files.added.exists(x, x.matches('src/|pkg/'))
+      files.added.exists(x, x.matches('src/|pkg/')) # Added files in src/ or pkg/
 ```
 
-This example will match modified files with the name of test.go:
+And this example triggers for *modified* files named `test.go`:
 
 ```yaml
     pipelinesascode.tekton.dev/on-cel-expression: |
-      files.modified.exists(x, x.matches('test.go'))
+      files.modified.exists(x, x.matches('test.go')) # Modified files named test.go
 ```
 
-### Matching PipelineRun to an event (commit, pull_request) title
+### Matching PipelineRuns to Event Titles
 
-This example will match all pull requests starting with the title `[DOWNSTREAM]`:
+Want to trigger pipelines based on the title of a commit or pull request?  Here's how to match pull requests with titles starting with `[DOWNSTREAM]`:
 
 ```yaml
 pipelinesascode.tekton.dev/on-cel-expression: |
-  event == "pull_request && event_title.startsWith("[DOWNSTREAM]")
+  event == "pull_request && event_title.startsWith("[DOWNSTREAM]") # PRs with titles starting with "[DOWNSTREAM]"
 ```
 
-The event title will be the pull request title on `pull_request` and the
-commit title on `push`.
+`event_title` will be the pull request title for `pull_request` events, and the commit title for `push` events.
 
-### Matching PipelineRun on body payload
+### Matching PipelineRuns Based on Event Body
 
 {{< tech_preview "Matching PipelineRun on body payload" >}}
 
-The payload body as passed by the Git provider is available in the CEL
-variable as `body` and you can use this expression to do any filtering on
-anything the Git provider is sending over:
+The raw event data from your Git provider is available in CEL as the `body` variable.  This lets you filter based on *anything* the Git provider sends.
 
-For example, this expression when run on GitHub:
+For example, this expression (for GitHub events):
 
 ```yaml
 pipelinesascode.tekton.dev/on-cel-expression: |
   body.pull_request.base.ref == "main" &&
     body.pull_request.user.login == "superuser" &&
-    body.action == "synchronize"
+    body.action == "synchronize" # Very specific conditions based on body content
 ```
 
-will only match if the pull request is targeting the `main` branch, the author
-of the pull request is called `superuser` and the action is `synchronize` (i.e.:
-an update occurred on a pull request).
+will *only* trigger if:
+
+- The pull request is targeting the `main` branch (`body.pull_request.base.ref == "main"`)
+- The author is `superuser` (`body.pull_request.user.login == "superuser"`)
+- The event action is `synchronize` (meaning a pull request update happened) (`body.action == "synchronize"`)
+
+Super fine-grained control!
 
 {{< hint info >}}
-When matching the body payload in a Pull Request, the GitOps comments such as
-`/retest` won't be working as expected.
+Heads up: When you're matching based on the event body in pull requests, GitOps comments like `/retest` might not work as expected.
 
-The payload body will become of the comment and not the original pull request
-payload.
+This is because when a comment triggers a pipeline in this scenario, the `body` variable might contain the comment data instead of the original pull request info.
 
-Consequently, when a pull request event occurs, like opening or updating a pull
-request, the CEL body payload may not align with the defined specifications.
-
-To be able to retest your Pull Request when using a CEL on body payload,
-you can make a dummy update to the Pull Request by sending a new SHA with this
-git command:
+So, if you're using CEL body matching and want to re-run a pipeline with `/retest`, you might need to make a small dummy change to your pull request.  You can do this by pushing a new commit with:
 
 ```bash
-# assuming you are on the branch you want to retest
-# and the upstream remote are set
+# Assuming you're on the branch you want to retest
+# and your upstream remote is set up correctly
 git commit --amend --no-edit && \
   git push --force-with-lease
 ```
 
-or close/open the pull request.
-
+Or, you can just close and reopen the pull request.
 {{< /hint >}}
 
-### Matching a PipelineRun to a request header
+### Matching PipelineRuns to Request Headers
 
-You can do some further filtering on the headers as passed by the Git provider
-with the CEL variable `headers`.
+You can even filter based on HTTP headers sent by your Git provider using the `headers` variable in CEL.
 
-The headers are available as a list and are always in lower case.
+Headers are always lowercase.
 
-For example, this is how to make sure the event is a pull_request on [GitHub](https://docs.github.com/en/webhooks/webhook-events-and-payloads#delivery-headers):
+For example, to make sure an event is a pull request on [GitHub](https://docs.github.com/en/webhooks/webhook-events-and-payloads#delivery-headers):
 
 ```yaml
 pipelinesascode.tekton.dev/on-cel-expression: |
-  headers['x-github-event'] == "pull_request"
+  headers['x-github-event'] == "pull_request" # Check for GitHub pull_request event header
 ```
 
-## Matching a PipelineRun to a branch with a comma
+## Handling Commas in Branch Names
 
-If you want to match multiple branches but one branch has a comma in there you
-will not be able to match it. In that case, you can use the HTML escape entity
-`&#44;` as a comma in the name of the branch, for example, if you want to match
-main and the branch called `release,nightly` you can do this:
+If you need to match multiple branches, and one of them has a comma in its name, you might run into trouble. In that case, use the HTML escape code `&#44;` instead of a regular comma in the branch name.  For example, to match `main` and a branch called `release,nightly`, do this:
 
 ```yaml
-pipelinesascode.tekton.dev/on-target-branch: [main, release&#44;nightly]
-```
+pipelinesascode.tekton.dev/on-target-branch: [main, release&#44;nightly] # Using &#44; for comma in branch name

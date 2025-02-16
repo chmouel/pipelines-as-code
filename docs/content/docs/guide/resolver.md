@@ -2,101 +2,72 @@
 title: Resolver
 weight: 2
 ---
-# Pipelines-as-Code resolver
+# Pipelines-as-Code Resolver: Making Sure Your Pipelines Play Nice
 
-The Pipelines-as-Code resolver ensures that the PipelineRun you are running
-doesn't conflict with others.
+Ever run into trouble where one PipelineRun messes with another?  The Pipelines-as-Code resolver is here to prevent that headache. Think of it as the traffic controller for your pipelines!
 
-Pipelines-as-Code parses any files ending with a `.yaml` or `.yml` suffix in
-the `.tekton` directory and subdirectory at the root of your repository. It
-will automatically attempt to detect any [Tekton](https://tekton.dev) resources
-like `Pipeline`, `PipelineRun`, `Task`.
+Here's the deal: Pipelines-as-Code automatically scans your repository's `.tekton` folder (and any folders inside it) for files ending in `.yaml` or `.yml`. It's on the lookout for Tekton goodies like `Pipeline`, `PipelineRun`, and `Task` definitions.
 
-When detecting a [PipelineRun](https://tekton.dev/docs/pipelines/pipelineruns/) it will try to *resolve*
-it as a single PipelineRun with an embedded PipelineSpec of the referenced
-[Task](https://tekton.dev/docs/pipelines/tasks/) or
-[Pipeline](https://tekton.dev/docs/pipelines/pipelines/). This embedding
-ensures that all dependencies required for execution are contained within a
-single PipelineRun at the time of execution on the cluster.
+When it spots a `PipelineRun`, it gets to work "resolving" it.  What does that mean?  Basically, it takes your `PipelineRun` and bundles up everything it needs to run – like the actual steps defined in your `Pipeline` or `Task` – right inside the `PipelineRun` itself.  This "embedding" thing is super handy because it makes sure your PipelineRun is self-contained and has all its dependencies ready to go when it runs on your cluster.  Think of it as packing everything for a trip in one suitcase!
 
 {{< hint info >}}
-The `Pipelines-as-Code` resolver is a different concept than the [Tekton resolver](https://tekton.dev/docs/pipelines/resolution-getting-started/), both are compatible and you can have the Tekton resolver within Pipelines-as-Code PipelineRun.
+Just a heads-up: the resolver we're talking about here is different from the standard Tekton resolver. But don't worry, they play nice together! You can even use the Tekton resolver *inside* your Pipelines-as-Code PipelineRuns if you want.
 {{< /hint >}}
 
-In any case of errors in any YAML files, parsing will halt, and errors will be
-reported on both the Git provider interface and the event's Namespace stream.
+Now, if Pipelines-as-Code finds any mistakes in your YAML files (typos, wrong formatting, you name it), it'll stop reading files right away and let you know. You'll see error messages in your Git provider (like GitHub or GitLab) and also in the event stream of your Kubernetes namespace.  No silent failures here!
 
-The resolver will then transform the Pipeline `Name` field to a `GenerateName`
-based on the Pipeline name to ensure each PipelineRun is unique.
+To keep things tidy and prevent naming clashes, the resolver does a little magic. It changes the `Name` of your Pipeline to a `GenerateName`. This basically means each time you run a Pipeline, it gets a unique, auto-generated name.  Neat, huh?
 
-If you want to split your Pipeline and PipelineRun, you can store  the files in the
-`.tekton/` directory or its subdirectories. `Pipeline` and `Task` can as well be
-referenced remotely (see below on how the remote tasks are referenced).
+Want to keep your `Pipeline` and `PipelineRun` definitions in separate files? No problem! Just pop them in the `.tekton/` folder (or any subfolders within). And yes, you can totally reference `Pipeline` and `Task` definitions that live somewhere else too (we'll get to remote stuff in a bit).
 
-The resolver will skip resolving if it sees these type of tasks:
+Okay, now for the exceptions. There are a few types of tasks that the resolver will just leave as they are, without trying to resolve them:
 
-* a reference to a [`ClusterTask`](https://github.com/tektoncd/pipeline/blob/main/docs/tasks.md#task-vs-clustertask)
-* a `Task` or `Pipeline` [`Bundle`](https://github.com/tektoncd/pipeline/blob/main/docs/pipelines.md#tekton-bundles)
-* a reference to a Tekton [`Resolver`](https://github.com/tektoncd/pipeline/blob/main/docs/pipelines.md#specifying-remote-tasks)  
-* a [Custom Task](https://github.com/tektoncd/pipeline/blob/main/docs/pipelines.md#using-custom-tasks) with an apiVersion that doesn't have a `tekton.dev/` prefix.
+* **`ClusterTask` references:** If you're using a `ClusterTask` (a task that's available cluster-wide), it's used directly.
+* **`Task` or `Pipeline` Bundles:**  Bundles are already packaged up, so no need to resolve them further.
+* **Tekton `Resolver` references:** If you're already using Tekton's own resolvers, Pipelines-as-Code respects that and doesn't interfere.
+* **Custom Tasks (with non-Tekton API versions):** If you're using custom tasks that aren't part of the standard Tekton API, they're also left untouched.
 
-It just uses them "as is" and will not try to do anything with it.
+Basically, if it's already "resolved" or handled by another mechanism, Pipelines-as-Code steps back and lets it be.
 
-If Pipelines-as-Code cannot resolve the referenced tasks in the `Pipeline` or
-`PipelineSpec`, the run will fail before applying the pipelinerun onto the
-cluster.
+Now, what if Pipelines-as-Code *can't* find a Task that your `Pipeline` is trying to use? In that case, the PipelineRun will fail *before* it even gets submitted to your cluster.  You'll get notified about the problem on your Git platform and in the events of the namespace where your `Repository` resource lives.  So, you'll know right away if something's missing.
 
-You should be able to see the issue on your Git provider platform interface and
-inside the events of the target namespace where the `Repository` CR  is
-located.
+Thinking of testing your `PipelineRun` before committing? Smart move! You can use the `resolve` command in the `tkn-pac` command-line tool.  It lets you check things out locally.  Head over to the [CLI documentation](./cli/#resolve) to learn how to use it.
 
-If you need to test your `PipelineRun` locally before sending it in a PR, you
-can use the `resolve` command from the `tkn-pac` CLI See  [CLI](./cli/#resolve)
-command to learn on how to use it.
+## Remote Tasks: Pulling in Tasks from Everywhere
 
-## Remote Task annotations
+Pipelines-as-Code is pretty cool – it can even grab Tasks and Pipelines from remote places! You just need to use annotations in your `PipelineRun`.  It's like saying "Hey, go fetch this Task from over there!"
 
-`Pipelines-as-Code` support fetching remote tasks or pipeline from a remote
-location with annotations on PipelineRun.
+If the resolver sees a `PipelineRun` that refers to a remote Task or Pipeline (either directly in the `PipelineRun` or inside an embedded `PipelineSpec`), it will automatically pull them in and include them.
 
-If the resolver sees a PipelineRun referencing a remote task or a Pipeline in
-a PipelineRun or a PipelineSpec it will automatically inline them.
+If you happen to have multiple annotations pointing to the same Task name, the resolver will just use the first one it finds.
 
-If multiple annotations reference the same task name the resolver will pick the
-first one fetched from the annotations.
-
-An annotation to a remote task looks like this :
+Here's how you can annotate your `PipelineRun` to use a remote Task:
 
 ```yaml
 pipelinesascode.tekton.dev/task: "git-clone"
 ```
 
-or multiple tasks with an array :
+Or, if you want to fetch multiple remote tasks at once, you can list them like this:
 
 ```yaml
 pipelinesascode.tekton.dev/task: "[git-clone, pylint]"
 ```
 
-### [Tekton Hub](https://hub.tekton.dev) Support for Tasks
+### Tekton Hub: Your Task Supermarket
 
 ```yaml
 pipelinesascode.tekton.dev/task: "git-clone"
 ```
 
-The syntax above installs the
-[git-clone](https://github.com/tektoncd/catalog/tree/main/task/git-clone) task
-from the [tekton hub](https://hub.tekton.dev) repository querying for the latest
-version with the tekton hub API.
+That simple annotation above? It tells Pipelines-as-Code to grab the `git-clone` Task from the [Tekton Hub](https://hub.tekton.dev).  It'll automatically find the latest version and pull it in.  Tekton Hub is like a public library of reusable Tasks – pretty neat!
 
-You can have multiple tasks in there if you separate them by a comma `,` around
-an array syntax with bracket:
+You can grab multiple Tasks from the Hub in one go, just separate them with commas, or use that bracket syntax like this:
 
 ```yaml
 pipelinesascode.tekton.dev/task: "[git-clone, golang-test, tkn]"
 ```
 
-You can have multiple lines if you add a `-NUMBER` suffix to the annotation, for
-example :
+Or, if you prefer, you can list them on separate lines using `-NUMBER` suffixes:
 
 ```yaml
   pipelinesascode.tekton.dev/task: "git-clone"
@@ -104,161 +75,131 @@ example :
   pipelinesascode.tekton.dev/task-2: "tkn"
 ```
 
-By default, `Pipelines-as-Code` will interpret the string as the `latest` task to
-grab
-from [tekton hub](https://hub.tekton.dev).
+By default, Pipelines-as-Code assumes you want the `latest` version from the Tekton Hub.
 
-If you want to have a specific version of the task, you can add a colon `:` to
-the string and a version number, like in
-this example :
+Want a specific version? No problem! Just add a colon `:` and the version number to the Task name, like this:
 
 ```yaml
-pipelinesascode.tekton.dev/task: "[git-clone:0.1]" # this will install git-clone 0.1 from tekton.hub
+pipelinesascode.tekton.dev/task: "[git-clone:0.1]" #  Get version 0.1 of git-clone from Tekton Hub
 ```
 
-#### Custom [Tekton Hub](https://github.com/tektoncd/hub/) Support for Tasks
+#### Custom Tekton Hub: Your Private Collection
 
-Additionally if the cluster administrator has [set-up](/docs/install/settings#tekton-hub-support) a custom Tekton Hub you
-are able to reference it from your template like this example:
+Maybe your organization has its own Tekton Hub setup? If your cluster admin has configured a custom Hub (see [settings documentation](/docs/install/settings#tekton-hub-support)), you can point to it like this:
 
 ```yaml
-pipelinesascode.tekton.dev/task: "[anothercatalog://curl]" # this will install curl from the custom catalog configured by the cluster administrator as anothercatalog
+pipelinesascode.tekton.dev/task: "[anothercatalog://curl]" # Get curl from your custom catalog named "anothercatalog"
 ```
 
-There is no fallback to the default Tekton Hub if the custom Tekton Hub does not
-have the task referenced it will fail.
+Important note: if you use a custom Hub, Pipelines-as-Code won't fall back to the default Tekton Hub if it can't find the Task in your custom one.  It'll just fail.
 
-There is no support for custom hub from the CLI on the `tkn pac resolve` command.
+Also, the `tkn pac resolve` command in the CLI doesn't currently support custom Hubs. Just something to keep in mind!
 
-### Remote HTTP URL
+### Remote HTTP URLs: Tasks from Any Web Address
 
-If you have a string starting with `http://` or `https://`, `Pipelines-as-Code`
-will fetch the task directly from that remote URL :
+Got a Task definition hosted on a website somewhere?  Pipelines-as-Code can grab it directly from an HTTP or HTTPS URL:
 
 ```yaml
   pipelinesascode.tekton.dev/task: "[https://remote.url/task.yaml]"
 ```
 
-### Remote HTTP URL from a private repository
+### Private Repository Access: Securely Fetching Tasks
 
-If you are using the `GitHub` or the `GitLab` provider and If the remote task
-URL uses the same host as where the repository CRD is, Pipelines-as-Code will
-use the  provided token to fetch the URL using the GitHub or GitLab API.
+If you're using GitHub or GitLab and your remote Task URL points to a repository on the *same* host as your Repository CRD, Pipelines-as-Code can use the provided token to securely fetch the Task using the Git provider's API.  This is super handy for accessing Tasks in private repositories!
 
-#### GitHub
+#### GitHub: Private Tasks Made Easy
 
-When using the GitHub provider if you have a repository URL looking like this :
+Let's say your repository is on GitHub, like this:
 
-<https://github.com/organization/repository>
+`<https://github.com/organization/repository>`
 
-and the remote HTTP URLs is a referenced GitHub "blob" URL:
+And your remote Task URL is a GitHub "blob" URL, like this:
 
-<https://github.com/organization/repository/blob/mainbranch/path/file>
+`<https://github.com/organization/repository/blob/mainbranch/path/file>`
 
-If the remote HTTP URL has a slash (/) in the branch name you will need to HTML
-encode with the `%2F` character, example:
+If your branch name has a slash (like `feature/branch`), you'll need to use HTML encoding (`%2F`) for the slash:
 
-<https://github.com/organization/repository/blob/feature%2Fmainbranch/path/file>
+`<https://github.com/organization/repository/blob/feature%2Fmainbranch/path/file>`
 
-It will be use the GitHub API with the generated token to fetch that file.
-This allows you to reference a task or a pipeline from a private repository easily.
+Pipelines-as-Code will use the GitHub API and your token to fetch that file securely.  Boom! Private repository access handled.
 
-GitHub app token are scoped to the owner or organization where the repository is located.
-If you are using the GitHub webhook method you are able to fetch any private or
-public repositories on any organization where the personal token is allowed.
+GitHub App tokens are scoped to the organization where the repository is. If you're using the GitHub webhook method, you can fetch Tasks from any private or public repository that your personal token has access to.
 
-There is settings you can set in the Pipelines-as-Code `Configmap` to control that behaviour, see the
-`secret-github-app-token-scoped` and `secret-github-app-scope-extra-repos` settings in the
-[settings documentation](/docs/install/settings).
+You can tweak this behavior with settings in the Pipelines-as-Code ConfigMap, specifically `secret-github-app-token-scoped` and `secret-github-app-scope-extra-repos`. Check out the [settings docs](/docs/install/settings) for the details.
 
-#### GitLab
+#### GitLab: Private Tasks on GitLab Too
 
-This same applies to `GitLab` URL as directly copied from `GitLab` UI like this:
+The same trick works for GitLab!  If you have a GitLab URL copied from the UI like this:
 
-<https://gitlab.com/organization/repository/-/blob/mainbranch/path/file>
+`<https://gitlab.com/organization/repository/-/blob/mainbranch/path/file>`
 
-or `GitLab` raw URL like this:
+or a GitLab raw URL like this:
 
-<https://gitlab.com/organization/repository/-/raw/mainbranch/path/file>
+`<https://gitlab.com/organization/repository/-/raw/mainbranch/path/file>`
 
-The GitLab token as provider in the Repository CR will be used to fetch the file.
+Pipelines-as-Code will use the GitLab token you provided in your Repository CR to fetch the file securely.
 
-### Tasks or Pipelines inside the repository
+### Tasks and Pipelines Inside Your Own Repo: Keeping Things Local
 
-Additionally, you can as well have a reference to a task or pipeline from a YAML file inside
-your repository if you specify the relative path to it, for example :
+You can also reference Tasks or Pipelines that are defined in YAML files *within* your own repository. Just use a relative path to the file:
 
 ```yaml
 pipelinesascode.tekton.dev/task: "[share/tasks/git-clone.yaml]"
 ```
 
-This will grab the file `share/tasks/git-clone.yaml` from the current
-repository on the `SHA` where the event come from (i.e: the current pull
-request or the current branch push).
+This will grab the `git-clone.yaml` file from the `share/tasks` folder in your repository, using the specific commit (SHA) related to the event (like your pull request or branch push).
 
-If there is any error fetching those resources, `Pipelines-as-Code` will error
-out and not process the pipeline.
+If anything goes wrong while fetching these remote resources, Pipelines-as-Code will throw an error and stop processing the Pipeline. And if the file it fetches isn't a valid Tekton `Task`, it'll also let you know.
 
-If the object fetched cannot be parsed as a Tekton `Task` it will error out.
+## Remote Pipelines: Sharing Pipelines Across Projects
 
-## Remote Pipeline annotations
+Want to share a Pipeline across multiple repositories? Remote Pipelines are your answer! You can reference a Pipeline by annotation in your `PipelineRun`.
 
-Remote Pipeline can be referenced by annotation, allowing you to share a Pipeline across multiple repositories.
+You can only have *one* remote Pipeline annotation (`pipelinesascode.tekton.dev/pipeline`) on a `PipelineRun`, and it should point to a single Pipeline definition.  Annotations like `pipelinesascode.tekton.dev/pipeline-1` aren't supported for Pipelines.
 
-Only one pipeline annotation(pipelinesascode.tekton.dev/pipeline) for remote pipeline is allowed on the `PipelineRun`. Also, the
-value of the annotation should have one pipeline. Annotations like `pipelinesascode.tekton.dev/pipeline-1` are not supported.
-
-An annotation to a remote pipeline looks like this, using a remote URL:
+Here's how to use a remote Pipeline from a URL:
 
 ```yaml
-pipelinesascode.tekton.dev/pipeline: "https://git.provider/raw/pipeline.yaml
+pipelinesascode.tekton.dev/pipeline: "https://git.provider/raw/pipeline.yaml"
 ```
 
-or from a relative path inside the repository:
+Or from a relative path within your repository:
 
 ```yaml
-pipelinesascode.tekton.dev/pipeline: "./tasks/pipeline.yaml
+pipelinesascode.tekton.dev/pipeline: "./tasks/pipeline.yaml"
 ```
 
-### [Tekton Hub](https://hub.tekton.dev) Support for Pipelines
+### Tekton Hub Pipelines: Pipelines from the Hub
 
 ```yaml
 pipelinesascode.tekton.dev/pipeline: "[buildpacks]"
 ```
 
-The syntax above installs the
-[buildpacks](https://github.com/tektoncd/catalog/tree/main/pipeline/buildpacks) pipeline
-from the [tekton hub](https://hub.tekton.dev) repository querying for the latest
-version with the tekton hub API.
+Just like with Tasks, you can fetch Pipelines from the Tekton Hub!  The example above grabs the `buildpacks` Pipeline from the [Tekton Hub](https://hub.tekton.dev), getting the latest version.
 
-If you want to have a specific version of the pipeline, you can add a colon `:` to
-the string and a version number, like in this example :
+To specify a version, use the colon `:` syntax:
 
 ```yaml
-pipelinesascode.tekton.dev/pipeline: "[buildpacks:0.1]" # this will install buildpacks 0.1 from tekton hub
+pipelinesascode.tekton.dev/pipeline: "[buildpacks:0.1]" # Get version 0.1 of buildpacks Pipeline from Tekton Hub
 ```
 
-#### Custom [Tekton Hub](https://github.com/tektoncd/hub/) Support for Pipelines
+#### Custom Tekton Hub Pipelines: Your Private Pipeline Collection
 
-Additionally if the cluster administrator has [set-up](/docs/install/settings#tekton-hub-support) a custom Tekton Hub you
-are able to reference it from your template like this example:
+And yes, you can also use Pipelines from a custom Tekton Hub if your cluster admin has set one up:
 
 ```yaml
-pipelinesascode.tekton.dev/pipeline: "[anothercatalog://buildpacks:0.1]" # this will install buildpacks from the custom catalog configured by the cluster administrator as anothercatalog
+pipelinesascode.tekton.dev/pipeline: "[anothercatalog://buildpacks:0.1]" # Get buildpacks Pipeline from your custom catalog "anothercatalog"
 ```
 
-### Overriding tasks from a remote pipeline on a PipelineRun
+### Overriding Tasks in Remote Pipelines: Customizing Shared Pipelines
 
 {{< tech_preview "Tasks from a remote Pipeline override" >}}
 
-Remote task annotations on the remote pipeline are supported. No other
-annotations like `on-target-branch`, `on-event` or `on-cel-expression` are
-supported.
+Good news! Remote Task annotations are supported in remote Pipelines too. However, other annotations like `on-target-branch`, `on-event`, or `on-cel-expression` are not supported on remote pipelines.
 
-If a user wants to override one of the tasks from the remote pipeline, they can do
-so by adding a task in the annotations that has the same name In their `PipelineRun` annotations.
+Want to tweak a Task from a remote Pipeline? You can! Just add a Task with the same name in the annotations of your `PipelineRun`.  Pipelines-as-Code will use your version instead of the one from the remote Pipeline.
 
-For example if the user PipelineRun contains those annotations:
+For example, say your `PipelineRun` looks like this:
 
 ```yaml
 kind: PipelineRun
@@ -268,8 +209,7 @@ metadata:
     pipelinesascode.tekton.dev/task: "./my-git-clone-task.yaml"
 ```
 
-And the Pipeline referenced by the `pipelinesascode.tekton.dev/pipeline` annotation
-in "<https://git.provider/raw/pipeline.yaml>"  contains those annotations:
+And the Pipeline at `<https://git.provider/raw/pipeline.yaml>` has this annotation:
 
 ```yaml
 kind: Pipeline
@@ -278,30 +218,23 @@ metadata:
     pipelinesascode.tekton.dev/task: "git-clone"
 ```
 
-In this case if the `my-git-clone-task.yaml` file in the root directory is a
-task named `git-clone` it will be used instead of the `git-clone` on the remote
-pipeline that is coming from the Tekton Hub.
+If `my-git-clone-task.yaml` in your repository root defines a Task named `git-clone`, Pipelines-as-Code will use *your* `git-clone` Task instead of the one from the remote Pipeline (which might be the `git-clone` Task from Tekton Hub, for example).
 
 {{< hint info >}}
-Task overriding is only supported for tasks that are referenced by a `taskRef`
-to a `Name`, no override is done on `Tasks` embedded with a `taskSpec`. See
-[Tekton documentation](https://tekton.dev/docs/pipelines/pipelines/#adding-tasks-to-the-pipeline) for the differences between `taskRef` and `taskSpec`:
+Task overriding only works for Tasks referenced by `taskRef` with a `Name`. It doesn't work for Tasks embedded directly using `taskSpec`. Check out the [Tekton documentation](https://tekton.dev/docs/pipelines/pipelines/#adding-tasks-to-the-pipeline) to understand the difference between `taskRef` and `taskSpec`.
 {{< /hint >}}
 
-### Tasks or Pipelines Precedence
+### Task and Pipeline Precedence: Where Does Pipelines-as-Code Look First?
 
-From where tasks or pipelines of the same name takes precedence?
+So, when you have Tasks or Pipelines with the same name, which one does Pipelines-as-Code choose?  Here's the order of preference:
 
-For the remote Tasks, when you have a `taskRef` on a task name, Pipelines-as-Code will try to find the task in this order:
+For Tasks (when using `taskRef` with a name):
 
-1. A task matched from the PipelineRun annotations
-2. A task matched from the remote Pipeline annotations
-3. A task matched fetched from the Tekton directory
-   (the tasks from the `.tekton` directory and its sub-directories are automatically included)
+1. **Tasks from `PipelineRun` annotations:**  Tasks defined in your `PipelineRun` annotations take top priority.
+2. **Tasks from remote `Pipeline` annotations:** If the Task isn't in the `PipelineRun` annotations, Pipelines-as-Code checks the annotations of the remote Pipeline (if you're using one).
+3. **Tasks from the `.tekton` directory:** Finally, if it still hasn't found the Task, it looks in your repository's `.tekton` folder and its subfolders.
 
-For the remote Pipeline referenced on a `pipelineRef`, Pipelines-as-Code will try to match a
-pipeline in this order:
+For Pipelines (when using `pipelineRef`):
 
-1. The Pipeline from the PipelineRun annotations
-2. The Pipeline from the Tekton directory (pipelines are automatically fetched from
-  the `.tekton` directory and its sub-directories)
+1. **Pipelines from `PipelineRun` annotations:** Pipelines defined in your `PipelineRun` annotations are checked first.
+2. **Pipelines from the `.tekton` directory:** If no Pipeline is specified in the annotations, Pipelines-as-Code looks in your repository's `.tekton` folder and subfolders.

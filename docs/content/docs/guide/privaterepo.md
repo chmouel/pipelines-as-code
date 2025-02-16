@@ -4,50 +4,29 @@ weight: 7
 ---
 # Private repositories
 
-Pipelines-as-Code allows the use of private repositories by creating or
-updating a secret in the target namespace. This secret contains the user token
-required for the [git-clone](https://hub.tekton.dev/tekton/task/git-clone) task
-to clone private repositories.
+Want to use private repos with Pipelines as Code? No problem!  It handles this by creating a secret in your namespace. This secret holds the token that the `git-clone` task needs to access your private repositories.
 
-Whenever Pipelines-as-Code creates a new PipelineRun in the target namespace,
-it also creates a secret with a specific name format:
+Here's the cool part: when Pipelines as Code spins up a new PipelineRun, it automatically creates a secret for you in the same namespace.  The secret's name looks something like this:
 
 `pac-gitauth-REPOSITORY_OWNER-REPOSITORY_NAME-RANDOM_STRING`
 
-This secret contains a [Git Config](https://git-scm.com/docs/git-config) file named
-`.gitconfig` and a [Git credentials](https://git-scm.com/docs/gitcredentials)
-file named `.git-credentials`. These files configure the base HTTPS URL of the git provider
-(such as <https://github.com>) using the token obtained from the GitHub application
-or from a secret attached to the repository CR on git provider when using the webhook method.
+Inside this secret, you'll find two important files: `.gitconfig` and `.git-credentials`. These files are set up to tell Git how to connect to your Git provider (like GitHub at `https://github.com`) using the token. This token comes from either the GitHub App or a secret you've set up in your repo's settings if you're using webhooks.
 
-The secret includes a key referencing the token as a key to let you easily use it in your task for
-other provider operations.
+The secret even has a handy key that points directly to the token. This makes it super easy to grab the token and use it in your tasks if you need to talk to your Git provider for other things.
 
-See the documentation with example on how to use it
-[here](../authoringprs/#using-the-temporary-github-app-token-for-github-api-operations)
+Want to see how to use this token in action? Check out this section: [Using the temporary GitHub App token for GitHub API operations](../authoringprs/#using-the-temporary-github-app-token-for-github-api-operations).
 
-The secret has a
-[ownerRef](https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/)
-field to the created PipelineRun. This means the secret will be auto deleted
-when you delete the `PipelineRun` it references to.
+And here's another neat thing: this secret is linked to the PipelineRun that created it.  So, when you delete the PipelineRun, the secret cleans itself up too!
 
 {{< hint warning >}}
-To disable this behavior, you can configure the `secret-auto-create` setting in
-the Pipelines-as-Code Configmap. You can set it to either false or true
-depending on your requirements.
+Need to keep the secret around even after the PipelineRun is gone? No worries! You can tweak the `secret-auto-create` setting in the Pipelines as Code ConfigMap. Set it to `false` if you want to disable the auto-deletion.
 {{< /hint >}}
 
-## Using the generated token in your PipelineRun
+## Using the Token in Your PipelineRun
 
-The git-clone task documentation, which is available at
-<https://github.com/tektoncd/catalog/blob/main/task/git-clone/0.4/README.md>,
-states that the secret needs to be referred to as a workspace named
-"basic-auth" inside your PipelineRun so that it can be passed to
-the `git-clone` task.
+Okay, so how do you actually use this token in your PipelineRun?  The `git-clone` task (check out its docs [here](https://github.com/tektoncd/catalog/blob/main/task/git-clone/0.4/README.md)) expects the secret to be provided as a workspace named "basic-auth".  So, let's get that set up in your PipelineRun.
 
-To achieve this, you can add the workspace referencing the secret in your
-PipelineRun. For instance, you can include the following code in your
-PipelineRun to reference the Secret:
+To make this work, you just need to add a workspace to your PipelineRun that points to the secret.  Like this:
 
 ```yaml
   workspace:
@@ -56,13 +35,7 @@ PipelineRun to reference the Secret:
       secretName: "{{ git_auth_secret }}"
 ```
 
-Once you have added the workspace referencing the secret in your PipelineRun as
-described earlier, you can then pass the git-clone task to reuse it inside your
-Pipeline or embedded PipelineRun. This is typically achieved by including the
-git-clone task as a step in your Pipeline or embedded PipelineRun, and
-specifying the workspace name as "basic-auth" in the task definition. Here's an
-example of how you could pass the git-clone task to reuse the secret in your
-Pipeline:
+Once you've got that workspace set up, you can then use the `git-clone` task.  The usual way to do this is to add `git-clone` as a step in your Pipeline or PipelineRun and make sure you tell it to use the "basic-auth" workspace. Here's a snippet showing how it all fits together:
 
 ```yaml
 […]
@@ -88,9 +61,8 @@ tasks:
           value: $(params.revision)
 ```
 
-- A full example is available
-  [here](https://github.com/openshift-pipelines/pipelines-as-code/blob/main/test/testdata/pipelinerun_git_clone_private.yaml)
+-  Want to see a complete example? Take a peek at [this PipelineRun](https://github.com/openshift-pipelines/pipelines-as-code/blob/main/test/testdata/pipelinerun_git_clone_private.yaml).
 
-## Fetching remote tasks from private repositories
+## What about fetching tasks from private repos?
 
-See the [resolver documentation](../resolver/#remote-http-url-from-a-private-github-repository) for more details.
+If you need to grab tasks from private repositories too,  the [resolver docs](../resolver/#remote-http-url-from-a-private-github-repository) have got you covered with the details.

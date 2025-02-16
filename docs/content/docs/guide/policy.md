@@ -3,31 +3,21 @@ title: Policy on actions
 weight: 50
 ---
 
-# Policy on Pipelines-as-Code Actions
+# Let's Talk About Action Policies
 
-Pipelines-as-Code uses policies to control which actions can be performed by
-users who belong to specific teams within an organization, as defined on GitHub
-or other supported Git providers (currently GitHub and Gitea).
+Pipelines as Code lets you set up policies to control what actions different teams in your organization can take. These teams are defined in your Git provider, like GitHub or Gitea (we support those right now).
 
 {{< support_matrix github_app="true" github_webhook="true" gitea="true" gitlab="false" bitbucket_cloud="false" bitbucket_server="false" >}}
 
-## Supported Actions
+## What Actions Can You Control?
 
-* `pull_request` - This action triggers the CI in Pipelines-as-Code. Specifying
-  a team restricts the ability to trigger CI to members of that team, regardless
-  of whether they are repository or organization owners or
-  collaborators. However, members listed in the `OWNERS` file are still
-  permitted to trigger the CI.
+* `pull_request` - This one's about kicking off CI (Continuous Integration) in Pipelines as Code. If you set a team for this action, only people in that team can trigger CI, even if they're repo owners or collaborators.  *However*, anyone listed in your `OWNERS` file can *always* trigger it.
 
-* `ok_to_test` - This action allows users who are members of the specified team
-  to trigger the CI for a pull request by commenting `/ok-to-test`. This enables
-  CI to run on pull requests submitted by contributors who are not collaborators
-  of the repository or organization. It also applies to `/test` and `/retest`
-  commands. This action takes precedence over the `pull_request` action.
+* `ok_to_test` -  This action is for letting specific teams authorize CI runs on pull requests using the `/ok-to-test` comment.  This is super handy for letting folks who aren't official collaborators on your repo contribute code and have it tested! It also works for `/test` and `/retest`.  Important:  `ok_to_test` trumps the `pull_request` policy.
 
-## Configuring Policies in the Repository CR
+## How to Set Up Policies in your Repository CR
 
-To set up policies in the Repository CR, include the following configuration:
+To get these policies working, you'll need to add this config to your Repository CR:
 
 ```yaml
 apiVersion: "pipelinesascode.tekton.dev/v1alpha1"
@@ -44,8 +34,7 @@ spec:
         - ci-users
 ```
 
-In this example:
+Let's break down this example:
 
-* Members of the `ci-admins` team can authorize other users to run the CI on
-  pull requests.
-* Members of the `ci-users` team can run CI on their own pull requests.
+* Folks in the `ci-admins` team can give the green light for CI to run on pull requests from *anyone*.
+* People in the `ci-users` team can run CI on their *own* pull requests.

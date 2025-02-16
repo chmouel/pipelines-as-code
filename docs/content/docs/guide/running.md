@@ -3,155 +3,104 @@ title: Running the PipelineRun
 weight: 4
 ---
 
-# Running the PipelineRun
+# Let's Get Those Pipelines Running!
 
-Pipelines-as-Code (PAC) can be used to run pipelines on events such as pushes
-or pull requests. When an event occurs, PAC will try to match it to any
-PipelineRuns located in the `.tekton` directory of your repository
-that are annotated with the appropriate event type.
+Pipelines as Code (PAC) is your friend when you want to automatically kick off pipelines whenever something interesting happens in your code repository, like someone pushing code or creating a pull request.  Think of it like this: when an event occurs in your repo, PAC jumps into action and tries to find instructions – specifically, `PipelineRun` definitions – in your repo's `.tekton` directory. These instructions tell PAC what pipeline to run for that event.
 
 {{< hint info >}}
-The PipelineRuns definitions are fetched from the `.tekton` directory at the
-root of your repository from where the event comes from, this is unless you have
-configured the [provenance from the default
-branch](../repositorycrd/#pipelinerun-definition-provenance) on your Repository
-CR.
+Just a heads-up: PAC looks for these `PipelineRun` files in the `.tekton` folder at the very top of your repository, right where the event came from.  *Unless* you've set up something different called "provenance from the default branch" in your Repository settings.  If you did that, it might look somewhere else! [Check out the docs on repository provenance](../repositorycrd/#pipelinerun-definition-provenance) for the nitty-gritty details.
 {{< /hint >}}
 
-For example, if a PipelineRun has this annotation:
+For example, say you have a `PipelineRun` file with this little annotation in it:
 
 ```yaml
 pipelinesascode.tekton.dev/on-event: "[pull_request]"
 ```
 
-it will be matched when a pull request is created and run on the cluster, as
-long as the submitter is allowed to run it.
+What this means is, whenever a pull request is created in your repo, PAC will see this annotation and go, "Aha! This PipelineRun is for pull requests!" and it will try to run it on your cluster.  Of course, there's a little gatekeeper – the person who created the pull request needs to be allowed to run it.
 
-The rules for determining whether a submitter is allowed to run a PipelineRun
-on CI are as follows. Any of the following conditions will allow a submitter to
-run a PipelineRun on CI:
+So, who's allowed to run pipelines on your CI?  Glad you asked! Here's the breakdown:  You're in if *any* of these are true:
 
-- The author of the pull request is the owner of the repository.
-- The author of the pull request is a collaborator on the repository.
-- The author of the pull request is a public or private member of the organization that
-  owns the repository.
-- The author of the pull request has permissions to push to branches inside the
-  repository.
+- You're the owner of the repository.  Makes sense, right?
+- You're a collaborator on the repository.  Teamwork!
+- You're a member (public or private) of the organization that owns the repository.  Organizational perks!
+- You've got permission to push code to branches in the repository.  You're a code contributor!
+- You're listed in the `OWNERS` file in the main directory of your repository's default branch (like `main` or `master`) on GitHub (or your Git provider).
 
-- The author of the pull request is listed in the `OWNERS` file located in the main
-  directory of the default branch on GitHub or your other service provider.
+   Let's talk about this `OWNERS` file.  It's basically a list of people who are allowed to do things, and it follows a format similar to the one used by Kubernetes Prow (you can see the details here: <https://www.kubernetes.dev/docs/guide/owners/>).  We keep it simple – we look for `approvers` and `reviewers` lists, and we treat them the same when it comes to running pipelines.
 
-  The OWNERS file adheres to a specific format, similar to the Prow OWNERS
-  file format (available at <https://www.kubernetes.dev/docs/guide/owners/>). We
-  support simple OWNERS configuration including `approvers` and `reviewers` lists
-  and they are treated equally in terms of permissions for executing a PipelineRun.
-  If the OWNERS file includes `filters` instead of a simple OWNERS configuration,
-  we only look for the everything matching `.*` filter and take the `approvers`
-  and `reviewers` lists from there. All other filters (matching specific files or
-  directories) are ignored.
+   Now, if your `OWNERS` file gets fancy and uses `filters` instead of just simple lists, we only pay attention to the filter that matches *everything* (`.*`).  We grab the `approvers` and `reviewers` from that and ignore any other filters that are specific to certain files or folders.
 
-  OWNERS_ALIASES is also supported and can be used for mapping of an alias name
-  to a list of usernames.
+   We also support `OWNERS_ALIASES`.  This is handy if you want to create nicknames for groups of people. You can map an alias (like "qa-team") to a list of usernames.
 
-  When you include contributors to the lists of `approvers` or `reviewers` in your
-  OWNERS files, Pipelines-as-Code enables those contributors to execute a PipelineRun.
+   The cool thing is, by adding people to the `approvers` or `reviewers` lists in your `OWNERS` files, you're giving them the green light to run pipelines!
 
-  For instance, if the `approvers` section of your OWNERS file in the main or
-  master branch of your repository appears as follows:
+   For example, if your `OWNERS` file in your main branch looks something like this:
 
-  ```yaml
-  approvers:
-    - approved
-  ```
+   ```yaml
+   approvers:
+     - approved
+   ```
 
-  then the user with the username "approved" will be granted permission.
+   Then anyone with the username "approved" is good to go!
 
-If the pull request author does not have the necessary permissions to run a
-PipelineRun, another user who does have the necessary permissions can comment
-`/ok-to-test` on the pull request to run the PipelineRun.
+Now, what if the person who made the pull request *doesn't* have permission?  Don't worry, there's a workaround!  Someone who *does* have permission can simply comment `/ok-to-test` on the pull request.  PAC will see this comment and say, "Okay, someone with authority gave the thumbs up!" and it will run the pipeline.
 
 {{< hint info >}}
-If you are using the GitHub Apps and have installed it on an organization,
-Pipelines-as-Code will only be triggered if it detects a Repo CR that matches
-one of the repositories in a URL on a repository that belongs to the
-organization where the GitHub App has been installed. Otherwise, Pipelines as
-Code will not be triggered.
+GitHub Apps users, listen up! If you're using GitHub Apps and you've installed it on an organization, PAC is a bit picky. It will only trigger pipelines if it finds a Repository CR that matches a repo URL *within* that organization.  If it doesn't find a match, no pipeline will run.  Just something to keep in mind!
 {{< /hint >}}
 
-## PipelineRun Execution
+## PipelineRun in Action!
 
-The PipelineRun will always run in the namespace of the Repository CRD associated with the repo
-that generated the event.
+So, where do these pipelines actually run?  They always run in the same namespace as the Repository CRD that's linked to the repository where the event came from.  Think of it as keeping things organized and in the right place.
 
-You can monitor the execution using the command line with the [tkn
-pac](../cli/#install) CLI :
+Want to watch your pipeline run?  The command line is your friend!  If you've got the `tkn pac` CLI tool installed (and you should! [Check out how to install it](../cli/#install)), you can use this command to see what's happening:
 
 ```console
 tkn pac logs -n my-pipeline-ci -L
 ```
 
-If you need to show another pipelinerun than the last one you can use the `tkn
-pac` logs command and it will ask you to select a PipelineRun attached to the
-repository :
+This will show you the logs for the *last* pipeline run in the `my-pipeline-ci` namespace.  If you want to see logs for an *older* pipeline run, just leave off the `-L`:
 
 ```console
 tkn pac logs -n my-pipeline-ci
 ```
 
-If you have set-up Pipelines-as-Code with the [Tekton Dashboard](https://github.com/tektoncd/dashboard/)
-or on OpenShift using the OpenShift Console.
-Pipelines-as-Code will post a URL in the Checks tab for GitHub apps to let you
-click on it and follow the pipeline execution directly there.
+PAC will be helpful and ask you to choose which PipelineRun you want to see logs for from the ones related to that repository.
 
-## Cancelling
+And guess what? If you're using the [Tekton Dashboard](https://github.com/tektoncd/dashboard/) or OpenShift's web console, PAC makes it even easier!  It'll post a link right in the "Checks" tab of your GitHub app.  Just click on it and you can follow the pipeline execution in a nice graphical interface. Pretty neat, huh?
 
-### Cancelling in-progress PipelineRuns
+## Need to Stop a Pipeline? Cancelling is Here!
+
+### Cancelling Pipelines That Are Running Right Now
 
 {{< tech_preview "Cancelling in progress PipelineRuns" >}}
 {{< support_matrix github_app="true" github_webhook="true" gitea="true" gitlab="true" bitbucket_cloud="true" bitbucket_server="false" >}}
 
-You can choose to cancel a PipelineRun that is currently in progress. This can
-be done by adding the annotation `pipelinesascode.tekton.dev/cancel-in-progress:
-"true"` in the PipelineRun definition.
+Sometimes, you might want to stop a pipeline that's currently running. Maybe you found a mistake or just need to halt things for some reason.  Good news! You can do that by adding this annotation to your `PipelineRun` definition:  `pipelinesascode.tekton.dev/cancel-in-progress: "true"`.
 
-This feature is effective only when the `PipelineRun` is in progress. If the
-`PipelineRun` has already completed or been cancelled, the cancellation will
-have no effect. (see the [max-keep-run annotation]({{< relref
-"/docs/guide/cleanups.md" >}}) instead to clean old `PipelineRuns`.)
+This only works if the `PipelineRun` is actually running. If it's already finished or been cancelled, this annotation won't do anything (think of it like trying to turn off a light that's already off).  If you want to clean up *old* `PipelineRuns`, you'll want to look into the [max-keep-run annotation]({{< relref "/docs/guide/cleanups.md" >}}) instead.
 
-The cancellation only applies to `PipelineRuns` within the scope of the current
-`PullRequest` or the targeted branch for Push events. For example, if two
-`PullRequests` each have a `PipelineRun` with the same name and the
-cancel-in-progress annotation, only the `PipelineRun` in the specific PullRequest
-will be cancelled. This prevents interference between separate PullRequests.
+Now, this cancellation is smart. It only applies to `PipelineRuns` within the current Pull Request or the branch you're pushing to.  So, if you have two different Pull Requests, each with a `PipelineRun` that has the same name and this `cancel-in-progress` annotation, cancelling in one Pull Request won't mess with the pipeline in the other.  They're kept separate.
 
-Older `PipelineRuns` are canceled only after the latest `PipelineRun` is
-successfully created and started. This annotation does not guarantee that only
-one `PipelineRun` will be active at a time.
+Also, it's important to know that older `PipelineRuns` are only cancelled *after* the newest `PipelineRun` has successfully started.  This annotation doesn't guarantee that only *one* `PipelineRun` will be running at any given moment.
 
-If a `PipelineRun` is in progress and the Pull Request is closed or declined,
-the `PipelineRun` will be canceled.
+One more thing: if a `PipelineRun` is running and the Pull Request gets closed or declined, PAC will automatically cancel that `PipelineRun` for you.  Handy!
 
-Currently, `cancel-in-progress` cannot be used in conjunction with the [concurrency
-limit]({{< relref "/docs/guide/repositorycrd.md#concurrency" >}}) setting.
+Just a heads-up:  `cancel-in-progress` and the [concurrency limit]({{< relref "/docs/guide/repositorycrd.md#concurrency" >}}) setting don't play well together right now.  You can't use them both at the same time.
 
-### Cancelling a PipelineRun with a GitOps command
+### Cancelling with a GitOps Command
 
-See [here]({{< relref "/docs/guide/gitops_commands.md#cancelling-a-pipelinerun" >}})
+There's another way to cancel a PipelineRun using GitOps commands. You can find out all about it [right here]({{< relref "/docs/guide/gitops_commands.md#cancelling-a-pipelinerun" >}}).
 
-## Restarting the PipelineRun
+## Need to Run That Pipeline Again? Restarting is Easy!
 
-You can restart a PipelineRun without having to send a new commit to
-your branch or pull_request.
+Sometimes a pipeline might fail, or maybe you just want to run it again without making any code changes.  No problem!  Restarting a `PipelineRun` is a breeze.
 
-### GitHub APPS
+### For GitHub Apps Users
 
-If you are using the GitHub apps method, you have the option to access the "Checks"
-tab where you can find an upper right button labeled "Re-Run". By clicking on
-this button, you can trigger Pipelines-as-Code to respond and recommence
-testing the PipelineRun.
+If you're using the GitHub Apps method, restarting is super simple. Just head over to the "Checks" tab on your GitHub pull request or commit.  In the upper right corner, you'll see a "Re-Run" button.  Give that button a click!
 
-This feature enables you to either rerun a particular pipeline or execute the
-entire suite of checks once again.
+Clicking "Re-Run" tells Pipelines as Code to jump back into action and run the pipeline again.  You can choose to rerun just that specific pipeline or rerun *all* the checks in the suite.  Your choice!
 
 ![github apps rerun check](/images/github-apps-rerun-checks.png)

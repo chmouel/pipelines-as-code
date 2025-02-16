@@ -3,43 +3,41 @@ title: Contributor Resources
 weight: 15
 ---
 
-# How to get started developing for the Pipelines-as-Code project
+# Want to Help Build Pipelines-as-Code? Awesome!
 
-## Please read the Code of conduct
+So you're thinking about contributing to Pipelines-as-Code? That's fantastic! We really appreciate your interest.  Here's a quick guide to get you up and running in our development world.
 
-It's important: <https://github.com/openshift-pipelines/pipelines-as-code/blob/main/code-of-conduct.md>
+## First Things First: Code of Conduct
 
-## Use the all in one install on kind to develop
+Seriously, please read our Code of Conduct. It's not just legal mumbo jumbo; it's how we keep things friendly and productive for everyone. You can find it right here: <https://github.com/openshift-pipelines/pipelines-as-code/blob/main/code-of-conduct.md>
 
-It uses kind under docker. You start it with:
+## Get Your Dev Environment Ready with `make dev`
+
+For local development, we've got this super handy "all-in-one" setup using `kind` (Kubernetes IN Docker).  Think of it as your personal Kubernetes playground, all tucked away in Docker.  Starting it up is a breeze:
 
 ```shell
 make dev
 ```
 
-When it finishes, you will have the following installed in your kind cluster:
+Once that command is done doing its magic, you'll have a complete development environment spun up in your `kind` cluster, including:
 
-- Kind Cluster deployment
-- Internal registry to push to from `ko`
-- An ingress controller with nginx for routing.
-- Tekton and Dashboard installed with an ingress route.
-- Pipelines as code deployed from your repo with ko.
-- Gitea service running locally so you can run the E2E tests against it (Gitea has the most comprehensive set of tests).
+- A `kind` Kubernetes cluster, naturally.
+- An internal Docker registry. This is where `ko` (more on that later) pushes your built images.
+- An ingress controller (nginx).  This is like a traffic cop for your cluster, directing web requests.
+- Tekton Pipelines and the Tekton Dashboard, all installed and accessible via an ingress route.  Basically, Tekton is the engine that powers Pipelines-as-Code, and the Dashboard gives you a visual peek into what's going on.
+- Pipelines-as-Code itself, deployed straight from your local code using `ko`.  This means you're testing the very code you're working on!
+- Gitea – a lightweight Git service – running locally. We use this for our end-to-end (E2E) tests because it's got the most comprehensive test suite.
 
-By default, it will try to install from
-$GOPATH/src/github.com/openshift-pipelines/pipelines-as-code. To override it,
-set the `PAC_DIRS` environment variable.
+By default, `make dev` assumes your Pipelines-as-Code code lives in `$GOPATH/src/github.com/openshift-pipelines/pipelines-as-code`.  If it's somewhere else, no worries! Just tell it where to look by setting the `PAC_DIRS` environment variable.
 
-- It will deploy under the nip.io domain reflector, the URL will be:
+-  URLs to check out once it's up and running (using nip.io, which is pretty neat for local testing):
 
-  - <http://controller.paac-127-0-0-1.nip.io>
-  - <http://dashboard.paac-127-0-0-1.nip.io>
+  - Controller: <http://controller.paac-127-0-0-1.nip.io>
+  - Dashboard: <http://dashboard.paac-127-0-0-1.nip.io>
 
-- You will need to create the secret yourself. If you have the [pass cli](https://www.passwordstore.org/)
-  installed, you can point to a folder that contains: github-application-id, github-private-key, webhook.secret
-  as configured from your GitHub application. Set the `PAC_PASS_SECRET_FOLDER`
-  environment variable to point to it.
-  For example:
+-  **Secrets time!** You'll need to create a Kubernetes secret for your GitHub App credentials.  If you're using `pass` (the password store command-line tool – highly recommended!), you can point `make dev` to a folder containing your `github-application-id`, `github-private-key`, and `webhook.secret` files.  These are the secrets you set up when you created your GitHub Application. Just set the `PAC_PASS_SECRET_FOLDER` environment variable.
+
+  For example, if you keep your GitHub app secrets under `github-app/` in pass:
 
   ```shell
   pass insert github-app/github-application-id
@@ -47,37 +45,37 @@ set the `PAC_DIRS` environment variable.
   pass insert -m github-app/github-private-key
   ```
 
-- If you need to redeploy your pac install (and only pac), you can do:
+- Need to redeploy just Pipelines-as-Code itself?  Easy peasy. You've got a few options:
 
   ```shell
   ./hack/dev/kind/install.sh -p
   ```
 
-  or
+  or the shorter `make` version:
 
   ```shell
   make rdev
   ```
 
-  or you can do this directly with ko:
+  Or, if you're feeling adventurous and want to use `ko` directly:
 
   ```shell
   env KO_DOCKER_REPO=localhost:5000 ko apply -f ${1:-"config"} -B
   ```
 
-- more flags: `-b` to only do the kind creation+nginx+docker image, `-r` to
-  install from the latest stable release (override with the env variable `PAC_RELEASE`)
-  instead of ko. `-c` will only do the pac configuration (i.e., creation of
-  secrets/ingress, etc..)
+-  There are a few more flags you can use with `./hack/dev/kind/install.sh`:
 
-- see the [install.sh](https://github.com/openshift-pipelines/pipelines-as-code/blob/main/hack/dev/kind/install.sh) -h for all flags
+  - `-b`:  Just creates the `kind` cluster, nginx ingress, and Docker image build setup – skips the rest.
+  - `-r`: Installs Pipelines-as-Code from the latest stable release (you can override which release with the `PAC_RELEASE` environment variable) instead of building from your local code using `ko`.
+  - `-c`: Only configures Pipelines-as-Code (creates secrets, ingress, etc.) – assumes it's already installed.
 
-## Gitea
+-  For all the nitty-gritty details and more flags, run:  `./hack/dev/kind/install.sh -h`.  It's got all the info!
 
-Gitea is "unofficially" supported. You just need to configure Gitea the same way
-you do for other webhook methods with a token.
+## Gitea: Our "Unofficially" Official Sidekick
 
-Here is an example of a Gitea NS/CRD/Secret (set to empty):
+We "unofficially" support Gitea.  Basically, if you know how to set up webhooks for other Git providers, you're golden with Gitea too.  Just configure it with a token, just like you would for, say, GitHub or GitLab.
+
+Here's a sample Kubernetes setup – Namespace, Repository CRD, and Secret – for Gitea (you'll need to fill in the blanks):
 
 ```yaml
 ---
@@ -115,263 +113,226 @@ stringData:
   webhook: "" # make sure it's empty when you set this up on the interface and here
 ```
 
-There are some gotchas with the webhook validation secret. Pipelines-as-Code
-detects a Gitea install and lets the user set an empty webhook secret (by default
-it's enforced).
+One little thing to watch out for with Gitea: webhook validation secrets. Pipelines-as-Code is smart enough to know when you're using Gitea and lets you get away with an empty webhook secret (usually, we require one).
 
-The `install.sh` script will by default spin up a new instance of GITEA to play
-with and run the Gitea E2E tests.
+The `install.sh` script we talked about earlier? It actually spins up a fresh Gitea instance for you to play with and run our Gitea E2E tests.  Pretty handy, right?
 
-You will need to create a Hook URL generated from <https://hook.pipelinesascode.com/new>
-into the environment variable `TEST_GITEA_SMEEURL`.
+To make the Gitea webhook work, you'll need a Hook URL. You can generate one at <https://hook.pipelinesascode.com/new> and then stick it into the `TEST_GITEA_SMEEURL` environment variable.
 
-The defaults are:
+By default, our Gitea setup uses:
 
 - URL: <https://localhost:3000/>
 - Admin Username: pac
 - Admin Password: pac
 
-The E2E tests will automatically create a repo using the admin username for each test.
+The E2E tests are clever – they'll automatically create a new repo for each test using that admin user.
 
-## Debugging E2E
+## Debugging Those Tricky E2E Tests
 
-As long as you have the secrets set up, you should be able to run the e2e tests properly.
-Gitea is the easiest to run (since they are self-contained). For the rest,
-you will need to set up some environment variables.
+If you've got your secrets all set up correctly, running the E2E tests should be smooth sailing. Gitea tests are the easiest to run since they're self-contained. For other Git providers, you'll need to set up a few environment variables.
 
-See the [e2e on kind
-workflow](https://github.com/openshift-pipelines/pipelines-as-code/blob/8f990bf5f348f6529deaa3693257907b42287a35/.github/workflows/kind-e2e-tests.yaml#L90)
-for all the variables set by the provider.
+Take a peek at our [e2e on kind workflow](https://github.com/openshift-pipelines/pipelines-as-code/blob/8f990bf5f348f6529deaa3693257907b42287a35/.github/workflows/kind-e2e-tests.yaml#L90) – it shows you all the environment variables we use for each provider.  It's a great reference!
 
-By default, the E2E tests clean up after themselves. If you want to keep the
-PR/MR open and the namespace where the test has been created, you can set the
-`TEST_NOCLEANUP` environment variable to `true`.
+By default, the E2E tests are tidy and clean up after themselves when they're done.  But, if you want to keep the Pull/Merge Request open and the namespace around for debugging, just set the `TEST_NOCLEANUP` environment variable to `true`.
 
-## Debugging controller
+## Diving into Controller Debugging
 
-Create a [hook](https://hook.pipelinesascode.com) URL and point your app/webhook to it. Use
-[gosmee](https://github.com/chmouel/gosmee) to forward the requests from GitHub
-to your locally installed controller (this can be either run on your debugger or
-inside kind).
+Want to get down and dirty with debugging the Pipelines-as-Code controller itself? Here's the scoop:
 
-An option of gosmee is to save the replay to a directory with `--saveDir
-/tmp/save`. If you go to that directory, a shell script will be created to replay
-the request that was sent directly to the controller without having to go through
-another push.
+First, snag yourself a [hook](https://hook.pipelinesascode.com) URL.  Then, point your Git provider's webhook to that URL.  Now, use this cool tool called [gosmee](https://github.com/chmouel/gosmee) to forward those webhook requests from GitHub (or GitLab, etc.) to your locally running controller.  You can run your controller either directly in your debugger or inside that `kind` cluster we set up earlier.
 
-Use [snazy](https://github.com/chmouel/snazy) to watch the logs. It supports pac
-by adding some context like which GitHub provider.
+`gosmee` has a neat trick: it can save webhook replays to a directory using `--saveDir /tmp/save`.  If you look in that directory, you'll find a shell script that lets you replay a specific webhook request directly to your controller – super handy for testing without triggering a whole new Git event!
+
+For watching controller logs in style, check out [snazy](https://github.com/chmouel/snazy). It's designed to make logs easier to read, especially for Pipelines-as-Code, adding helpful context like which Git provider is involved.
 
 ![snazy screenshot](/images/pac-snazy.png)
 
-## Using the Makefile targets
+##  Makefile Magic: Your Command-Line Toolkit
 
-Several targets are available in the Makefile if you want to run them
-manually. You can list all the makefile targets with:
+We've got a bunch of handy shortcuts in our `Makefile`.  To see what's available, just run:
 
 ```shell
 make help
 ```
 
-For example, to test and lint the go files:
+For example, to run Go tests and linting, it's as simple as:
 
 ```shell
 make test lint-go
 ```
 
-If you add a CLI command with help, you will need to regenerate the golden files:
+If you're adding new CLI commands with help text, you'll need to update the "golden files" (don't worry too much about what those are right now):
 
 ```shell
 make update-golden
 ```
 
-## Configuring the Pre Push Git checks
+##  Pre-Push Git Checks: Keeping Things Shipshape
 
-We are using several tools to verify that pipelines-as-code is up to a good
-coding and documentation standard. We use pre-commit tools to ensure before you
-send your PR that the commit is valid.
+We're pretty serious about code quality and documentation around here. We use pre-commit hooks to help make sure everything you contribute is top-notch.  These checks run *before* you even push your code, catching potential issues early.
 
-First, you need to install pre-commit:
+First, you gotta install pre-commit:
 
 <https://pre-commit.com/>
 
-It should be available as a package on Fedora and Brew or install it with `pip`.
+It's probably available as a package for your system (like on Fedora or via Brew), or you can install it with `pip`.
 
-Once installed, add the hook to your repo by doing:
+Once pre-commit is installed, set it up in your Pipelines-as-Code repo:
 
 ```shell
 pre-commit install
 ```
 
-This will run several `hooks` on the files that have been changed before you
-_push_ to your remote branch. If you need to skip the verification (for whatever
-reason), you can do:
+This sets up a bunch of "hooks" that will run on your changed files whenever you try to `git push`. If something fails a check, pre-commit will let you know.
+
+Need to skip the checks for some reason? You can bypass them with:
 
 ```shell
 git push --no-verify
 ```
 
-or you can disable an individual hook with the `SKIP` variable:
+Or, if you just want to skip a specific hook (say, `lint-md`), you can use the `SKIP` environment variable:
 
 ```shell
 SKIP=lint-md git push
 ```
 
-If you want to manually run on everything:
+Want to manually run all the pre-commit checks on everything?  Just run:
 
 ```shell
 make pre-commit
 ```
 
-## Developing the Documentation
+##  Docs are King (and Queen!): Developing Documentation
 
-Documentation is important to us. Most of the time, new features or changes in
-behavior need to include documentation as part of the Pull Request.
+Documentation is super important to us.  If you're adding a new feature or changing how something works, including documentation in your Pull Request is usually a must.
 
-We use [hugo](https://gohugo.io). If you want to preview the changes you made
-locally while developing, you can run this command:
+We use [Hugo](https://gohugo.io) to build our website.  If you want to preview your doc changes locally while you're working, run this:
 
 ```shell
 make dev-docs
 ```
 
-This will download a version of Hugo that is the same as what we use on
-Cloudflare Pages (where [pipelinesascode.com](https://pipelinesascode.com) is
-generated) and start the Hugo server with a live preview of the docs on:
+This will download the same version of Hugo we use to build [pipelinesascode.com](https://pipelinesascode.com) (which is hosted on Cloudflare Pages) and start a local Hugo server with live previews at:
 
 <https://localhost:1313>
 
-When we push the release, the docs get rebuilt automatically by CloudFare pages.
+When we release a new version, Cloudflare Pages automatically rebuilds the docs.
 
-By default, the website <https://pipelinesascode.com> only contains the "stable"
-documentation. If you want to preview the dev documentation as from `main`, you
-need to go to this URL:
+By default, [pipelinesascode.com](https://pipelinesascode.com) shows the "stable" documentation.  If you want to see the latest docs from the `main` branch (the "dev" docs), head over to:
 
 <https://main.pipelines-as-code.pages.dev>
 
-There is a drop-down at the bottom of the page to let you change the older
-major version.
+There's a dropdown at the bottom of the page where you can switch to older major versions of the documentation too.
 
-## Documentation when we are doing the Release Process
+##  Documentation During Releases
 
-- See here [release-process]({{< relref "/docs/dev/release-process.md" >}})
+We have a whole process for releases, and documentation is part of it! You can read about it here: [release-process]({{< relref "/docs/dev/release-process.md" >}})
 
-## How to update all dependencies in Pipelines-as-Code
+## Keeping Dependencies Fresh: Updating in Pipelines-as-Code
 
-### Go Modules
+### Go Modules: Staying Up-to-Date
 
-Unless that's not possible, we try to update all dependencies to the
-latest version as long as it's compatible with the Pipeline version as shipped by
-OpenShift Pipelines Operator (which should be conservative).
+We try to keep our Go dependencies as up-to-date as possible, as long as they play nicely with the version of Tekton Pipelines that OpenShift Pipelines Operator ships with (we like to be a bit cautious there).
 
-Every time you update the Go modules, check if you can remove the `replace`
-clause which pins a dependency to a specific version/commit or match the replace
-to the tektoncd/pipeline version.
+Whenever you update Go modules, it's a good idea to check if you can remove any `replace` directives in `go.mod`. These are used to pin dependencies to specific versions or commits, and we want to avoid them if we can, or at least match them to the Tekton Pipelines version if needed.
 
-- Update all go modules:
+Here's how to update Go modules:
 
-  ```shell
-  go get -u ./...
-  make vendor
-  ```
+```shell
+go get -u ./...
+make vendor
+```
 
-- Go to <https://github.com/google/go-github> and note the latest go version, for example: v59
-- Open a file that uses the go-github library (i.e., pkg/provider/github/detect.go) and check the old version, for example: v56
+Next, go to <https://github.com/google/go-github> and see what the latest Go version is (e.g., v59).  Then, open a Go file that uses the `go-github` library (like `pkg/provider/github/detect.go`) and check the *old* version (e.g., v56).
 
-- Run this sed command:
+Run this `sed` command to update the import paths in your code:
 
-  ```shell
-  find -name '*.go'|xargs sed -i 's,github.com/google/go-github/v56,github.com/google/go-github/v59,'
-  ```
+```shell
+find -name '*.go'|xargs sed -i 's,github.com/google/go-github/v56,github.com/google/go-github/v59,'
+```
 
-- This will update everything. Sometimes the library ghinstallation is not
-updated with the new version, so you will need to keep the old version kept in
-there. For example, you will get this kind of error:
+This should update most things. Sometimes, the `ghinstallation` library doesn't get updated right away, so you might need to keep the older version for that one. You'll know if you see errors like this:
 
-  ```text
-  pkg/provider/github/parse_payload.go:56:33: cannot use &github.InstallationTokenOptions{…} (value of type *"github.com/google/go-github/v59/github".InstallationTokenOptions) as *"github.com/google/go-github/v57/github".InstallationTokenOptions value in assignment
-  ```
+```text
+pkg/provider/github/parse_payload.go:56:33: cannot use &github.InstallationTokenOptions{…} (value of type *"github.com/google/go-github/v59/github".InstallationTokenOptions) as *"github.com/google/go-github/v57/github".InstallationTokenOptions value in assignment
+```
 
-- Check that everything compiles and tests are passing with this command:
+After updating, make sure everything still builds and the tests pass:
 
-  ```shell
-  make allbinaries test lint
-  ```
+```shell
+make allbinaries test lint
+```
 
-- Some structs need to be updated. Some of them are going to fail as
-  deprecated, so you will need to figure out how to update them. Don't be lazy and avoid the
-  update with a nolint or a pin to a dep. You only delay the inevitable until
-  the problem comes back and hits you harder.
+Sometimes, structs in the libraries change, and things might break because of deprecations.  Don't just ignore these!  Figure out how to update your code to use the new versions correctly.  Don't be tempted to just add a `nolint` or pin to an older dependency – that just kicks the can down the road and makes things harder later.
 
-### Go version
+### Go Version: Keeping Up with RHEL
 
-- Check that the go version is updated to the latest RHEL version:
+We aim to use the latest Go version that's in RHEL (Red Hat Enterprise Linux).  To check this:
 
-  ```shell
-  docker pull golang
-  docker run golang go version
-  ```
+```shell
+docker pull golang
+docker run golang go version
+```
 
-- If this is not the same as what we have in go.mod, then you need to update the go.mod version. Then you need to update, for example, here 1.20:
+If that version is newer than what we have in `go.mod`, you'll need to update `go.mod`.  For example, if the latest RHEL Go version is 1.20:
 
-  ```shell
-  go mod tidy -go=1.20
-  ```
+```shell
+go mod tidy -go=1.20
+```
 
-- Grep for the image go-toolset everywhere with:
+Then, search the codebase for `go-toolset` images:
 
-  ```shell
-  git grep golang:
-  ```
+```shell
+git grep golang:
+```
 
-  and change the old version to the new version
+and update the old version to the new one in those places.
 
-### Update the pre-commit rules
+### Pre-commit and Vale Rules: Keeping Linters Fresh
 
-  ```shell
-  pre-commit autoupdate
-  ```
+Update the pre-commit rules:
 
-### Update the vale rules
+```shell
+pre-commit autoupdate
+```
 
-  ```shell
-  vale sync
-  make lint-md
-  ```
+Update the Vale (grammar checker) rules:
 
-## Tools that are useful
+```shell
+vale sync
+make lint-md
+```
 
-Several tools are used in CI and `pre-commit`. The non-exhaustive list you
-need to have on your system:
+##  Tools of the Trade:  What You'll Need
 
-- [golangci-lint](https://github.com/golangci/golangci-lint) - For golang lint
-- [yamllint](https://github.com/adrienverge/yamllint) - For YAML lint
-- [shellcheck](https://www.shellcheck.net/) - For shell scripts linting
-- [ruff](https://github.com/astral-sh/ruff) - Python code formatter check
-- [vale](https://github.com/errata-ai/vale) - For grammar check
-- [markdownlint](https://github.com/markdownlint/markdownlint) - For markdown lint
-- [codespell](https://github.com/codespell-project/codespell) - For code spelling
-- [gitlint](https://github.com/jorisroovers/gitlint) - For git commit messages lint
-- [hugo](https://gohugo.io) - For documentation
-- [ko](https://github.com/google/ko) - To rebuild and push change to kube cluster.
-- [kind](https://kind.sigs.k8s.io/) - For local devs
-- [snazy](https://github.com/chmouel/snazy) - To parse json logs nicely
-- [pre-commit](https://pre-commit.com/) - For checking commits before sending it
-  to the outer loop.
-- [pass](https://www.passwordstore.org/) - For getting/storing secrets
-- [gosmee](https://github.com/chmouel/gosmee) - For replaying webhooks
+Here's a (not exhaustive) list of tools that we use in CI and pre-commit.  You'll probably want to have these on your system:
 
-## Target architecture
+- [golangci-lint](https://github.com/golangci/golangci-lint) - For Go code linting.
+- [yamllint](https://github.com/adrienverge/yamllint) - For YAML linting.
+- [shellcheck](https://www.shellcheck.net/) - For shell script linting.
+- [ruff](https://github.com/astral-sh/ruff) - Python code formatter and checker.
+- [vale](https://github.com/errata-ai/vale) - For grammar and style checking in docs.
+- [markdownlint](https://github.com/markdownlint/markdownlint) - For Markdown linting.
+- [codespell](https://github.com/codespell-project/codespell) - For catching typos in code.
+- [gitlint](https://github.com/jorisroovers/gitlint) - For linting Git commit messages (making them consistent).
+- [hugo](https://gohugo.io) - For building the documentation website.
+- [ko](https://github.com/google/ko) - To build and push container images to your Kubernetes cluster.
+- [kind](https://kind.sigs.k8s.io/) - For local Kubernetes development.
+- [snazy](https://github.com/chmouel/snazy) - To make JSON logs readable.
+- [pre-commit](https://pre-commit.com/) - For running checks before you commit code.
+- [pass](https://www.passwordstore.org/) - For managing secrets securely.
+- [gosmee](https://github.com/chmouel/gosmee) - For replaying webhook events.
 
-- We target arm64 and amd64. The dogfooding is on arm64, so we need to ensure
-that all jobs and docker images used in the .tekton PipelineRuns are built
-for arm64.
-- A GitHub action is using [ko](https://ko.build/) to build the amd64 and arm64 images whenever there is
-a push to a branch or for a release.
+##  Target Architecture:  arm64 and amd64
 
-# Links
+We're building Pipelines-as-Code to run on both `arm64` and `amd64` architectures.  Our own dogfooding environment is on `arm64`, so it's important that all the jobs and Docker images we use in our Tekton Pipelines are built for `arm64`.
 
-- [Jira Backlog](https://issues.redhat.com/browse/SRVKP-2144?jql=component%20%3D%20%22Pipeline%20as%20Code%22%20%20AND%20status%20!%3D%20Done)
-- [Bitbucket Server Rest API](https://docs.atlassian.com/bitbucket-server/rest/7.17.0/bitbucket-rest.html)
-- [GitHub API](https://docs.github.com/en/rest/reference)
-- [GitLab API](https://docs.gitlab.com/ee/api/api_resources.html)
+We use a GitHub Action and [ko](https://ko.build/) to automatically build both `amd64` and `arm64` images whenever there's a push to a branch or for a release.
+
+# Helpful Links
+
+- [Jira Backlog](https://issues.redhat.com/browse/SRVKP-2144?jql=component%20%3D%20%22Pipeline%20as%20Code%22%20%20AND%20status%20!%3D%20Done) -  See what we're currently working on and planning.
+- [Bitbucket Server Rest API](https://docs.atlassian.com/bitbucket-server/rest/7.17.0/bitbucket-rest.html) - For working with Bitbucket Server.
+- [GitHub API](https://docs.github.com/en/rest/reference) - For interacting with GitHub programmatically.
+- [GitLab API](https://docs.gitlab.com/ee/api/api_resources.html) - For automating tasks in GitLab.
