@@ -179,7 +179,7 @@ For example, to test and lint the go files:
 make test lint-go
 ```
 
-If you add a CLI command with help, you will need to regenerate the golden files:
+If you add a CLI command with help, you will need to regenerate the golden files, for the unittest files you run:
 
 ```shell
 make update-golden
