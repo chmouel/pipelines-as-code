@@ -128,7 +128,7 @@ type CreateGroupVariableOptions struct {
 	Description      *string            `url:"description,omitempty" json:"description,omitempty"`
 	EnvironmentScope *string            `url:"environment_scope,omitempty" json:"environment_scope,omitempty"`
 	Masked           *bool              `url:"masked,omitempty" json:"masked,omitempty"`
-	MaskedAndHidden  *bool              `url:"masked_and_hidden,omitempty" json:"hidden,omitempty"`
+	MaskedAndHidden  *bool              `url:"masked_and_hidden,omitempty" json:"masked_and_hidden,omitempty"`
 	Protected        *bool              `url:"protected,omitempty" json:"protected,omitempty"`
 	Raw              *bool              `url:"raw,omitempty" json:"raw,omitempty"`
 	VariableType     *VariableTypeValue `url:"variable_type,omitempty" json:"variable_type,omitempty"`

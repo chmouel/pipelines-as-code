@@ -20,6 +20,15 @@ This is not needed when fixing a bug or adding an enhancement, as long as the
 enhancement you are trying to add can be found in the public GitLab API docs as
 this project only supports what is in the public API docs.
 
+### Use community fork to contribute
+
+To contribute to this project we recommend that you use the
+[community fork](https://gitlab.com/gitlab-community/api/client-go).
+Have a look at the
+[community fork README](https://gitlab.com/gitlab-community#gitlab-community-forks)
+to learn more about what it is and why you should prefer it over
+creating your own fork to contribute.
+
 ## Coding style
 
 We try to follow the Go best practices, where it makes sense, and use

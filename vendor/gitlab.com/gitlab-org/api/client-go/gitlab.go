@@ -117,6 +117,7 @@ type Client struct {
 	Boards                       *IssueBoardsService
 	Branches                     *BranchesService
 	BroadcastMessage             *BroadcastMessagesService
+	BulkImports                  *BulkImportsService
 	CIYMLTemplate                *CIYMLTemplatesService
 	ClusterAgents                *ClusterAgentsService
 	Commits                      *CommitsService
@@ -154,6 +155,7 @@ type Client struct {
 	GroupMilestones              *GroupMilestonesService
 	GroupProtectedEnvironments   *GroupProtectedEnvironmentsService
 	GroupRepositoryStorageMove   *GroupRepositoryStorageMoveService
+	GroupSecuritySettings        *GroupSecuritySettingsService
 	GroupSSHCertificates         *GroupSSHCertificatesService
 	GroupVariables               *GroupVariablesService
 	GroupWikis                   *GroupWikisService
@@ -357,6 +359,7 @@ func newClient(options ...ClientOptionFunc) (*Client, error) {
 	c.Boards = &IssueBoardsService{client: c}
 	c.Branches = &BranchesService{client: c}
 	c.BroadcastMessage = &BroadcastMessagesService{client: c}
+	c.BulkImports = &BulkImportsService{client: c}
 	c.CIYMLTemplate = &CIYMLTemplatesService{client: c}
 	c.ClusterAgents = &ClusterAgentsService{client: c}
 	c.Commits = &CommitsService{client: c}
@@ -394,6 +397,7 @@ func newClient(options ...ClientOptionFunc) (*Client, error) {
 	c.GroupMilestones = &GroupMilestonesService{client: c}
 	c.GroupProtectedEnvironments = &GroupProtectedEnvironmentsService{client: c}
 	c.GroupRepositoryStorageMove = &GroupRepositoryStorageMoveService{client: c}
+	c.GroupSecuritySettings = &GroupSecuritySettingsService{client: c}
 	c.GroupSSHCertificates = &GroupSSHCertificatesService{client: c}
 	c.GroupVariables = &GroupVariablesService{client: c}
 	c.GroupWikis = &GroupWikisService{client: c}

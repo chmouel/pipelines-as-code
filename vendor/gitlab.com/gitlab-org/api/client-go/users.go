@@ -56,6 +56,7 @@ type BasicUser struct {
 	Username  string     `json:"username"`
 	Name      string     `json:"name"`
 	State     string     `json:"state"`
+	Locked    bool       `json:"locked"`
 	CreatedAt *time.Time `json:"created_at"`
 	AvatarURL string     `json:"avatar_url"`
 	WebURL    string     `json:"web_url"`
@@ -119,6 +120,7 @@ type User struct {
 	CustomAttributes               []*CustomAttribute `json:"custom_attributes"`
 	NamespaceID                    int                `json:"namespace_id"`
 	Locked                         bool               `json:"locked"`
+	CreatedBy                      *BasicUser         `json:"created_by"`
 }
 
 // UserIdentity represents a user identity.
@@ -494,23 +496,24 @@ func (s *UsersService) GetUserAssociationsCount(user int, options ...RequestOpti
 
 // SSHKey represents a SSH key.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/users.html#list-ssh-keys
+// GitLab API docs: https://docs.gitlab.com/ee/api/user_keys.html#list-all-ssh-keys
 type SSHKey struct {
 	ID        int        `json:"id"`
 	Title     string     `json:"title"`
 	Key       string     `json:"key"`
 	CreatedAt *time.Time `json:"created_at"`
 	ExpiresAt *time.Time `json:"expires_at"`
+	UsageType string     `json:"usage_type"`
 }
 
 // ListSSHKeysOptions represents the available ListSSHKeys options.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/users.html#list-ssh-keys
+// GitLab API docs: https://docs.gitlab.com/ee/api/user_keys.html#list-all-ssh-keys
 type ListSSHKeysOptions ListOptions
 
 // ListSSHKeys gets a list of currently authenticated user's SSH keys.
 //
-// GitLab API docs: https://docs.gitlab.com/ee/api/users.html#list-ssh-keys
+// GitLab API docs: https://docs.gitlab.com/ee/api/user_keys.html#list-all-ssh-keys
 func (s *UsersService) ListSSHKeys(opt *ListSSHKeysOptions, options ...RequestOptionFunc) ([]*SSHKey, *Response, error) {
 	req, err := s.client.NewRequest(http.MethodGet, "user/keys", opt, options)
 	if err != nil {
@@ -1552,7 +1555,6 @@ func (s *UsersService) CreateUserRunner(opts *CreateUserRunnerOptions, options .
 
 	return r, resp, nil
 }
-
 
 // CreateServiceAccountUserOptions represents the available CreateServiceAccountUser() options.
 //
