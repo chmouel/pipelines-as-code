@@ -4,18 +4,29 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/google/go-github/v71/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/acl"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/policy"
+	authv1 "k8s.io/api/authorization/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // CheckPolicyAllowing check that policy is allowing the event to be processed
 // we  check the membership of the team allowed
 // if the team is not found we explicitly disallow the policy, user have to correct the setting.
 func (v *Provider) CheckPolicyAllowing(ctx context.Context, event *info.Event, allowedTeams []string) (bool, string) {
+	// Check auth method, if it's kubernetesGroups, use SAR to check membership
+	if allowed, err := v.checkKubernetesGroupMembership(ctx, event, allowedTeams); allowed {
+		return true, fmt.Sprintf("allowing user: %s as a member of the owners file", event.Sender)
+	} else if err != nil {
+		return false, fmt.Sprintf("error while checking owners file: %s", err.Error())
+	}
+
+	// Default to GitHub teams
 	for _, team := range allowedTeams {
 		// TODO: caching
 		opt := github.ListOptions{PerPage: v.PaginedNumber}
@@ -44,6 +55,58 @@ func (v *Provider) CheckPolicyAllowing(ctx context.Context, event *info.Event, a
 	}
 
 	return false, fmt.Sprintf("user: %s is not a member of any of the allowed teams: %v", event.Sender, allowedTeams)
+}
+
+func (v *Provider) checkKubernetesGroupMembership(ctx context.Context, event *info.Event, allowedGroups []string) (bool, error) {
+	// 1. Check if user is in any allowed group
+	crbList, err := v.Run.Clients.Kube.RbacV1().ClusterRoleBindings().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return false, fmt.Errorf("error listing ClusterRoleBindings: %w", err)
+	}
+
+	inGroup := false
+	for _, crb := range crbList.Items {
+		if !slices.Contains(allowedGroups, crb.Name) {
+			continue
+		}
+
+		for _, subject := range crb.Subjects {
+			if subject.Kind == "User" && subject.Name == event.Sender {
+				inGroup = true
+				break
+			}
+		}
+		if inGroup {
+			break
+		}
+	}
+
+	if !inGroup {
+		return false, fmt.Errorf("user %s not in allowed groups", event.Sender)
+	}
+
+	// 2. Check if user can create PipelineRuns
+	sar := &authv1.SubjectAccessReview{
+		Spec: authv1.SubjectAccessReviewSpec{
+			User: event.Sender,
+			ResourceAttributes: &authv1.ResourceAttributes{
+				Namespace: v.repo.GetNamespace(),
+				Verb:      "create",
+				Resource:  "pipelineruns",
+				Group:     "tekton.dev",
+			},
+		},
+	}
+
+	resp, err := v.Run.Clients.Kube.AuthorizationV1().SubjectAccessReviews().Create(ctx, sar, metav1.CreateOptions{})
+	if err != nil {
+		return false, fmt.Errorf("error creating SubjectAccessReview: %w", err)
+	}
+	if !resp.Status.Allowed {
+		return false, fmt.Errorf("user lacks permission to create PipelineRuns")
+	}
+
+	return true, nil
 }
 
 // IsAllowedOwnersFile get the owner files (OWNERS, OWNERS_ALIASES) from main branch
