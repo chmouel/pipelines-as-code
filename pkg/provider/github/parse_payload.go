@@ -214,17 +214,15 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 	var err error
 
 	processedEvent = info.NewEvent()
-
 	switch gitEvent := eventInt.(type) {
 	case *github.CheckRunEvent:
 		if v.Client == nil {
 			return nil, fmt.Errorf("check run rerequest is only supported with github apps integration")
 		}
-
-		if *gitEvent.Action != "rerequested" {
-			return nil, fmt.Errorf("only issue recheck is supported in checkrunevent")
+		if gitEvent.GetAction() == "rerequested" || gitEvent.GetAction() == "requested_action" {
+			return v.handleReRequestEvent(ctx, gitEvent)
 		}
-		return v.handleReRequestEvent(ctx, gitEvent)
+		return nil, fmt.Errorf("only issue recheck is supported in checkrunevent")
 	case *github.CheckSuiteEvent:
 		if v.Client == nil {
 			return nil, fmt.Errorf("check suite rerequest is only supported with github apps integration")
@@ -339,17 +337,27 @@ func (v *Provider) handleReRequestEvent(ctx context.Context, event *github.Check
 	runevent.HeadBranch = event.GetCheckRun().GetCheckSuite().GetHeadBranch()
 	runevent.HeadURL = event.GetCheckRun().GetCheckSuite().GetRepository().GetHTMLURL()
 	// If we don't have a pull_request in this it probably mean a push
-	if len(event.GetCheckRun().GetCheckSuite().PullRequests) == 0 {
-		runevent.BaseBranch = runevent.HeadBranch
-		runevent.BaseURL = runevent.HeadURL
-		runevent.EventType = "push"
-		// we allow the rerequest user here, not the push user, i guess it's
-		// fine because you can't do a rereq without being a github owner?
-		runevent.Sender = event.GetSender().GetLogin()
-		v.userType = event.GetSender().GetType()
-		return runevent, nil
+
+	if event.GetCheckRun().GetExternalID() != "" {
+		split := strings.Split(event.GetCheckRun().GetExternalID(), "|")
+		if len(split) > 1 {
+			runevent.PullRequestNumber, _ = strconv.Atoi(split[1])
+			runevent.Sender = *event.GetSender().Login
+		}
 	}
-	runevent.PullRequestNumber = event.GetCheckRun().GetCheckSuite().PullRequests[0].GetNumber()
+	if runevent.PullRequestNumber == 0 {
+		if len(event.GetCheckRun().GetCheckSuite().PullRequests) == 0 {
+			runevent.BaseBranch = runevent.HeadBranch
+			runevent.BaseURL = runevent.HeadURL
+			runevent.EventType = "push"
+			// we allow the rerequest user here, not the push user, i guess it's
+			// fine because you can't do a rereq without being a github owner?
+			runevent.Sender = event.GetSender().GetLogin()
+			v.userType = event.GetSender().GetType()
+			return runevent, nil
+		}
+		runevent.PullRequestNumber = event.GetCheckRun().GetCheckSuite().PullRequests[0].GetNumber()
+	}
 	runevent.TriggerTarget = triggertype.PullRequest
 	v.Logger.Infof("Recheck of PR %s/%s#%d has been requested", runevent.Organization, runevent.Repository, runevent.PullRequestNumber)
 	return v.getPullRequest(ctx, runevent)

@@ -59,8 +59,12 @@ func (v *Provider) getExistingCheckRunID(ctx context.Context, runevent *info.Eve
 					return checkrun.ID, nil
 				}
 			}
-			if *checkrun.ExternalID == status.PipelineRunName {
-				return checkrun.ID, nil
+
+			if checkrun.GetExternalID() != "" {
+				split := strings.Split(checkrun.GetExternalID(), "|")
+				if len(split) > 0 && split[0] == status.PipelineRunName {
+					return checkrun.ID, nil
+				}
 			}
 		}
 		if resp.NextPage == 0 {
@@ -76,9 +80,9 @@ func isPendingApprovalCheckrun(run *github.CheckRun) bool {
 	if run == nil || run.Output == nil {
 		return false
 	}
-	if run.Output.Title != nil && strings.Contains(*run.Output.Title, "Pending") &&
+	if run.Output.Title != nil && strings.Contains(run.Output.GetTitle(), "Pending") &&
 		run.Output.Summary != nil &&
-		strings.Contains(*run.Output.Summary, "is waiting for approval") {
+		strings.Contains(run.Output.GetSummary(), "is waiting for an approval") {
 		return true
 	}
 	return false
@@ -114,7 +118,7 @@ func (v *Provider) createCheckRunStatus(ctx context.Context, runevent *info.Even
 		HeadSHA:    runevent.SHA,
 		Status:     github.Ptr("in_progress"),
 		DetailsURL: github.Ptr(status.DetailsURL),
-		ExternalID: github.Ptr(status.PipelineRunName),
+		ExternalID: github.Ptr(fmt.Sprintf("%s|%d", status.PipelineRunName, runevent.PullRequestNumber)),
 		StartedAt:  &now,
 	}
 
@@ -254,8 +258,9 @@ func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info
 		Status: github.Ptr(statusOpts.Status),
 		Output: checkRunOutput,
 	}
+
 	if statusOpts.PipelineRunName != "" {
-		opts.ExternalID = github.Ptr(statusOpts.PipelineRunName)
+		opts.ExternalID = github.Ptr(fmt.Sprintf("%s|%d", statusOpts.PipelineRunName, runevent.PullRequestNumber))
 	}
 	if statusOpts.DetailsURL != "" {
 		opts.DetailsURL = &statusOpts.DetailsURL
@@ -270,6 +275,16 @@ func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info
 		opts.Conclusion = github.Ptr("cancelled")
 	}
 
+	if statusOpts.AccessDenied {
+		opts.Status = nil
+		opts.Actions = []*github.CheckRunAction{
+			{
+				Label:       "Approve",
+				Description: "Approve this check",
+				Identifier:  "approve_checks",
+			},
+		}
+	}
 	_, _, err = v.Client.Checks.UpdateCheckRun(ctx, runevent.Organization, runevent.Repository, *checkRunID, opts)
 	return err
 }
@@ -372,7 +387,7 @@ func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statu
 			statusOpts.Summary = "is skipping this commit."
 		} else {
 			// for unauthorized user set title as Pending approval
-			statusOpts.Summary = "is waiting for approval."
+			statusOpts.Summary = "is waiting for an approval"
 		}
 	case "cancelled":
 		statusOpts.Title = "Cancelled"
@@ -398,7 +413,6 @@ func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statu
 	if runevent.InstallationID > 0 {
 		return v.getOrUpdateCheckRunStatus(ctx, runevent, statusOpts)
 	}
-
 	// Otherwise use the update status commit API
 	return v.createStatusCommit(ctx, runevent, statusOpts)
 }

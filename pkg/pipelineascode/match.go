@@ -416,6 +416,7 @@ func (p *PacRun) checkAccessOrErrror(ctx context.Context, repo *v1alpha1.Reposit
 	}
 	p.eventEmitter.EmitMessage(repo, zap.InfoLevel, "RepositoryPermissionDenied", msg)
 	status.Text = msg
+	status.AccessDenied = true
 
 	if err := p.vcx.CreateStatus(ctx, p.event, status); err != nil {
 		return false, fmt.Errorf("failed to run create status, user is not allowed to run the CI:: %w", err)

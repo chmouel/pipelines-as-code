@@ -96,6 +96,9 @@ func (v *Provider) detectTriggerTypeFromPayload(ghEventType string, eventInt any
 		if event.GetAction() == "rerequested" && event.GetCheckRun() != nil {
 			return triggertype.CheckRunRerequested, ""
 		}
+		if event.GetAction() == "requested_action" && event.GetCheckRun() != nil {
+			return triggertype.CheckRunRerequested, ""
+		}
 		return "", fmt.Sprintf("check_run: unsupported action \"%s\"", event.GetAction())
 	case *github.CommitCommentEvent:
 		if event.GetAction() == "created" {

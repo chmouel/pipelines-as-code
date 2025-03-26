@@ -435,7 +435,7 @@ func (v *Provider) getPullRequest(ctx context.Context, runevent *info.Event) (*i
 	runevent.SHAURL = fmt.Sprintf("%s/commit/%s", pr.GetHTMLURL(), pr.GetHead().GetSHA())
 	runevent.PullRequestTitle = pr.GetTitle()
 
-	// TODO: check if we really need this
+	// NOTE: This is used when doing a approved PR from check_run the author is the one that approved the PR run not the author of the PR (which would have previously be denied)
 	if runevent.Sender == "" {
 		runevent.Sender = pr.GetUser().GetLogin()
 	}
