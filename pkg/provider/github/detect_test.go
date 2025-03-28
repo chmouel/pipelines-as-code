@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/go-github/v70/github"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
 	"gotest.tools/v3/assert"
 )
@@ -344,6 +345,66 @@ func TestProvider_Detect(t *testing.T) {
 			assert.NilError(t, err)
 			assert.Equal(t, tt.isGH, isGh)
 			assert.Equal(t, tt.processReq, processReq)
+		})
+	}
+}
+
+func TestDetectTriggerTypeFromPayloadCheckRun(t *testing.T) {
+	testCases := []struct {
+		name            string
+		eventType       string
+		event           interface{}
+		expectedTrigger triggertype.Trigger
+		expectedErr     string
+	}{
+		{
+			name:      "check_run rerequested",
+			eventType: "check_run",
+			event: &github.CheckRunEvent{
+				Action: github.String("rerequested"),
+				CheckRun: &github.CheckRun{
+					CheckSuite: &github.CheckSuite{},
+				},
+			},
+			expectedTrigger: triggertype.CheckRunRerequested,
+			expectedErr:     "",
+		},
+		{
+			name:      "check_run requested_action",
+			eventType: "check_run",
+			event: &github.CheckRunEvent{
+				Action: github.String("requested_action"),
+				CheckRun: &github.CheckRun{
+					CheckSuite: &github.CheckSuite{},
+				},
+			},
+			expectedTrigger: triggertype.CheckRunRerequested,
+			expectedErr:     "",
+		},
+		{
+			name:      "check_run unsupported action",
+			eventType: "check_run",
+			event: &github.CheckRunEvent{
+				Action: github.String("unsupported_action"),
+				CheckRun: &github.CheckRun{
+					CheckSuite: &github.CheckSuite{},
+				},
+			},
+			expectedTrigger: "",
+			expectedErr:     "check_run: unsupported action \"unsupported_action\"",
+		},
+	}
+
+	logger, _ := logger.GetLogger()
+	provider := Provider{
+		Logger: logger,
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			trigger, errString := provider.detectTriggerTypeFromPayload(tc.eventType, tc.event)
+			assert.Equal(t, trigger, tc.expectedTrigger)
+			assert.Equal(t, errString, tc.expectedErr)
 		})
 	}
 }

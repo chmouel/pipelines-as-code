@@ -170,7 +170,7 @@ func TestGetExistingPendingApprovalCheckRunID(t *testing.T) {
 					"external_id": "%s",
 					"output": {
 						"title": "%s",
-						"summary": "My CI is waiting for approval"
+						"summary": "My CI is waiting for an approval"
 					}
 				}
 			]
@@ -452,7 +452,7 @@ func TestGithubProviderCreateStatus(t *testing.T) {
                                 "conclusion": "pending", 
 								"output": {
 									"title": "Pending approval, waiting for an /ok-to-test",
-									"summary": "My CI is waiting for approval"
+									"summary": "My CI is waiting for an approval"
 								}
 							}
 						]
@@ -671,4 +671,128 @@ func TestProviderGetExistingCheckRunID(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAccessDeniedCheckRunActions(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+	defer teardown()
+
+	runEvent := info.NewEvent()
+	runEvent.Organization = "check"
+	runEvent.Repository = "run"
+	runEvent.SHA = "sha123"
+	runEvent.PullRequestNumber = 42
+	runEvent.InstallationID = 12345 // Enable GitHub Apps mode
+
+	checkRunId := int64(55555)
+	approveAction := false
+
+	// Mock the check run update endpoint
+	mux.HandleFunc(fmt.Sprintf("/repos/check/run/check-runs/%d", checkRunId), func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var update github.UpdateCheckRunOptions
+		err := json.Unmarshal(body, &update)
+		assert.NilError(t, err)
+
+		// Check if this is an access denied check run with actions
+		if update.Actions != nil && len(update.Actions) > 0 {
+			approveAction = true
+			assert.Equal(t, update.Actions[0].Label, "Approve")
+			assert.Equal(t, update.Actions[0].Description, "Approve this check")
+			assert.Equal(t, update.Actions[0].Identifier, "approve_checks")
+			assert.Equal(t, update.Status, (*string)(nil)) // Status should be nil for approval actions
+		}
+
+		// Return a valid response
+		fmt.Fprintf(w, `{"id": %d}`, checkRunId)
+	})
+
+	// Mock existing check run ID lookup
+	mux.HandleFunc(fmt.Sprintf("/repos/check/run/commits/sha123/check-runs"), func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{
+			"total_count": 1,
+			"check_runs": [
+				{
+					"id": %d,
+					"external_id": "pipeline-run-123|42"
+				}
+			]
+		}`, checkRunId)
+	})
+
+	ghp := &Provider{
+		Client: fakeclient,
+		Run:    params.New(),
+		pacInfo: &info.PacOpts{
+			Settings: settings.Settings{
+				ApplicationName: settings.PACApplicationNameDefaultValue,
+			},
+		},
+	}
+
+	// Test with access denied status
+	status := provider.StatusOpts{
+		Status:          "queued",
+		Title:           "Pending approval, waiting for an /ok-to-test",
+		Conclusion:      "pending",
+		Text:            "User is not allowed to trigger CI",
+		DetailsURL:      "https://example.com/logs",
+		PipelineRunName: "pipeline-run-123",
+		AccessDenied:    true,
+	}
+
+	err := ghp.CreateStatus(ctx, runEvent, status)
+	assert.NilError(t, err)
+	assert.Assert(t, approveAction, "Approval action was not added to check run")
+}
+
+func TestExternalIDFormatInCheckRuns(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+	defer teardown()
+
+	runEvent := info.NewEvent()
+	runEvent.Organization = "check"
+	runEvent.Repository = "run"
+	runEvent.SHA = "sha123"
+	runEvent.PullRequestNumber = 42
+	runEvent.InstallationID = 12345
+
+	// Test the external ID format in check run creation
+	externalIDCorrect := false
+	mux.HandleFunc("/repos/check/run/check-runs", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var create github.CreateCheckRunOptions
+		err := json.Unmarshal(body, &create)
+		assert.NilError(t, err)
+
+		// Verify the external ID format (pipelineRunName|prNumber)
+		if create.ExternalID != nil && *create.ExternalID == "test-pipeline-123|42" {
+			externalIDCorrect = true
+		}
+
+		fmt.Fprintf(w, `{"id": 123456}`)
+	})
+
+	ghp := &Provider{
+		Client: fakeclient,
+		Run:    params.New(),
+		pacInfo: &info.PacOpts{
+			Settings: settings.Settings{
+				ApplicationName: settings.PACApplicationNameDefaultValue,
+			},
+		},
+	}
+
+	status := provider.StatusOpts{
+		Status:          "in_progress",
+		Title:           "CI has Started",
+		DetailsURL:      "https://example.com/logs",
+		PipelineRunName: "test-pipeline-123",
+	}
+
+	err := ghp.getOrUpdateCheckRunStatus(ctx, runEvent, status)
+	assert.NilError(t, err)
+	assert.Assert(t, externalIDCorrect, "External ID format was not correct")
 }

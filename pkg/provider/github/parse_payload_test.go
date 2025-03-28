@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -884,4 +886,179 @@ func TestAppTokenGeneration(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleReRequestEventWithExternalID(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+
+	testCases := []struct {
+		name               string
+		checkRunEvent      *github.CheckRunEvent
+		expectedPRNumber   int
+		expectedSender     string
+		mockPullRequestGet bool
+	}{
+		{
+			name: "check_run with external_id",
+			checkRunEvent: &github.CheckRunEvent{
+				Action: github.String("rerequested"),
+				Sender: &github.User{
+					Login: github.String("test-user"),
+				},
+				Repo: &github.Repository{
+					Owner: &github.User{
+						Login: github.String("owner"),
+					},
+					Name:          github.String("repo"),
+					HTMLURL:       github.String("https://github.com/owner/repo"),
+					DefaultBranch: github.String("main"),
+				},
+				CheckRun: &github.CheckRun{
+					ExternalID: github.String("pipeline-run-123|42"),
+					CheckSuite: &github.CheckSuite{
+						HeadSHA:    github.String("sha123"),
+						HeadBranch: github.String("feature-branch"),
+						Repository: &github.Repository{
+							HTMLURL: github.String("https://github.com/owner/repo"),
+						},
+					},
+				},
+			},
+			expectedPRNumber:   42,
+			expectedSender:     "test-user",
+			mockPullRequestGet: true,
+		},
+		{
+			name: "check_run without external_id but with pull request",
+			checkRunEvent: &github.CheckRunEvent{
+				Action: github.String("rerequested"),
+				Sender: &github.User{
+					Login: github.String("test-user"),
+				},
+				Repo: &github.Repository{
+					Owner: &github.User{
+						Login: github.String("owner"),
+					},
+					Name:          github.String("repo"),
+					HTMLURL:       github.String("https://github.com/owner/repo"),
+					DefaultBranch: github.String("main"),
+				},
+				CheckRun: &github.CheckRun{
+					CheckSuite: &github.CheckSuite{
+						HeadSHA:    github.String("sha123"),
+						HeadBranch: github.String("feature-branch"),
+						Repository: &github.Repository{
+							HTMLURL: github.String("https://github.com/owner/repo"),
+						},
+						PullRequests: []*github.PullRequest{
+							{
+								Number: github.Int(24),
+							},
+						},
+					},
+				},
+			},
+			expectedPRNumber:   24,
+			expectedSender:     "test-user",
+			mockPullRequestGet: true,
+		},
+		{
+			name: "check_run with no pull request info",
+			checkRunEvent: &github.CheckRunEvent{
+				Action: github.String("rerequested"),
+				Sender: &github.User{
+					Login: github.String("test-user"),
+					Type:  github.String("User"),
+				},
+				Repo: &github.Repository{
+					Owner: &github.User{
+						Login: github.String("owner"),
+					},
+					Name:          github.String("repo"),
+					HTMLURL:       github.String("https://github.com/owner/repo"),
+					DefaultBranch: github.String("main"),
+				},
+				CheckRun: &github.CheckRun{
+					CheckSuite: &github.CheckSuite{
+						HeadSHA:    github.String("sha123"),
+						HeadBranch: github.String("feature-branch"),
+						Repository: &github.Repository{
+							HTMLURL: github.String("https://github.com/owner/repo"),
+						},
+						PullRequests: []*github.PullRequest{},
+					},
+				},
+			},
+			expectedPRNumber:   0,
+			expectedSender:     "test-user",
+			mockPullRequestGet: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			logger, _ := logger.GetLogger()
+			provider := Provider{
+				Logger: logger,
+				Run:    params.New(),
+			}
+
+			// Create a mock client if needed
+			if tc.mockPullRequestGet {
+				fakeclient, mux, _, teardown := setupGithubClientMock(t)
+				defer teardown()
+				provider.Client = fakeclient
+
+				// Mock the PR response
+				setupPullRequestMock(t, mux, tc.expectedPRNumber)
+			}
+
+			result, err := provider.handleReRequestEvent(ctx, tc.checkRunEvent)
+			assert.NilError(t, err)
+
+			assert.Equal(t, result.PullRequestNumber, tc.expectedPRNumber)
+			assert.Equal(t, result.Sender, tc.expectedSender)
+		})
+	}
+}
+
+// Helper functions to setup GitHub mocks
+func setupGithubClientMock(t *testing.T) (*github.Client, *http.ServeMux, *httptest.Server, func()) {
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+
+	client := github.NewClient(nil)
+	url, _ := url.Parse(server.URL + "/")
+	client.BaseURL = url
+	client.UploadURL = url
+
+	return client, mux, server, server.Close
+}
+
+func setupPullRequestMock(t *testing.T, mux *http.ServeMux, prNumber int) {
+	mux.HandleFunc(fmt.Sprintf("/repos/owner/repo/pulls/%d", prNumber), func(w http.ResponseWriter, r *http.Request) {
+		pr := github.PullRequest{
+			Number: github.Int(prNumber),
+			Head: &github.PullRequestBranch{
+				SHA: github.String("sha123"),
+				Ref: github.String("feature-branch"),
+				Repo: &github.Repository{
+					HTMLURL: github.String("https://github.com/owner/repo"),
+				},
+			},
+			Base: &github.PullRequestBranch{
+				Ref: github.String("main"),
+				Repo: &github.Repository{
+					DefaultBranch: github.String("main"),
+					HTMLURL:       github.String("https://github.com/owner/repo"),
+				},
+			},
+			User: &github.User{
+				Login: github.String("pr-author"),
+			},
+			Title: github.String("Test PR"),
+		}
+
+		json.NewEncoder(w).Encode(pr)
+	})
 }
