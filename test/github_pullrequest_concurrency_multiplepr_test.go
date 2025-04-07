@@ -40,7 +40,7 @@ func TestGithubSecondPullRequestConcurrencyMultiplePR(t *testing.T) {
 	loopMax := 35
 
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
-	_, runcnx, opts, ghcnx, err := tgithub.Setup(ctx, true, false)
+	_, runcnx, opts, ghcnx, err := tgithub.SetupSecondary(ctx, false)
 	assert.NilError(t, err)
 
 	runcnx.Clients.Log.Infof("Starting %d pipelineruns, (numberOfPullRequest=%d*numberOfPipelineRuns=%d) + (numberOfPullRequest=%d*numberOfRetests=%d*numberOfPipelineRuns=%d) Should end after clean up (maxKeepRun=%d) with %d",

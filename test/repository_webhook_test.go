@@ -16,7 +16,7 @@ import (
 
 func TestRepositoryCreation(t *testing.T) {
 	ctx := context.TODO()
-	ctx, runcnx, _, _, err := ghtest.Setup(ctx, false, false)
+	ctx, runcnx, _, _, err := ghtest.SetupPrimary(ctx, false)
 	assert.NilError(t, err)
 
 	targetNs := "test-repo"

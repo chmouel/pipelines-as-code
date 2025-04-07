@@ -49,7 +49,7 @@ func TestGithubSecondPullRequestConcurrencyRestartedWhenWatcherIsUp(t *testing.T
 	maxNumberOfConcurrentPipelineRuns := 1
 	checkOrdering := true
 	yamlFiles := map[string]string{}
-	ctx, runCnxS, _, _, err := tgithub.Setup(ctx, true, false)
+	ctx, runCnxS, _, _, err := tgithub.SetupSecondary(ctx, false)
 	assert.NilError(t, err)
 
 	tkubestuff.ScaleDeployment(ctx, t, runCnxS, 0, "pipelines-as-code-watcher", "pipelines-as-code")
@@ -148,7 +148,7 @@ func testGlobalRepoConcurrency(t *testing.T, label string, localRepoMaxConcurren
 
 func setupGithubConcurrency(ctx context.Context, t *testing.T, maxNumberOfConcurrentPipelineRuns, numberOfPipelineRuns int, label string, yamlFiles map[string]string) tgithub.PRTest {
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
-	_, runcnx, opts, ghcnx, err := tgithub.Setup(ctx, true, false)
+	_, runcnx, opts, ghcnx, err := tgithub.SetupSecondary(ctx, false)
 	assert.NilError(t, err)
 
 	logmsg := fmt.Sprintf("Testing %s with Github APPS integration on %s", label, targetNS)

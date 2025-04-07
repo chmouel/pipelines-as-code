@@ -89,7 +89,8 @@ func TestGithubPullRequestScopeTokenToListOfReposByGlobalConfiguration(t *testin
 
 func verifyGHTokenScope(t *testing.T, remoteTaskURL, remoteTaskName string, data map[string]string) {
 	ctx := context.Background()
-	ctx, runcnx, opts, ghcnx, err := tgithub.Setup(ctx, false, false)
+
+	ctx, runcnx, opts, ghprovider, err := tgithub.SetupPrimary(ctx, false)
 	assert.NilError(t, err)
 
 	targetNS := names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-ns")
@@ -105,7 +106,7 @@ func verifyGHTokenScope(t *testing.T, remoteTaskURL, remoteTaskName string, data
 	})
 	assert.NilError(t, err)
 
-	repoinfo, resp, err := ghcnx.Client.Repositories.Get(ctx, opts.Organization, opts.Repo)
+	repoinfo, resp, err := ghprovider.Client.Repositories.Get(ctx, opts.Organization, opts.Repo)
 	assert.NilError(t, err)
 	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		t.Errorf("Repository %s not found in %s", opts.Organization, opts.Repo)
@@ -150,17 +151,17 @@ func verifyGHTokenScope(t *testing.T, remoteTaskURL, remoteTaskName string, data
 	targetRefName := fmt.Sprintf("refs/heads/%s",
 		names.SimpleNameGenerator.RestrictLengthWithRandomSuffix("pac-e2e-test"))
 
-	sha, vref, err := tgithub.PushFilesToRef(ctx, ghcnx.Client, "TestPullRequestRemoteAnnotations - "+targetRefName, repoinfo.GetDefaultBranch(), targetRefName, opts.Organization, opts.Repo, entries)
+	sha, vref, err := tgithub.PushFilesToRef(ctx, ghprovider.Client, "TestPullRequestRemoteAnnotations - "+targetRefName, repoinfo.GetDefaultBranch(), targetRefName, opts.Organization, opts.Repo, entries)
 	assert.NilError(t, err)
 	runcnx.Clients.Log.Infof("Commit %s has been created and pushed to %s", sha, vref.GetURL())
 
 	title := "TestPullRequestRemoteAnnotations - " + targetRefName
-	number, err := tgithub.PRCreate(ctx, runcnx, ghcnx, opts.Organization, opts.Repo, targetRefName, repoinfo.GetDefaultBranch(), title)
+	number, err := tgithub.PRCreate(ctx, runcnx, ghprovider, opts.Organization, opts.Repo, targetRefName, repoinfo.GetDefaultBranch(), title)
 	assert.NilError(t, err)
 	g := tgithub.PRTest{
 		Cnx:             runcnx,
 		Options:         opts,
-		Provider:        ghcnx,
+		Provider:        ghprovider,
 		TargetNamespace: targetNS,
 		TargetRefName:   targetRefName,
 		PRNumber:        number,
