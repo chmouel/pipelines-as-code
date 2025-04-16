@@ -1,1 +1,1 @@
-defaultBaseImage: gcr.io/distroless/base-debian11:nonroot
+defaultBaseImage: quay.io/chmouel/ubi9-nonroot

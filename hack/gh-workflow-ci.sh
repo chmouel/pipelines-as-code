@@ -91,6 +91,50 @@ run_e2e_tests() {
   make test-e2e GO_TEST_FLAGS="-run \"$(echo "${tests[*]}" | sed 's/ /|/g')\""
 }
 
+startpaac() {
+  echo "**********************************************************************"
+  echo "                       Installing startpaac"
+  echo "**********************************************************************"
+  [[ -d ~/startpaac ]] ||
+    git clone --depth=1 https://github.com/chmouel/startpaac ~/startpaac
+
+  mkdir -p ~/second ~/pass $HOME/.config/startpaac
+
+  cat <<EOF >$HOME/.config/startpaac/config
+PAC_DIR=$HOME/work/pipelines-as-code/pipelines-as-code/
+PAC_SECRET_FOLDER=$HOME/pass
+PAC_SECOND_SECRET_FOLDER=${HOME}/second
+TARGET_HOST=local
+EOF
+
+  echo "${PAC_GITHUB_PRIVATE_KEY}" >~/pass/github-private-key
+  echo "${PAC_GITHUB_APPLICATION_ID}" >~/pass/github-application-id
+  echo "${PAC_WEBHOOK_SECRET}" >~/pass/webhook.secret
+  echo "${PAC_SMEE_URL}" >~/pass/smee
+
+  echo "${TEST_GITHUB_SECOND_PRIVATE_KEY}" >~/second/github-private-key
+  echo "${TEST_GITHUB_SECOND_APPLICATION_ID}" >~/second/github-application-id
+  echo "${TEST_GITHUB_SECOND_WEBHOOK_SECRET}" >~/second/webhook.secret
+  echo "${TEST_GITHUB_SECOND_SMEE_URL}" >~/second/smee
+
+  go install github.com/jsha/minica@latest
+
+  (
+    cd ${HOME}/startpaac
+    if [[ ${TEST_PROVIDER} == "providers" ]]; then
+      ./startpaac --all-github-second-no-forgejo
+    else
+      ./startpaac --all
+    fi
+  )
+
+  echo "**********************************************************************"
+  echo "Copying minica CA certs to /usr/local/share/ca-certificates/minica.crt"
+  echo "**********************************************************************"
+  sudo cp -v /tmp/certs/minica.pem /usr/local/share/ca-certificates/minica.crt
+  sudo update-ca-certificates
+}
+
 collect_logs() {
   # Read from environment variables
   local test_gitea_smee_url="${TEST_GITEA_SMEEURL}"
@@ -157,6 +201,10 @@ help() {
   collect_logs
     Collect logs from the cluster
     Required env vars: TEST_GITEA_SMEEURL, TEST_GITHUB_SECOND_SMEE_URL
+
+  startpaac
+    Install startpaac and setup the config
+    Required env vars: PAC_GITHUB_PRIVATE_KEY, PAC_GITHUB_APPLICATION_ID, PAC_WEBHOOK_SECRET, PAC_SMEE_URL
 EOF
 }
 
@@ -172,6 +220,9 @@ run_e2e_tests)
   ;;
 collect_logs)
   collect_logs
+  ;;
+startpaac)
+  startpaac
   ;;
 help)
   help
