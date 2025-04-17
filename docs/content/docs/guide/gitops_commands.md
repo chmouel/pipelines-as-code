@@ -4,9 +4,24 @@ weight: 5.1
 ---
 # GitOps Commands
 
-Pipelines-as-Code supports the concept of `GitOps commands`, which allow users to issue special commands in a comment on a Pull Request or a pushed commit to control `Pipelines-as-Code`.
+Pipelines-as-Code supports GitOps commands, which allow you to control CI/CD workflows directly through Git interfaces. These commands can be issued in comments on Pull Requests or within commit messages, providing a seamless integration between your code review process and CI/CD execution.
 
-The advantage of using a `GitOps command` is that it provides a journal of all the executions of your pipeline directly on your Pull Request, near your code.
+## Benefits of GitOps Commands
+
+- **Intuitive Interface**: Control your pipelines where you're already working - in your Git provider
+- **Transparency**: All commands are visible in the PR history, providing a clear audit trail
+- **Collaboration**: Team members can see and understand what CI/CD actions have been taken
+- **Reduced Context Switching**: No need to switch to a separate CI/CD interface
+
+## Available GitOps Commands
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `/retest` | Re-run all PipelineRuns for a PR | `/retest` |
+| `/test <name>` | Run a specific PipelineRun | `/test unit-tests` |
+| `/ok-to-test` | Authorize PR from non-collaborator | `/ok-to-test` |
+| `/cancel` | Cancel running PipelineRuns | `/cancel` |
+| `/cancel <name>` | Cancel specific PipelineRun | `/cancel integration-tests` |
 
 ## GitOps Commands on Pull Requests
 
@@ -241,10 +256,10 @@ You can pass those `key=value` pairs anywhere in your comment, and they will be 
 
 There are different formats that can be accepted, allowing you to pass values with spaces or newlines:
 
-* key=value
-* key="a value"
-* key="another \"value\" defined"
-* key="another
+- key=value
+- key="a value"
+- key="another \"value\" defined"
+- key="another
   value with newline"
 
 ## Event Type Annotation and Dynamic Variables
@@ -253,14 +268,14 @@ The `pipeline.tekton.dev/event-type` annotation indicates the type of GitOps com
 
 Here are the possible event types:
 
-* `test-all-comment`: The event is a single `/test` that would test every matched PipelineRun.
-* `test-comment`: The event is a `/test <PipelineRun>` comment that would test a specific PipelineRun.
-* `retest-all-comment`: The event is a single `/retest` that would retest every matched PipelineRun.
-* `retest-comment`: The event is a `/retest <PipelineRun>` that would retest a specific PipelineRun.
-* `on-comment`: The event is coming from a custom comment that would trigger a PipelineRun.
-* `cancel-all-comment`: The event is a single `/cancel` that would cancel every matched PipelineRun.
-* `cancel-comment`: The event is a `/cancel <PipelineRun>` that would cancel a specific PipelineRun.
-* `ok-to-test-comment`: The event is a `/ok-to-test` that would allow running the CI for an unauthorized user.
+- `test-all-comment`: The event is a single `/test` that would test every matched PipelineRun.
+- `test-comment`: The event is a `/test <PipelineRun>` comment that would test a specific PipelineRun.
+- `retest-all-comment`: The event is a single `/retest` that would retest every matched PipelineRun.
+- `retest-comment`: The event is a `/retest <PipelineRun>` that would retest a specific PipelineRun.
+- `on-comment`: The event is coming from a custom comment that would trigger a PipelineRun.
+- `cancel-all-comment`: The event is a single `/cancel` that would cancel every matched PipelineRun.
+- `cancel-comment`: The event is a `/cancel <PipelineRun>` that would cancel a specific PipelineRun.
+- `ok-to-test-comment`: The event is a `/ok-to-test` that would allow running the CI for an unauthorized user.
 
 When a repository owner issues the `/ok-to-test` command on a pull request raised by an unauthorized user, and no PipelineRun exists in the .tekton directory for `pull_request` event,
 Pipelines-as-Code will create a neutral check-run status. This status serves to indicate that no PipelineRun has been matched, preventing any workflows from being blocked such as auto-merge, will proceed as expected.
@@ -273,12 +288,12 @@ Note: This neutral check-run status functionality is only supported on GitHub.
 
 When using the `{{ event_type }}` [dynamic variable]({{< relref "/docs/guide/authoringprs.md#dynamic-variables" >}}) for the following event types:
 
-* `test-all-comment`
-* `test-comment`
-* `retest-all-comment`
-* `retest-comment`
-* `cancel-all-comment`
-* `ok-to-test-comment`
+- `test-all-comment`
+- `test-comment`
+- `retest-all-comment`
+- `retest-comment`
+- `cancel-all-comment`
+- `ok-to-test-comment`
 
 The dynamic variable will return `pull_request` as the event type instead of the specific categorized GitOps command type. This is to handle backward compatibility with previous releases for users relying on this dynamic variable.
 

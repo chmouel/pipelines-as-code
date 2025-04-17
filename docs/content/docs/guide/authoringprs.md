@@ -40,64 +40,77 @@ weight: 3
 
 ## Dynamic variables
 
-Here is a list of all the dynamic variables available in Pipelines-as-Code. The
-one that would be the most important to you would probably be the `revision` and `repo_url`
-variables, they will give you the commit SHA and the repository URL that is
-getting tested. You usually use this with the
-[git-clone](https://hub.tekton.dev/tekton/task/git-clone) task to be able to
-check out the code that is being tested.
+`Pipelines-as-Code` provides several dynamic variables that you can use in your templates. These variables are replaced at runtime with values specific to the Git event that triggered the pipeline.
 
-| Variable            | Description                                                                                                                                                                     | Example                             | Example Output                                                                                                                                                |
-|---------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| body                | The full payload body (see [below](#using-the-body-and-headers-in-a-pipelines-as-code-parameter))                                                                               | `{{body.pull_request.user.email }}` | <email@domain.com>                                                                                                                                            |
-| event_type          | The event type (eg: `pull_request` or `push`)                                                                                                                                   | `{{event_type}}`                    | pull_request          (see the note for GitOps Comments [here]({{< relref "/docs/guide/gitops_commands.md#event-type-annotation-and-dynamic-variables" >}}) ) |
-| git_auth_secret     | The secret name auto-generated with provider token to check out private repos.                                                                                                  | `{{git_auth_secret}}`               | pac-gitauth-xkxkx                                                                                                                                             |
-| headers             | The request headers (see [below](#using-the-body-and-headers-in-a-pipelines-as-code-parameter))                                                                                 | `{{headers['x-github-event']}}`     | push                                                                                                                                                          |
-| pull_request_number | The pull or merge request number, only defined when we are in a `pull_request` event type.                                                                                      | `{{pull_request_number}}`           | 1                                                                                                                                                             |
-| repo_name           | The repository name.                                                                                                                                                            | `{{repo_name}}`                     | pipelines-as-code                                                                                                                                             |
-| repo_owner          | The repository owner.                                                                                                                                                           | `{{repo_owner}}`                    | openshift-pipelines                                                                                                                                           |
-| repo_url            | The repository full URL.                                                                                                                                                        | `{{repo_url}}`                      | https:/github.com/repo/owner                                                                                                                                  |
-| revision            | The commit full sha revision.                                                                                                                                                   | `{{revision}}`                      | 1234567890abcdef                                                                                                                                              |
-| sender              | The sender username (or account ID on some providers) of the commit.                                                                                                             | `{{sender}}`                        | johndoe                                                                                                                                                       |
-| source_branch       | The branch name where the event comes from.                                                                                                                                      | `{{source_branch}}`                 | main                                                                                                                                                          |
-| source_url          | The source repository URL from which the event comes from (same as `repo_url` for push events).                                                                                  | `{{source_url}}`                    | https:/github.com/repo/owner                                                                                                                                  |
-| target_branch       | The branch name on which the event targets (same as `source_branch` for push events).                                                                                           | `{{target_branch}}`                 | main                                                                                                                                                          |
-| target_namespace    | The target namespace where the Repository has matched and the PipelineRun will be created.                                                                                      | `{{target_namespace}}`              | my-namespace                                                                                                                                                  |
-| trigger_comment     | The comment triggering the PipelineRun when using a [GitOps command]({{< relref "/docs/guide/running.md#gitops-command-on-pull-or-merge-request" >}}) (like `/test`, `/retest`) | `{{trigger_comment}}`               | /merge-pr branch                                                                                                                                              |
-| pull_request_labels | The labels of the pull request separated by a newline                                                                                                                           | `{{pull_request_labels}}`           | bugs\nenhancement                                                                                                                                             |
+These variables use the syntax `{{ variable_name }}` and can be used anywhere in your PipelineRun template.
+
+### Default Parameters
+
+Here's the complete list of available dynamic variables:
+
+| Variable Name | Description | Example Usage | Example Value |
+|---------------|-------------|---------------|--------------|
+| `repo_name` | The repository name. | `{{repo_name}}` | pipelines-as-code |
+| `repo_owner` | The repository owner (user or organization). | `{{repo_owner}}` | openshift-pipelines |
+| `repo_url` | The repository's full URL. | `{{repo_url}}` | <https://github.com/openshift-pipelines/pipelines-as-code> |
+| `revision` | The commit's full SHA revision. | `{{revision}}` | 1234567890abcdef |
+| `sender` | The username (or account ID on some providers) of the commit/PR author. | `{{sender}}` | johndoe |
+| `source_branch` | The branch where the event originated. | `{{source_branch}}` | feature-branch |
+| `source_url` | The source repository URL from which the event comes (same as `repo_url` for push events). | `{{source_url}}` | <https://github.com/johndoe/pipelines-as-code> |
+| `target_branch` | The branch which the event targets (same as `source_branch` for push events). | `{{target_branch}}` | main |
+| `target_namespace` | The namespace where the Repository was matched and where the PipelineRun will be created. | `{{target_namespace}}` | my-namespace |
+| `pull_request_number` | The pull request number (only available for pull request events). | `{{pull_request_number}}` | 123 |
+| `pull_request_title` | The pull request title (only available for pull request events). | `{{pull_request_title}}` | Add feature X |
+| `pull_request_body` | The body/description of the pull request (only available for pull request events). | `{{pull_request_body}}` | This PR implements feature X... |
+| `pull_request_url` | The URL to the pull request (only available for pull request events). | `{{pull_request_url}}` | <https://github.com/openshift-pipelines/pipelines-as-code/pull/123> |
+| `pull_request_labels` | Labels on the pull request, separated by newlines (only available for pull request events). | `{{pull_request_labels}}` | bug\nneeds-review |
+| `trigger_comment` | The comment that triggered the PipelineRun when using a GitOps command (like `/test`, `/retest`). | `{{trigger_comment}}` | /merge-pr branch |
+| `git_auth_secret` | The name of the secret created for Git authentication. | `{{git_auth_secret}}` | pac-gitauth-owner-repo-a1b2c3 |
+| `event_type` | The type of event that triggered the PipelineRun. | `{{event_type}}` | pull_request, push, incoming |
+| `event_url` | A URL pointing to the event that triggered the PipelineRun. | `{{event_url}}` | <https://github.com/owner/repo/pull/123> |
+| `commit_message` | The commit message of the revision. | `{{commit_message}}` | Fix bug in feature X |
+
+### Using Variables in YAML
+
+When using these variables in YAML, be careful with values that might contain special characters or multiple lines. For YAML block scalars or values that may contain quotes, you should use the YAML block scalar syntax (`>` or `|`):
+
+```yaml
+spec:
+  params:
+    - name: description
+      value: >
+        {{ pull_request_body }}
+```
+
+For more complex objects like JSON values, you might need to use a block literal (`|`) to preserve newlines:
+
+```yaml
+spec:
+  params:
+    - name: pull_request
+      value: |
+        {{ body.pull_request }}
+  pipelineSpec:
+    tasks:
+      # ...
+```
 
 ### Defining Parameters with Object Values in YAML
 
-When working with YAML, particularly when defining parameters, you might encounter situations where you need to pass an object or a dynamic variable (e.g., `{{ body }}`) as the value of a parameter. However, YAML's validation rules prevent such values from being defined inline.
-
-For instance, if you attempt to define a parameter like this:
+When you need to use a body payload as a parameter value (for example, the entire pull request object), use a block scalar to ensure proper YAML formatting:
 
 ```yaml
 spec:
   params:
-    - name: body
-      value: {{ body }}  # This will result in a YAML validation error
-  pipelineSpec:
-    tasks:
-```
-
-You will encounter a YAML validation error because objects or multiline strings cannot be placed inline. To resolve this issue and ensure your YAML is correctly validated, you should define the value in block format instead of inline. Here’s an example:
-
-```yaml
-spec:
-  params:
-    - name: body
-      value: |-
-        {{ body }}
-    # Alternatively, use '>' to specify that the value will be in block format
     - name: pull_request
       value: >
         {{ body.pull_request }}
   pipelineSpec:
     tasks:
+      # ...
 ```
 
-By using the block format, you can avoid validation errors and ensure that your YAML is properly structured.
+Using block format avoids YAML validation errors and ensures that your data is properly structured.
 
 ## Matching an event to a PipelineRun
 

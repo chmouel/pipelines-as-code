@@ -129,34 +129,39 @@ click on it and follow the pipeline execution directly there.
 {{< tech_preview "Cancelling in progress PipelineRuns" >}}
 {{< support_matrix github_app="true" github_webhook="true" gitea="true" gitlab="true" bitbucket_cloud="true" bitbucket_datacenter="false" >}}
 
-You can choose to cancel a PipelineRun that is currently in progress. This can
-be done by adding the annotation `pipelinesascode.tekton.dev/cancel-in-progress:
-"true"` in the PipelineRun definition.
+You can configure your PipelineRuns to automatically cancel previously running instances when a new one starts. This is done by adding the annotation `pipelinesascode.tekton.dev/cancel-in-progress: "true"` to your PipelineRun definition:
 
-This feature is effective only when the `PipelineRun` is in progress. If the
-`PipelineRun` has already completed or been cancelled, the cancellation will
-have no effect. (see the [max-keep-run annotation]({{< relref
-"/docs/guide/cleanups.md" >}}) instead to clean old `PipelineRuns`.)
+```yaml
+metadata:
+  annotations:
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
+```
 
-The cancellation only applies to `PipelineRuns` within the scope of the current
-`PullRequest` or the targeted branch for Push events. For example, if two
-`PullRequests` each have a `PipelineRun` with the same name and the
-cancel-in-progress annotation, only the `PipelineRun` in the specific PullRequest
-will be cancelled. This prevents interference between separate PullRequests.
+Important details about this feature:
 
-Older `PipelineRuns` are canceled only after the latest `PipelineRun` is
-successfully created and started. This annotation does not guarantee that only
-one `PipelineRun` will be active at a time.
-
-If a `PipelineRun` is in progress and the Pull Request is closed or declined,
-the `PipelineRun` will be canceled.
-
-Currently, `cancel-in-progress` cannot be used in conjunction with the [concurrency
-limit]({{< relref "/docs/guide/repositorycrd.md#concurrency" >}}) setting.
+- The cancellation only happens if the PipelineRun is currently in progress; completed or already cancelled runs are not affected
+- The scope is limited to PipelineRuns within the current Pull Request or targeted branch (for Push events)
+- Older PipelineRuns are cancelled only after the latest one is successfully created and started
+- If a Pull Request is closed or declined, any in-progress PipelineRuns will be automatically cancelled
+- This feature cannot currently be used in conjunction with the [concurrency limit]({{< relref "/docs/guide/repositorycrd.md#concurrency" >}}) setting
 
 ### Cancelling a PipelineRun with a GitOps command
 
-See [here]({{< relref "/docs/guide/gitops_commands.md#cancelling-a-pipelinerun" >}})
+You can also cancel running PipelineRuns by adding comments directly on your Pull Request or commit.
+
+To cancel all running PipelineRuns associated with a Pull Request:
+
+```
+/cancel
+```
+
+To cancel a specific PipelineRun:
+
+```
+/cancel <pipelinerun-name>
+```
+
+For more details on GitOps commands, including how to cancel PipelineRuns on pushed commits, see the [GitOps Commands documentation]({{< relref "/docs/guide/gitops_commands.md#cancelling-a-pipelinerun" >}}).
 
 ## Restarting the PipelineRun
 
