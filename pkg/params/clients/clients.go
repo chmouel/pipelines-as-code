@@ -69,6 +69,32 @@ func (c *Clients) GetURL(ctx context.Context, url string) ([]byte, error) {
 	return data, nil
 }
 
+// GetURLWithHeaders fetches a URL and returns the response body and headers
+func (c *Clients) GetURLWithHeaders(ctx context.Context, url string) ([]byte, http.Header, error) {
+	nctx, cancel := context.WithTimeout(ctx, RequestMaxWaitTime)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(nctx, http.MethodGet, url, nil)
+	if err != nil {
+		return []byte{}, nil, err
+	}
+	res, err := c.HTTP.Do(req)
+	if err != nil {
+		return []byte{}, nil, err
+	}
+	defer res.Body.Close()
+	statusOK := res.StatusCode >= 200 && res.StatusCode < 300
+	if !statusOK {
+		return nil, nil, fmt.Errorf("Non-OK HTTP status: %d", res.StatusCode)
+	}
+
+	data, err := io.ReadAll(res.Body)
+	if err != nil {
+		return []byte{}, nil, err
+	}
+	return data, res.Header, nil
+}
+
 // Set kube client based on config.
 func (c *Clients) kubeClient(config *rest.Config) (kubernetes.Interface, error) {
 	k8scs, err := kubernetes.NewForConfig(config)

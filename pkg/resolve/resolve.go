@@ -213,12 +213,7 @@ func Resolve(ctx context.Context, cs *params.Run, logger *zap.SugaredLogger, pro
 		return []*tektonv1.PipelineRun{}, err
 	}
 
-	rt := &matcher.RemoteTasks{
-		Run:               cs,
-		Event:             event,
-		ProviderInterface: providerintf,
-		Logger:            logger,
-	}
+	rt := matcher.NewRemoteTasks(cs, event, providerintf, logger)
 
 	fetchedResources, err := resolveRemoteResources(ctx, rt, types, ropt)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/matcher"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	httptesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/http"
 	testprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/test/provider"
 	ttkn "github.com/openshift-pipelines/pipelines-as-code/pkg/test/tekton"
@@ -309,15 +310,12 @@ func TestRemote(t *testing.T) {
 
 			tprovider := &testprovider.TestProviderImp{}
 			httpTestClient := httptesthelper.MakeHTTPTestClient(tt.remoteURLS)
-			rt := &matcher.RemoteTasks{
-				ProviderInterface: tprovider,
-				Logger:            logger,
-				Run: &params.Run{
-					Clients: clients.Clients{
-						HTTP: *httpTestClient,
-					},
+			cs := &params.Run{
+				Clients: clients.Clients{
+					HTTP: *httpTestClient,
 				},
 			}
+			rt := matcher.NewRemoteTasks(cs, &info.Event{}, tprovider, logger)
 			ret, err := resolveRemoteResources(ctx, rt, tktype, &Opts{RemoteTasks: true, GenerateName: true})
 			if tt.wantErrSnippet != "" {
 				assert.ErrorContains(t, err, tt.wantErrSnippet)
