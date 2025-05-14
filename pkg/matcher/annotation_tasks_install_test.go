@@ -381,15 +381,11 @@ func TestGetTaskFromAnnotationName(t *testing.T) {
 				},
 			}
 			ctx, _ := rtesting.SetupFakeContext(t)
-			rt := RemoteTasks{
-				Run:    cs,
-				Logger: logger,
-				ProviderInterface: &provider.TestProviderImp{
-					FilesInsideRepo:        tt.filesInsideRepo,
-					WantProviderRemoteTask: tt.wantProviderRemoteTask,
-				},
-				Event: &tt.runevent,
+			providerImpl := &provider.TestProviderImp{
+				FilesInsideRepo:        tt.filesInsideRepo,
+				WantProviderRemoteTask: tt.wantProviderRemoteTask,
 			}
+			rt := NewRemoteTasks(cs, &tt.runevent, providerImpl, logger)
 
 			got, err := rt.GetTaskFromAnnotationName(ctx, tt.task)
 			if tt.wantLog != "" {
@@ -592,14 +588,10 @@ func TestGetPipelineFromAnnotationName(t *testing.T) {
 				},
 			}
 			ctx, _ := rtesting.SetupFakeContext(t)
-			rt := RemoteTasks{
-				Run:    cs,
-				Logger: logger,
-				ProviderInterface: &provider.TestProviderImp{
-					FilesInsideRepo: tt.filesInsideRepo,
-				},
-				Event: &tt.runevent,
+			providerImpl := &provider.TestProviderImp{
+				FilesInsideRepo: tt.filesInsideRepo,
 			}
+			rt := NewRemoteTasks(cs, &tt.runevent, providerImpl, logger)
 
 			got, err := rt.GetPipelineFromAnnotationName(ctx, tt.pipeline)
 

@@ -12,6 +12,43 @@ type NamedItem interface {
 	GetName() string
 }
 
+// alreadyFetchedResourceWithCache checks both in-memory maps and cross-run cache for a resource
+// For tasks, if found in cache, parses and adds to the in-memory map for efficiency
+func alreadyFetchedTaskWithCache(ctx context.Context, rt *matcher.RemoteTasks, tasks map[string]*tektonv1.Task, taskName string) (*tektonv1.Task, bool) {
+	// First check in-memory map (fastest)
+	if task, ok := tasks[taskName]; ok {
+		return task, true
+	}
+
+	// Check cross-run cache
+	if task, found := rt.GetCachedTask(ctx, taskName); found {
+		// Add to in-memory map for subsequent lookups in this session
+		tasks[taskName] = task
+		return task, true
+	}
+
+	return nil, false
+}
+
+// alreadyFetchedPipelineWithCache checks both in-memory maps and cross-run cache for a pipeline
+// If found in cache, parses and adds to the in-memory map for efficiency
+func alreadyFetchedPipelineWithCache(ctx context.Context, rt *matcher.RemoteTasks, pipelines map[string]*tektonv1.Pipeline, pipelineName string) (*tektonv1.Pipeline, bool) {
+	// First check in-memory map (fastest)
+	if pipeline, ok := pipelines[pipelineName]; ok {
+		rt.Logger.Infof("Pipeline %s found in in-memory cache", pipelineName)
+		return pipeline, true
+	}
+
+	// Check cross-run cache
+	if pipeline, found := rt.GetCachedPipeline(ctx, pipelineName); found {
+		// Add to in-memory map for subsequent lookups in this session
+		pipelines[pipelineName] = pipeline
+		return pipeline, true
+	}
+
+	return nil, false
+}
+
 func alreadyFetchedResource[T NamedItem](resources map[string]T, resourceName string) bool {
 	if _, ok := resources[resourceName]; ok {
 		return true
@@ -64,10 +101,10 @@ func resolveRemoteResources(ctx context.Context, rt *matcher.RemoteTasks, types 
 			// if we got the pipeline name from annotation, we need to fetch the pipeline
 			if remotePipeline != "" {
 				// making sure that the pipeline with same annotation name is not fetched
-				if alreadyFetchedResource(fetchedResourcesForEvent.Pipelines, remotePipeline) {
+				if cachedPipeline, found := alreadyFetchedPipelineWithCache(ctx, rt, fetchedResourcesForEvent.Pipelines, remotePipeline); found {
 					rt.Logger.Debugf("skipping already fetched pipeline %s in annotations on pipelinerun %s", remotePipeline, pipelinerun.GetName())
 					// already fetched, then just get the pipeline to add to run specific Resources
-					pipeline = fetchedResourcesForEvent.Pipelines[remotePipeline]
+					pipeline = cachedPipeline
 				} else {
 					// seems like a new pipeline, fetch it based on name in annotation
 					pipeline, err = rt.GetPipelineFromAnnotationName(ctx, remotePipeline)
@@ -113,9 +150,9 @@ func resolveRemoteResources(ctx context.Context, rt *matcher.RemoteTasks, types 
 			for _, remoteTask := range append(remoteTasks, pipelineTasks...) {
 				var task *tektonv1.Task
 				// if task is already fetched in the event, then just copy the task
-				if alreadyFetchedResource(fetchedResourcesForEvent.Tasks, remoteTask) {
+				if cachedTask, found := alreadyFetchedTaskWithCache(ctx, rt, fetchedResourcesForEvent.Tasks, remoteTask); found {
 					rt.Logger.Debugf("skipping already fetched task %s in annotations on pipelinerun %s", remoteTask, pipelinerun.GetName())
-					task = fetchedResourcesForEvent.Tasks[remoteTask]
+					task = cachedTask
 				} else {
 					// get the task from annotation name
 					task, err = rt.GetTaskFromAnnotationName(ctx, remoteTask)

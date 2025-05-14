@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/cache"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
@@ -37,10 +40,15 @@ const (
 	publicRawURLHost = "raw.githubusercontent.com"
 
 	defaultPaginedNumber = 100
+
+	// Default TTL for cached content (24 hours)
+	defaultCacheTTL = 24 * time.Hour
 )
 
 var _ provider.Interface = (*Provider)(nil)
 
+// Provider is the GitHub provider implementation.
+// It handles communication with the GitHub API and manages repository interactions.
 type Provider struct {
 	ghClient      *github.Client
 	Logger        *zap.SugaredLogger
@@ -57,6 +65,10 @@ type Provider struct {
 	userType      string // The type of user i.e bot or not
 	skippedRun
 	triggerEvent string
+
+	// Cache for remote URL
+	fileCache   *cache.Cache
+	cacheConfig *cache.Config
 }
 
 type skippedRun struct {
@@ -303,6 +315,32 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 
 	v.APIURL = apiURL
 
+	// Read cache configuration from environment variables
+	cacheTTL := defaultCacheTTL
+	cacheEnabled := true
+
+	if ttlStr := os.Getenv("PAC_GITHUB_CACHE_TTL"); ttlStr != "" {
+		if parsedTTL, err := time.ParseDuration(ttlStr); err == nil {
+			cacheTTL = parsedTTL
+			if v.Logger != nil {
+				v.Logger.Debugf("Using GitHub cache TTL from environment: %v", cacheTTL)
+			}
+		} else if v.Logger != nil {
+			v.Logger.Warnf("Invalid PAC_GITHUB_CACHE_TTL value: %s, using default: %v", ttlStr, cacheTTL)
+		}
+	}
+
+	if enabledStr := os.Getenv("PAC_GITHUB_CACHE_ENABLED"); enabledStr != "" {
+		if parsedEnabled, err := strconv.ParseBool(enabledStr); err == nil {
+			cacheEnabled = parsedEnabled
+			if !cacheEnabled && v.Logger != nil {
+				v.Logger.Debugf("GitHub cache disabled based on environment setting")
+			}
+		}
+	}
+
+	v.UpdateCacheConfig(cacheEnabled, cacheTTL)
+
 	if event.Provider.WebhookSecretFromRepo {
 		// check the webhook secret is valid and not ratelimited
 		if err := v.checkWebhookSecretValidity(ctx, clockwork.NewRealClock()); err != nil {
@@ -400,7 +438,23 @@ func (v *Provider) GetFileInsideRepo(ctx context.Context, runevent *info.Event, 
 		ref = runevent.DefaultBranch
 	}
 
-	fp, objects, _, err := v.Client().Repositories.GetContents(ctx, runevent.Organization,
+	// If the reference is a SHA, we can first check if it's in the cache
+	// This can help us avoid the GetContents API call entirely for cached SHA references
+	// if cache.IsSHAReference(ref) &&
+	if v.fileCache != nil && v.cacheConfig != nil && v.cacheConfig.Enabled {
+		// Try to generate a cache key based on what we know
+		fileCacheKey := cache.GenerateCacheKey(runevent.Organization, runevent.Repository, ref, path)
+		if cachedContent, found := v.fileCache.Get(fileCacheKey); found {
+			if v.Logger != nil {
+				v.Logger.Debugf("Cache hit for %s/%s path: %s SHA: %s (direct file access)",
+					runevent.Organization, runevent.Repository, path, ref)
+			}
+			return cachedContent.(string), nil
+		}
+	}
+
+	// If not in cache or not using SHA reference, proceed with API call
+	fp, objects, resp, err := v.Client().Repositories.GetContents(ctx, runevent.Organization,
 		runevent.Repository, path, &github.RepositoryContentGetOptions{Ref: ref})
 	if err != nil {
 		return "", err
@@ -409,12 +463,24 @@ func (v *Provider) GetFileInsideRepo(ctx context.Context, runevent *info.Event, 
 		return "", fmt.Errorf("referenced file inside the Github Repository %s is a directory", path)
 	}
 
-	getobj, err := v.getObject(ctx, fp.GetSHA(), runevent)
+	content, err := fp.GetContent()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("error getting content from file %s: %w", path, err)
 	}
 
-	return string(getobj), nil
+	// If we're using a direct path+SHA access, also cache it by path for future reference
+	if v.fileCache != nil && v.cacheConfig != nil && v.cacheConfig.Enabled {
+		expiry := cache.GetExpiryForRef(clockwork.NewRealClock(), resp.Header, ref, v.cacheConfig.TTL)
+		// Cache with a path-specific key
+		fileCacheKey := cache.GenerateCacheKey(runevent.Organization, runevent.Repository, ref, path)
+		v.fileCache.Set(fileCacheKey, content, expiry)
+		if v.Logger != nil {
+			v.Logger.Debugf("Cached %s/%s path: %s SHA: %s for future direct file access",
+				runevent.Organization, runevent.Repository, path, ref)
+		}
+	}
+
+	return content, nil
 }
 
 // concatAllYamlFiles concat all yaml files from a directory as one big multi document yaml string.
@@ -424,6 +490,7 @@ func (v *Provider) concatAllYamlFiles(ctx context.Context, objects []*github.Tre
 	for _, value := range objects {
 		if strings.HasSuffix(value.GetPath(), ".yaml") ||
 			strings.HasSuffix(value.GetPath(), ".yml") {
+			// The getObject method will handle caching automatically
 			data, err := v.getObject(ctx, value.GetSHA(), runevent)
 			if err != nil {
 				return "", err
@@ -438,6 +505,77 @@ func (v *Provider) concatAllYamlFiles(ctx context.Context, objects []*github.Tre
 		}
 	}
 	return allTemplates, nil
+}
+
+// getObject Get an object from a repository.
+// This method implements SHA-based caching to reduce API calls.
+// If the reference is a SHA (immutable in Git), it will check the cache first.
+// Otherwise, it will always fetch from the API.
+func (v *Provider) getObject(ctx context.Context, sha string, runevent *info.Event) ([]byte, error) {
+	// Skip cache usage if it's not enabled or not available
+	if v.fileCache == nil || v.cacheConfig == nil || !v.cacheConfig.Enabled {
+		content, _, err := v.fetchObjectFromAPI(ctx, sha, runevent)
+		return content, err
+	}
+
+	// Skip caching if the reference is not a SHA (e.g., a branch or tag)
+	// This is important since branch/tag content can change while SHA content is immutable
+	if !cache.IsSHAReference(sha) {
+		if v.Logger != nil {
+			v.Logger.Debugf("Skipping cache for non-SHA reference: %s", sha)
+		}
+		content, _, err := v.fetchObjectFromAPI(ctx, sha, runevent)
+		return content, err
+	}
+
+	// Generate cache key for this content
+	cacheKey := cache.GenerateCacheKey(runevent.Organization, runevent.Repository, sha, "")
+
+	// Try to get from cache first
+	if cachedContent, found := v.fileCache.Get(cacheKey); found {
+		if v.Logger != nil {
+			v.Logger.Debugf("Cache hit for %s/%s SHA: %s",
+				runevent.Organization, runevent.Repository, sha)
+		}
+		return cachedContent.([]byte), nil
+	}
+
+	// If not in cache, fetch from API
+	if v.Logger != nil {
+		v.Logger.Debugf("Cache miss for %s/%s SHA: %s",
+			runevent.Organization, runevent.Repository, sha)
+	}
+
+	content, resp, err := v.fetchObjectFromAPI(ctx, sha, runevent)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache with proper expiry time
+	expiry := cache.GetExpiryForRef(clockwork.NewRealClock(), resp, sha, v.cacheConfig.TTL)
+	v.fileCache.Set(cacheKey, content, expiry)
+	if v.Logger != nil {
+		v.Logger.Debugf("Cached %s/%s SHA: %s until %s",
+			runevent.Organization, runevent.Repository, sha, expiry.Format(time.RFC3339))
+	}
+
+	return content, nil
+}
+
+// fetchObjectFromAPI fetches an object directly from the GitHub API without caching
+// This is a helper method used by getObject to perform the actual API call
+// when the requested content is not in the cache or cannot be cached.
+func (v *Provider) fetchObjectFromAPI(ctx context.Context, sha string, runevent *info.Event) ([]byte, http.Header, error) {
+	blob, resp, err := v.Client().Git.GetBlob(ctx, runevent.Organization, runevent.Repository, sha)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(blob.GetContent())
+	if err != nil {
+		return nil, nil, err
+	}
+	return decoded, resp.Header, nil
 }
 
 // getPullRequest get a pull request details.
@@ -532,20 +670,6 @@ func (v *Provider) GetFiles(ctx context.Context, runevent *info.Event) (changedf
 		return changedFiles, nil
 	}
 	return changedfiles.ChangedFiles{}, nil
-}
-
-// getObject Get an object from a repository.
-func (v *Provider) getObject(ctx context.Context, sha string, runevent *info.Event) ([]byte, error) {
-	blob, _, err := v.Client().Git.GetBlob(ctx, runevent.Organization, runevent.Repository, sha)
-	if err != nil {
-		return nil, err
-	}
-
-	decoded, err := base64.StdEncoding.DecodeString(blob.GetContent())
-	if err != nil {
-		return nil, err
-	}
-	return decoded, err
 }
 
 // ListRepos lists all the repos for a particular token.
@@ -663,4 +787,31 @@ func (v *Provider) CreateComment(ctx context.Context, event *info.Event, commit,
 		Body: &commit,
 	})
 	return err
+}
+
+// UpdateCacheConfig updates the cache configuration with provided settings
+// This allows runtime configuration of the cache, including enabling/disabling
+// and adjusting the TTL (time-to-live) for cached content.
+func (v *Provider) UpdateCacheConfig(enabled bool, ttl time.Duration) {
+	if v.fileCache == nil {
+		v.fileCache = cache.New(ttl)
+	}
+
+	if v.cacheConfig == nil {
+		v.cacheConfig = &cache.Config{
+			Enabled: enabled,
+			TTL:     ttl,
+		}
+	} else {
+		v.cacheConfig.Enabled = enabled
+		v.cacheConfig.TTL = ttl
+	}
+
+	if v.Logger != nil {
+		if enabled {
+			v.Logger.Infof("GitHub content cache is enabled with TTL of %v", ttl)
+		} else {
+			v.Logger.Infof("GitHub content cache is disabled")
+		}
+	}
 }
