@@ -546,8 +546,8 @@ func (v *Provider) GetTemplate(commentType provider.CommentType) string {
 	return provider.GetHTMLTemplate(commentType)
 }
 
-// CreateLLMQueryResponse creates a comment with the LLM query response
-func (v *Provider) CreateLLMQueryResponse(ctx context.Context, event *info.Event, queryResponse string) error {
+// CreateLLMQueryResponse creates a comment with the LLM query response.
+func (v *Provider) CreateLLMQueryResponse(_ context.Context, event *info.Event, queryResponse string) error {
 	if v.gitlabClient == nil {
 		return fmt.Errorf("no gitlab client has been initialized")
 	}

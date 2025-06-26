@@ -38,6 +38,8 @@ func ConvertPacStructToConfigMap(settings *Settings) map[string]string {
 			config[key] = strconv.FormatBool(element.Bool())
 		case reflect.Int:
 			config[key] = strconv.FormatInt(element.Int(), 10)
+		case reflect.Float64:
+			config[key] = strconv.FormatFloat(element.Float(), 'f', -1, 64)
 		case reflect.Ptr:
 			// for hub catalogs map
 			if key == "" {

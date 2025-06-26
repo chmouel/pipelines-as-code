@@ -26,6 +26,14 @@ const (
 	CustomConsoleNamespaceURLKey = "custom-console-url-namespace"
 
 	SecretGhAppTokenRepoScopedKey = "secret-github-app-token-scoped" //nolint: gosec
+
+	// LLM Configuration Keys.
+	LLMEnabledKey     = "llm-enabled"
+	LLMProviderKey    = "llm-provider"
+	LLMModelKey       = "llm-model"
+	LLMMaxTokensKey   = "llm-max-tokens" // nolint: gosec
+	LLMTemperatureKey = "llm-temperature"
+	LLMTimeoutKey     = "llm-timeout-seconds"
 )
 
 var (
@@ -75,6 +83,14 @@ type Settings struct {
 	CustomConsoleNamespaceURL string `json:"custom-console-url-namespace"`
 
 	RememberOKToTest bool `json:"remember-ok-to-test"`
+
+	// LLM Configuration
+	LLMEnabled     bool    `default:"false"         json:"llm-enabled"`
+	LLMProvider    string  `default:"openai"        json:"llm-provider"`
+	LLMModel       string  `default:"gpt-3.5-turbo" json:"llm-model"`
+	LLMMaxTokens   int     `default:"1000"          json:"llm-max-tokens"`
+	LLMTemperature float64 `default:"0.1"           json:"llm-temperature"`
+	LLMTimeout     int     `default:"30"            json:"llm-timeout-seconds"`
 }
 
 func (s *Settings) DeepCopy(out *Settings) {

@@ -435,7 +435,7 @@ func (v *Provider) GetTemplate(commentType provider.CommentType) string {
 	return provider.GetMarkdownTemplate(commentType)
 }
 
-// CreateLLMQueryResponse creates a comment with the LLM query response
+// CreateLLMQueryResponse creates a comment with the LLM query response.
 func (v *Provider) CreateLLMQueryResponse(ctx context.Context, event *info.Event, queryResponse string) error {
 	if v.client == nil {
 		return fmt.Errorf("cannot create LLM query response on bitbucket datacenter no token or url set")

@@ -448,8 +448,8 @@ func MatchRunningPipelineRunForIncomingWebhook(eventType, incomingPipelineRun st
 	return nil
 }
 
-// MatchPipelinerunByLLMComment processes LLM comments and returns matching pipelines
-func MatchPipelinerunByLLMComment(ctx context.Context, logger *zap.SugaredLogger, pruns []*tektonv1.PipelineRun, cs *params.Run, event *info.Event, vcx provider.Interface, eventEmitter *events.EventEmitter, repo *apipac.Repository, llmClient *llm.Client) ([]Match, error) {
+// MatchPipelinerunByLLMComment processes LLM comments and returns matching pipelines.
+func MatchPipelinerunByLLMComment(ctx context.Context, logger *zap.SugaredLogger, pruns []*tektonv1.PipelineRun, _ *params.Run, event *info.Event, _ provider.Interface, _ *events.EventEmitter, repo *apipac.Repository, llmClient *llm.Client) ([]Match, error) {
 	if llmClient == nil {
 		return nil, fmt.Errorf("LLM client is not configured")
 	}
@@ -475,7 +475,7 @@ func MatchPipelinerunByLLMComment(ctx context.Context, logger *zap.SugaredLogger
 	}
 
 	// Convert LLM result to matches for action-based commands
-	var matches []Match
+	matches := []Match{}
 	for _, pipeline := range result.TargetPipelines {
 		match := Match{
 			PipelineRun: pipeline,

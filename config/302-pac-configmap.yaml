@@ -159,6 +159,31 @@ data:
   # custom-console-url-pr-details: https://url/ns/{{ namespace }}/{{ pr }}
   # custom-console-url-pr-tasklog: https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ task }}
 
+  # LLM (Large Language Model) Configuration
+  # Enable or disable LLM integration for natural language commands in comments
+  # Default: false
+  llm-enabled: "false"
+
+  # LLM provider to use (openai, anthropic, gemini)
+  # Default: openai
+  llm-provider: "openai"
+
+  # LLM model to use (e.g., gpt-3.5-turbo, gpt-4, claude-3-sonnet, gemini-pro)
+  # Default: gpt-3.5-turbo
+  llm-model: "gpt-3.5-turbo"
+
+  # Maximum number of tokens for LLM responses
+  # Default: 1000
+  llm-max-tokens: "1000"
+
+  # Temperature for LLM responses (0.0 = deterministic, 1.0 = creative)
+  # Default: 0.1
+  llm-temperature: "0.1"
+
+  # Timeout in seconds for LLM API calls
+  # Default: 30
+  llm-timeout-seconds: "30"
+
 kind: ConfigMap
 metadata:
   name: pipelines-as-code

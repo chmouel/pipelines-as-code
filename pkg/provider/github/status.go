@@ -414,7 +414,7 @@ func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statu
 	return v.createStatusCommit(ctx, runevent, statusOpts)
 }
 
-// CreateLLMQueryResponse creates a comment with the LLM query response
+// CreateLLMQueryResponse creates a comment with the LLM query response.
 func (v *Provider) CreateLLMQueryResponse(ctx context.Context, event *info.Event, queryResponse string) error {
 	if v.ghClient == nil {
 		return fmt.Errorf("cannot create LLM query response on github no token or url set")

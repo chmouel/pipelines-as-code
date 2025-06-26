@@ -4,10 +4,13 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
+	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
 )
 
@@ -15,9 +18,9 @@ type mockTransport struct {
 	response string
 }
 
-func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (m *mockTransport) RoundTrip(_ *http.Request) (*http.Response, error) {
 	return &http.Response{
-		StatusCode: 200,
+		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(m.response)),
 	}, nil
 }
@@ -162,4 +165,75 @@ func TestAnalyzeComment_Query(t *testing.T) {
 	assert.Equal(t, result.Confidence, 0.9)
 	assert.Equal(t, result.Explanation, "User is asking about pipeline information")
 	assert.Equal(t, result.QueryResponse, "Based on the available pipelines, I can see the following production-related pipelines: [list relevant pipelines with descriptions]")
+}
+
+func TestNewClientFromSettings(t *testing.T) {
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+
+	// Test with LLM disabled
+	settings := &testSettings{
+		LLMEnabled:     false,
+		LLMProvider:    "openai",
+		LLMModel:       "gpt-3.5-turbo",
+		LLMMaxTokens:   1000,
+		LLMTemperature: 0.1,
+		LLMTimeout:     30,
+	}
+
+	client := NewClientFromSettings(settings, logger)
+	assert.Assert(t, client != nil)
+	assert.Equal(t, client.config.Enabled, false)
+
+	// Test with LLM enabled but no API key
+	settings.LLMEnabled = true
+	client = NewClientFromSettings(settings, logger)
+	assert.Assert(t, client != nil)
+	assert.Equal(t, client.config.Enabled, false) // Should be disabled due to missing API key
+
+	// Test with LLM enabled and API key set
+	settings.LLMEnabled = true
+	os.Setenv("OPENAI_API_KEY", "test-key")
+	defer os.Unsetenv("OPENAI_API_KEY")
+
+	client = NewClientFromSettings(settings, logger)
+	assert.Assert(t, client != nil)
+	assert.Equal(t, client.config.Enabled, true)
+	assert.Equal(t, client.config.Provider, "openai")
+	assert.Equal(t, client.config.Model, "gpt-3.5-turbo")
+	assert.Equal(t, client.config.MaxTokens, 1000)
+	assert.Equal(t, client.config.Temperature, 0.1)
+	assert.Equal(t, client.config.Timeout, 30*time.Second)
+	assert.Equal(t, client.config.APIKey, "test-key")
+	assert.Equal(t, client.config.APIEndpoint, "https://api.openai.com/v1/chat/completions")
+
+	// Test with Gemini provider
+	settings.LLMProvider = "gemini"
+	settings.LLMModel = "gemini-pro"
+	os.Setenv("GEMINI_API_KEY", "test-gemini-key")
+	defer os.Unsetenv("GEMINI_API_KEY")
+
+	client = NewClientFromSettings(settings, logger)
+	assert.Assert(t, client != nil)
+	assert.Equal(t, client.config.Enabled, true)
+	assert.Equal(t, client.config.Provider, "gemini")
+	assert.Equal(t, client.config.Model, "gemini-pro")
+	assert.Equal(t, client.config.APIKey, "test-gemini-key")
+	assert.Equal(t, client.config.APIEndpoint, "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent")
+
+	// Test with unknown provider
+	settings.LLMProvider = "unknown"
+	client = NewClientFromSettings(settings, logger)
+	assert.Assert(t, client != nil)
+	assert.Equal(t, client.config.Enabled, false) // Should be disabled for unknown provider
+}
+
+// testSettings is a test struct that mimics the settings structure.
+type testSettings struct {
+	LLMEnabled     bool
+	LLMProvider    string
+	LLMModel       string
+	LLMMaxTokens   int
+	LLMTemperature float64
+	LLMTimeout     int
 }

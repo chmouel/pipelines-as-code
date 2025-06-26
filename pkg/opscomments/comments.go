@@ -154,7 +154,7 @@ func GetPipelineRunFromCancelComment(comment string) string {
 }
 
 // GetLLMCommand extracts the command part from an LLM comment
-// e.g., "/llm restart the go test pipeline" returns "restart the go test pipeline"
+// e.g., "/llm restart the go test pipeline" returns "restart the go test pipeline".
 func GetLLMCommand(comment string) string {
 	matches := llmRegex.FindStringSubmatch(comment)
 	if len(matches) < 2 {

@@ -12,13 +12,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// Processor handles LLM-based comment processing and pipeline matching
+// Processor handles LLM-based comment processing and pipeline matching.
 type Processor struct {
 	client *Client
 	logger *zap.SugaredLogger
 }
 
-// NewProcessor creates a new LLM processor
+// NewProcessor creates a new LLM processor.
 func NewProcessor(client *Client, logger *zap.SugaredLogger) *Processor {
 	return &Processor{
 		client: client,
@@ -26,8 +26,8 @@ func NewProcessor(client *Client, logger *zap.SugaredLogger) *Processor {
 	}
 }
 
-// ProcessLLMComment processes an LLM comment and returns the intended pipeline actions
-func (p *Processor) ProcessLLMComment(ctx context.Context, comment string, event *info.Event, availablePipelines []*tektonv1.PipelineRun) (*LLMResult, error) {
+// ProcessLLMComment processes an LLM comment and returns the intended pipeline actions.
+func (p *Processor) ProcessLLMComment(ctx context.Context, comment string, event *info.Event, availablePipelines []*tektonv1.PipelineRun) (*Result, error) {
 	// Extract the LLM command from the comment
 	llmCommand := opscomments.GetLLMCommand(comment)
 	if llmCommand == "" {
@@ -53,7 +53,7 @@ func (p *Processor) ProcessLLMComment(ctx context.Context, comment string, event
 	}
 
 	// Convert LLM response to pipeline actions
-	result := &LLMResult{
+	result := &Result{
 		OriginalCommand: llmCommand,
 		Action:          resp.Action,
 		Confidence:      resp.Confidence,
@@ -84,8 +84,8 @@ func (p *Processor) ProcessLLMComment(ctx context.Context, comment string, event
 	return result, nil
 }
 
-// LLMResult represents the result of LLM comment processing
-type LLMResult struct {
+// Result represents the result of LLM comment processing.
+type Result struct {
 	OriginalCommand string                  `json:"original_command"`
 	Action          string                  `json:"action"`           // "test", "retest", "cancel", "query", "unknown"
 	Confidence      float64                 `json:"confidence"`       // 0-1 confidence score
@@ -94,9 +94,9 @@ type LLMResult struct {
 	TargetPipelines []*tektonv1.PipelineRun `json:"target_pipelines"` // pipelines to act on
 }
 
-// convertPipelinesToInfo converts PipelineRun objects to PipelineInfo for LLM analysis
+// convertPipelinesToInfo converts PipelineRun objects to PipelineInfo for LLM analysis.
 func (p *Processor) convertPipelinesToInfo(pipelines []*tektonv1.PipelineRun) []PipelineInfo {
-	var infos []PipelineInfo
+	infos := []PipelineInfo{}
 
 	for _, pipeline := range pipelines {
 		info := PipelineInfo{
@@ -112,7 +112,7 @@ func (p *Processor) convertPipelinesToInfo(pipelines []*tektonv1.PipelineRun) []
 	return infos
 }
 
-// getPipelineName returns the name of the pipeline
+// getPipelineName returns the name of the pipeline.
 func (p *Processor) getPipelineName(pipeline *tektonv1.PipelineRun) string {
 	name := pipeline.GetGenerateName()
 	if name == "" {
@@ -122,7 +122,7 @@ func (p *Processor) getPipelineName(pipeline *tektonv1.PipelineRun) string {
 	return strings.TrimSuffix(name, "-")
 }
 
-// getPipelineDescription extracts a description from pipeline annotations or generates one
+// getPipelineDescription extracts a description from pipeline annotations or generates one.
 func (p *Processor) getPipelineDescription(pipeline *tektonv1.PipelineRun) string {
 	annotations := pipeline.GetAnnotations()
 
@@ -142,7 +142,7 @@ func (p *Processor) getPipelineDescription(pipeline *tektonv1.PipelineRun) strin
 	return "Pipeline for CI/CD"
 }
 
-// extractTaskNames extracts task names from the pipeline
+// extractTaskNames extracts task names from the pipeline.
 func (p *Processor) extractTaskNames(pipeline *tektonv1.PipelineRun) []string {
 	var tasks []string
 
@@ -163,7 +163,7 @@ func (p *Processor) extractTaskNames(pipeline *tektonv1.PipelineRun) []string {
 	return tasks
 }
 
-// matchesPipelineName checks if a pipeline name matches the target name
+// matchesPipelineName checks if a pipeline name matches the target name.
 func (p *Processor) matchesPipelineName(pipeline *tektonv1.PipelineRun, targetName string) bool {
 	pipelineName := p.getPipelineName(pipeline)
 

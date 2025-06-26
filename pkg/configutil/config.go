@@ -89,6 +89,28 @@ func ValidateAndAssignValues(logger *zap.SugaredLogger, configData map[string]st
 			}
 			structValue.FieldByName(fieldName).SetInt(newValue)
 
+		case reflect.Float64:
+			// if fieldvalue is empty, skip validation and set the field as 0
+			if validator, ok := customValidations[fieldName]; ok && fieldValue != "" {
+				if err := validator(fieldValue); err != nil {
+					errors = append(errors, fmt.Errorf("custom validation failed for field %s: %w", fieldName, err))
+					continue
+				}
+			}
+			if fieldValue == "" {
+				fieldValue = "0"
+			}
+			newValue, err := strconv.ParseFloat(fieldValue, 64)
+			if err != nil {
+				errors = append(errors, fmt.Errorf("invalid value for float64 field %s: %w", fieldName, err))
+				continue
+			}
+			oldValue := structValue.FieldByName(fieldName).Float()
+			if oldValue != newValue && logUpdates {
+				logger.Infof("updating value for field %s: from '%f' to '%f'", fieldName, oldValue, newValue)
+			}
+			structValue.FieldByName(fieldName).SetFloat(newValue)
+
 		default:
 			// Skip unsupported field types
 			continue

@@ -11,11 +11,12 @@ import (
 )
 
 type testStruct struct {
-	ApplicationName   string `default:"pac-app"          json:"application-name"`
-	BoolField         bool   `default:"true"             json:"bool-field"`
-	IntField          int    `default:"43"               json:"int-field"`
-	WithoutDefault    string `json:"without-default"`
-	WithoutDefaultInt int    `json:"without-default-int"`
+	ApplicationName   string  `default:"pac-app"          json:"application-name"`
+	BoolField         bool    `default:"true"             json:"bool-field"`
+	IntField          int     `default:"43"               json:"int-field"`
+	FloatField        float64 `default:"3.14"             json:"float-field"`
+	WithoutDefault    string  `json:"without-default"`
+	WithoutDefaultInt int     `json:"without-default-int"`
 	IgnoredField      string
 }
 
@@ -36,6 +37,7 @@ func TestValidateAndAssignValues(t *testing.T) {
 				ApplicationName: "pac-app",
 				BoolField:       true,
 				IntField:        43,
+				FloatField:      3.14,
 				WithoutDefault:  "",
 			},
 			customValidations: map[string]func(string) error{},
@@ -46,12 +48,14 @@ func TestValidateAndAssignValues(t *testing.T) {
 				"application-name": "pac-pac",
 				"bool-field":       "false",
 				"int-field":        "101",
+				"float-field":      "2.718",
 				"without-default":  "random",
 			},
 			expectedStruct: testStruct{
 				ApplicationName: "pac-pac",
 				BoolField:       false,
 				IntField:        101,
+				FloatField:      2.718,
 				WithoutDefault:  "random",
 			},
 			customValidations: map[string]func(string) error{},
@@ -89,6 +93,13 @@ func TestValidateAndAssignValues(t *testing.T) {
 				"int-field": "abcd",
 			},
 			expectedError: "invalid value for int field IntField: strconv.ParseInt: parsing \"abcd\": invalid syntax",
+		},
+		{
+			name: "invalid value for float64 field",
+			configMap: map[string]string{
+				"float-field": "not-a-number",
+			},
+			expectedError: "invalid value for float64 field FloatField: strconv.ParseFloat: parsing \"not-a-number\": invalid syntax",
 		},
 	}
 
