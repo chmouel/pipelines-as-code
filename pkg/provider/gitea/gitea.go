@@ -470,3 +470,20 @@ func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (st
 func (v *Provider) GetTemplate(commentType provider.CommentType) string {
 	return provider.GetHTMLTemplate(commentType)
 }
+
+// CreateLLMQueryResponse creates a comment with the LLM query response
+func (v *Provider) CreateLLMQueryResponse(ctx context.Context, event *info.Event, queryResponse string) error {
+	if v.giteaClient == nil {
+		return fmt.Errorf("cannot create LLM query response on gitea no token or url set")
+	}
+
+	// Format the response as a markdown comment
+	formattedResponse := fmt.Sprintf("🤖 **AI Assistant Response**\n\n%s", queryResponse)
+
+	_, _, err := v.Client().CreateIssueComment(event.Organization, event.Repository,
+		int64(event.PullRequestNumber), gitea.CreateIssueCommentOption{
+			Body: formattedResponse,
+		},
+	)
+	return err
+}

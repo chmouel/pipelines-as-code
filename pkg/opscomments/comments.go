@@ -21,6 +21,7 @@ var (
 	oktotestRegex     = regexp.MustCompile(`(?m)^/ok-to-test\s*$`)
 	cancelAllRegex    = regexp.MustCompile(`(?m)^(/cancel)\s*$`)
 	cancelSingleRegex = regexp.MustCompile(`(?m)^(/cancel)[ \t]+\S+`)
+	llmRegex          = regexp.MustCompile(`(?m)^/llm\s+(.+)$`)
 )
 
 type EventType string
@@ -39,6 +40,8 @@ var (
 	CancelCommentSingleEventType = EventType("cancel-comment")
 	CancelCommentAllEventType    = EventType("cancel-all-comment")
 	OkToTestCommentEventType     = EventType("ok-to-test-comment")
+	LLMCommentEventType          = EventType("llm-comment")
+	LLMQueryEventType            = EventType("llm-query")
 )
 
 const (
@@ -63,6 +66,8 @@ func CommentEventType(comment string) EventType {
 		return CancelCommentAllEventType
 	case cancelSingleRegex.MatchString(comment):
 		return CancelCommentSingleEventType
+	case llmRegex.MatchString(comment):
+		return LLMCommentEventType
 	default:
 		return NoOpsCommentEventType
 	}
@@ -116,13 +121,15 @@ func IsAnyOpsEventType(eventType string) bool {
 		eventType == CancelCommentSingleEventType.String() ||
 		eventType == CancelCommentAllEventType.String() ||
 		eventType == OkToTestCommentEventType.String() ||
-		eventType == OnCommentEventType.String()
+		eventType == OnCommentEventType.String() ||
+		eventType == LLMCommentEventType.String() ||
+		eventType == LLMQueryEventType.String()
 }
 
 // AnyOpsKubeLabelInSelector will output a Kubernetes label out of all possible
 // CommentEvent Type for selection.
 func AnyOpsKubeLabelInSelector() string {
-	return fmt.Sprintf("%s,%s,%s,%s,%s,%s,%s,%s",
+	return fmt.Sprintf("%s,%s,%s,%s,%s,%s,%s,%s,%s,%s",
 		TestSingleCommentEventType.String(),
 		TestAllCommentEventType.String(),
 		RetestAllCommentEventType.String(),
@@ -130,7 +137,9 @@ func AnyOpsKubeLabelInSelector() string {
 		CancelCommentSingleEventType.String(),
 		CancelCommentAllEventType.String(),
 		OkToTestCommentEventType.String(),
-		OnCommentEventType.String())
+		OnCommentEventType.String(),
+		LLMCommentEventType.String(),
+		LLMQueryEventType.String())
 }
 
 func GetPipelineRunFromTestComment(comment string) string {
@@ -142,6 +151,16 @@ func GetPipelineRunFromTestComment(comment string) string {
 
 func GetPipelineRunFromCancelComment(comment string) string {
 	return getNameFromComment(cancelComment, comment)
+}
+
+// GetLLMCommand extracts the command part from an LLM comment
+// e.g., "/llm restart the go test pipeline" returns "restart the go test pipeline"
+func GetLLMCommand(comment string) string {
+	matches := llmRegex.FindStringSubmatch(comment)
+	if len(matches) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(matches[1])
 }
 
 func getNameFromComment(typeOfComment, comment string) string {

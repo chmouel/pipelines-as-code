@@ -327,3 +327,22 @@ func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (st
 func (v *Provider) GetTemplate(commentType provider.CommentType) string {
 	return provider.GetMarkdownTemplate(commentType)
 }
+
+// CreateLLMQueryResponse creates a comment with the LLM query response
+func (v *Provider) CreateLLMQueryResponse(ctx context.Context, event *info.Event, queryResponse string) error {
+	if v.bbClient == nil {
+		return fmt.Errorf("cannot create LLM query response on bitbucket cloud no token or url set")
+	}
+
+	// Format the response as a markdown comment
+	formattedResponse := fmt.Sprintf("🤖 **AI Assistant Response**\n\n%s", queryResponse)
+
+	_, err := v.Client().Repositories.PullRequests.AddComment(
+		&bitbucket.PullRequestCommentOptions{
+			Owner:         event.Organization,
+			RepoSlug:      event.Repository,
+			PullRequestID: strconv.Itoa(event.PullRequestNumber),
+			Content:       formattedResponse,
+		})
+	return err
+}

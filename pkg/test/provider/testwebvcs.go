@@ -52,6 +52,10 @@ func (v *TestProviderImp) CreateComment(_ context.Context, _ *info.Event, _, _ s
 	return nil
 }
 
+func (v *TestProviderImp) CreateLLMQueryResponse(_ context.Context, _ *info.Event, _ string) error {
+	return nil
+}
+
 func (v *TestProviderImp) SetLogger(_ *zap.SugaredLogger) {
 }
 

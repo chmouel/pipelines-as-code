@@ -545,3 +545,18 @@ func (v *Provider) isHeadCommitOfBranch(runevent *info.Event, branchName string)
 func (v *Provider) GetTemplate(commentType provider.CommentType) string {
 	return provider.GetHTMLTemplate(commentType)
 }
+
+// CreateLLMQueryResponse creates a comment with the LLM query response
+func (v *Provider) CreateLLMQueryResponse(ctx context.Context, event *info.Event, queryResponse string) error {
+	if v.gitlabClient == nil {
+		return fmt.Errorf("no gitlab client has been initialized")
+	}
+
+	// Format the response as a markdown comment
+	formattedResponse := fmt.Sprintf("🤖 **AI Assistant Response**\n\n%s", queryResponse)
+
+	_, _, err := v.Client().Notes.CreateMergeRequestNote(v.targetProjectID, event.PullRequestNumber, &gitlab.CreateMergeRequestNoteOptions{
+		Body: &formattedResponse,
+	})
+	return err
+}

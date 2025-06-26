@@ -682,3 +682,89 @@ func TestGetPipelineRunAndBranchNameFromCancelComment(t *testing.T) {
 func TestAnyOpsKubeLabelInSelector(t *testing.T) {
 	assert.Assert(t, strings.Contains(AnyOpsKubeLabelInSelector(), RetestSingleCommentEventType.String()))
 }
+
+func TestLLMCommentDetection(t *testing.T) {
+	tests := []struct {
+		name    string
+		comment string
+		want    EventType
+	}{
+		{
+			name:    "llm action command",
+			comment: "/llm restart the go test pipeline",
+			want:    LLMCommentEventType,
+		},
+		{
+			name:    "llm query command",
+			comment: "/llm what is the push to production pipeline",
+			want:    LLMCommentEventType,
+		},
+		{
+			name:    "llm command with extra spaces",
+			comment: "/llm  run all tests  ",
+			want:    LLMCommentEventType,
+		},
+		{
+			name:    "not an llm command",
+			comment: "/test pipeline",
+			want:    TestSingleCommentEventType,
+		},
+		{
+			name:    "empty comment",
+			comment: "",
+			want:    NoOpsCommentEventType,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CommentEventType(tt.comment)
+			if got != tt.want {
+				t.Errorf("CommentEventType() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetLLMCommand(t *testing.T) {
+	tests := []struct {
+		name    string
+		comment string
+		want    string
+	}{
+		{
+			name:    "llm action command",
+			comment: "/llm restart the go test pipeline",
+			want:    "restart the go test pipeline",
+		},
+		{
+			name:    "llm query command",
+			comment: "/llm what is the push to production pipeline",
+			want:    "what is the push to production pipeline",
+		},
+		{
+			name:    "llm command with extra spaces",
+			comment: "/llm  run all tests  ",
+			want:    "run all tests",
+		},
+		{
+			name:    "not an llm command",
+			comment: "/test pipeline",
+			want:    "",
+		},
+		{
+			name:    "empty comment",
+			comment: "",
+			want:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetLLMCommand(tt.comment)
+			if got != tt.want {
+				t.Errorf("GetLLMCommand() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

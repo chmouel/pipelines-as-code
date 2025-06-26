@@ -12,6 +12,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -185,7 +186,26 @@ func checkPipelineRunAnnotation(prun *tektonv1.PipelineRun, eventEmitter *events
 	}
 }
 
-func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger, pruns []*tektonv1.PipelineRun, cs *params.Run, event *info.Event, vcx provider.Interface, eventEmitter *events.EventEmitter, repo *apipac.Repository) ([]Match, error) {
+func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger, pruns []*tektonv1.PipelineRun, cs *params.Run, event *info.Event, vcx provider.Interface, eventEmitter *events.EventEmitter, repo *apipac.Repository, llmClient *llm.Client) ([]Match, error) {
+	// Check if this is an LLM comment
+	if event.EventType == opscomments.LLMCommentEventType.String() && llmClient != nil {
+		return MatchPipelinerunByLLMComment(ctx, logger, pruns, cs, event, vcx, eventEmitter, repo, llmClient)
+	}
+
+	// Check if this is an LLM query
+	if event.EventType == opscomments.LLMQueryEventType.String() {
+		// Handle LLM query response
+		if event.TriggerComment != "" {
+			err := vcx.CreateLLMQueryResponse(ctx, event, event.TriggerComment)
+			if err != nil {
+				logger.Errorf("Failed to create LLM query response: %v", err)
+				return nil, err
+			}
+			logger.Infof("Successfully posted LLM query response")
+		}
+		return []Match{}, nil
+	}
+
 	matchedPRs := []Match{}
 	infomsg := fmt.Sprintf("matching pipelineruns to event: URL=%s, target-branch=%s, source-branch=%s, target-event=%s",
 		event.URL,
@@ -426,4 +446,61 @@ func MatchRunningPipelineRunForIncomingWebhook(eventType, incomingPipelineRun st
 		}
 	}
 	return nil
+}
+
+// MatchPipelinerunByLLMComment processes LLM comments and returns matching pipelines
+func MatchPipelinerunByLLMComment(ctx context.Context, logger *zap.SugaredLogger, pruns []*tektonv1.PipelineRun, cs *params.Run, event *info.Event, vcx provider.Interface, eventEmitter *events.EventEmitter, repo *apipac.Repository, llmClient *llm.Client) ([]Match, error) {
+	if llmClient == nil {
+		return nil, fmt.Errorf("LLM client is not configured")
+	}
+
+	// Create LLM processor
+	processor := llm.NewProcessor(llmClient, logger)
+
+	// Process the LLM comment
+	result, err := processor.ProcessLLMComment(ctx, event.TriggerComment, event, pruns)
+	if err != nil {
+		logger.Errorf("Failed to process LLM comment: %v", err)
+		return nil, err
+	}
+
+	// Handle query actions - return empty matches but store query response
+	if result.Action == "query" {
+		// Store query response in event for later use
+		event.TriggerComment = result.QueryResponse
+		event.EventType = opscomments.LLMQueryEventType.String()
+
+		logger.Infof("LLM query response: %s", result.QueryResponse)
+		return []Match{}, nil
+	}
+
+	// Convert LLM result to matches for action-based commands
+	var matches []Match
+	for _, pipeline := range result.TargetPipelines {
+		match := Match{
+			PipelineRun: pipeline,
+			Repo:        repo,
+			Config:      map[string]string{},
+		}
+		matches = append(matches, match)
+	}
+
+	// Log the LLM analysis result
+	logger.Infof("LLM analysis: action=%s, confidence=%.2f, explanation=%s, matched_pipelines=%d",
+		result.Action, result.Confidence, result.Explanation, len(matches))
+
+	// Set the event type based on LLM action
+	switch result.Action {
+	case "test":
+		event.EventType = opscomments.TestAllCommentEventType.String()
+	case "retest":
+		event.EventType = opscomments.RetestAllCommentEventType.String()
+	case "cancel":
+		event.CancelPipelineRuns = true
+		event.EventType = opscomments.CancelCommentAllEventType.String()
+	default:
+		event.EventType = opscomments.LLMCommentEventType.String()
+	}
+
+	return matches, nil
 }
