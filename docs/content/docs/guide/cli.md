@@ -409,6 +409,97 @@ You can specify a different directory than the current one by using the -d/--dir
 
 {{< /details >}}
 
+{{< details "tkn pac cel" >}}
+
+### CEL Expression Evaluator
+
+`tkn pac cel` — Evaluate CEL (Common Expression Language) expressions interactively with webhook payloads.
+
+This command allows you to test and debug CEL expressions as they would be evaluated by Pipelines-as-Code, using real webhook payloads and headers. It supports interactive and non-interactive modes, provider auto-detection, and persistent history.
+
+#### Features
+
+* **Interactive mode**: Type CEL expressions with up/down arrow history (readline experience). History is saved in a cross-platform location:
+  * Linux/macOS: `~/.cache/tkn-pac/cel-history`
+  * Windows: `%USERPROFILE%\.cache\tkn-pac\cel-history`
+* **Non-interactive mode**: Pipe expressions via stdin.
+* **Provider auto-detection**: Detects GitHub, GitLab, Bitbucket Cloud, Bitbucket Data Center, and Gitea from headers/payload.
+* **Direct CEL variables**: All documented variables are available at the top level (e.g., `event`, `target_branch`, `source_branch`, etc.), not just under `pac.*`.
+* **Backward compatibility**: `pac.*` variables are still available.
+* **Comprehensive help**: Lists all available variables and example expressions.
+* **Cross-platform**: History file location and directory creation work on Linux, macOS, and Windows.
+
+#### Usage
+
+```shell
+tkn pac cel -b <body.json> -H <headers.txt>
+```
+
+* `-b, --body`: Path to JSON body file (webhook payload)
+* `-H, --headers`: Path to headers file (plain text or JSON)
+* `-p, --provider`: Provider (auto, github, gitlab, bitbucket-cloud, bitbucket-datacenter, gitea)
+
+#### Interactive Mode
+
+If run in a terminal, you'll get a prompt:
+
+```
+CEL expression> 
+```
+
+* Use ↑/↓ arrows to navigate history.
+* History is saved and loaded automatically.
+* Press Enter on an empty line to exit.
+
+#### Non-Interactive Mode
+
+Pipe expressions via stdin:
+
+```shell
+echo 'event == "pull_request"' | tkn pac cel -b body.json -H headers.txt
+```
+
+#### Available Variables
+
+* **Direct variables** (top-level, as per PAC documentation):
+  * `event` — event type (push, pull_request)
+  * `target_branch` — target branch name
+  * `source_branch` — source branch name
+  * `target_url` — target repository URL
+  * `source_url` — source repository URL
+  * `event_title` — PR title or commit message
+
+* **Webhook payload** (`body.*`): All fields from the webhook JSON.
+* **HTTP headers** (`headers.*`): All HTTP headers.
+* **Files** (`files.*`): Always empty in CLI mode.  
+  **Note:** `fileChanged`, `fileDeleted`, `fileModified` and similar functions are **not implemented yet** in the CLI.
+* **PAC Parameters** (`pac.*`): All variables for backward compatibility.
+
+#### Example Expressions
+
+```text
+event == "pull_request" && target_branch == "main"
+event == "pull_request" && source_branch.matches(".*feat/.*")
+body.action == "synchronize"
+!body.pull_request.draft
+headers['x-github-event'] == "pull_request"
+event == "pull_request" && target_branch != "experimental"
+```
+
+#### Limitations
+
+* `files.*` variables are always empty in CLI mode.
+* Functions like `fileChanged`, `fileDeleted`, `fileModified` are **not implemented yet** in the CLI.
+
+#### Cross-Platform History
+
+* History is saved in a cache directory:
+  * Linux/macOS: `~/.cache/tkn-pac/cel-history`
+  * Windows: `%USERPROFILE%\.cache\tkn-pac\cel-history`
+* The directory is created automatically if it does not exist.
+
+{{< /details >}}
+
 ## Screenshot
 
 ![tkn-plug-in](/images/tkn-pac-cli.png)

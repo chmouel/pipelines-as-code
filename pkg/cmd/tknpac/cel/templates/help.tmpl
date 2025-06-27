@@ -1,0 +1,34 @@
+🔍 CEL Expression Evaluator for Pipelines as Code
+🚰 Detected provider: %s
+
+📋 Available variables:
+  🎯 Direct variables (as per PAC documentation):
+    • event              - event type (push, pull_request)
+    • target_branch      - target branch name
+    • source_branch      - source branch name
+    • target_url         - target repository URL
+    • source_url         - source repository URL
+    • event_title        - PR title or commit message
+  📦 Webhook payload (body.*):
+    • body.action            - PR action (opened, synchronize, etc.)
+    • body.number            - PR number
+    • body.pull_request.user.login - PR author
+    • body.pull_request.draft - true if PR is draft
+  📡 HTTP headers (headers.*):
+    • headers['x-github-event']    - GitHub event type
+    • headers['x-github-delivery'] - GitHub delivery ID
+    • headers['content-type']      - Request content type
+    • headers['user-agent']        - User agent (GitHub-Hookshot/...)
+  📁 Files (files.* - ❌ always empty in CLI):
+    • files.all, files.added, files.modified, etc.
+    ⚠️  Note: fileChanged, fileDeleted, fileModified and all files.* variables are not implemented in the CLI and will always be empty.
+  🔧 PAC Parameters (pac.* - for backward compatibility):
+    • pac.event, pac.target_branch, pac.source_branch, etc.
+
+💡 Example expressions:
+  ✓ event == "pull_request" && target_branch == "main"
+  ✓ event == "pull_request" && source_branch.matches(".*feat/.*")
+  ✓ body.action == "synchronize"
+  ✓ !body.pull_request.draft
+  ✓ headers['x-github-event'] == "pull_request"
+  ✓ event == "pull_request" && target_branch != "experimental"
