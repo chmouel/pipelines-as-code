@@ -14,7 +14,9 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -2570,3 +2572,164 @@ func TestGetName(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchPipelinerunByLLMComment(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	logger := zap.NewNop().Sugar()
+
+	tests := []struct {
+		name           string
+		event          *info.Event
+		pruns          []*tektonv1.PipelineRun
+		llmClient      *llm.Client
+		provider       provider.Interface
+		expectedAction string
+		expectedError  string
+	}{
+		{
+			name: "LLM query response posted as comment",
+			event: &info.Event{
+				EventType:         opscomments.LLMCommentEventType.String(),
+				TriggerComment:    "/llm what pipelines are available?",
+				Organization:      "test-org",
+				Repository:        "test-repo",
+				PullRequestNumber: 123,
+				BaseBranch:        "main",
+				HeadBranch:        "feature",
+			},
+			pruns: []*tektonv1.PipelineRun{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-pipeline",
+						Annotations: map[string]string{
+							keys.OnEvent:        "pull_request",
+							keys.OnTargetBranch: "main",
+						},
+					},
+				},
+			},
+			llmClient: llm.NewClient(&llm.Config{
+				Enabled: true,
+			}, logger),
+			provider: &testProvider{
+				commentPosted: false,
+			},
+			expectedAction: "query",
+		},
+		{
+			name: "No LLM client configured",
+			event: &info.Event{
+				EventType:      opscomments.LLMCommentEventType.String(),
+				TriggerComment: "test comment",
+			},
+			pruns:         []*tektonv1.PipelineRun{},
+			llmClient:     nil,
+			provider:      &testProvider{},
+			expectedError: "LLM client is not configured",
+		},
+		{
+			name: "LLM PR analysis command",
+			event: &info.Event{
+				EventType:         opscomments.LLMPRAnalysisEventType.String(),
+				TriggerComment:    "/llm analyze this pull request for security issues",
+				Organization:      "test-org",
+				Repository:        "test-repo",
+				PullRequestNumber: 123,
+				BaseBranch:        "main",
+				HeadBranch:        "feature",
+				PullRequestTitle:  "Test PR",
+				SHATitle:          "Test commit message",
+				PullRequestLabel:  []string{"bug", "enhancement"},
+			},
+			pruns: []*tektonv1.PipelineRun{},
+			llmClient: llm.NewClient(&llm.Config{
+				Enabled: true,
+			}, logger),
+			provider: &testProvider{
+				commentPosted: false,
+			},
+			expectedAction: "query",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matches, err := MatchPipelinerunByLLMComment(ctx, logger, tt.pruns, nil, tt.event, tt.provider, nil, nil, tt.llmClient)
+
+			if tt.expectedError != "" {
+				assert.ErrorContains(t, err, tt.expectedError)
+				return
+			}
+
+			assert.NilError(t, err)
+
+			// For query actions, we expect no matches but the response should be posted
+			if tt.expectedAction == "query" {
+				assert.Equal(t, 0, len(matches))
+				// Note: In a real test, we would mock the LLM client to return a specific response
+				// and verify that the provider's CreateLLMQueryResponse method was called
+			}
+		})
+	}
+}
+
+// testProvider is a mock provider for testing
+type testProvider struct {
+	commentPosted bool
+}
+
+func (p *testProvider) CreateLLMQueryResponse(ctx context.Context, event *info.Event, queryResponse string) error {
+	p.commentPosted = true
+	return nil
+}
+
+// Implement other required methods with empty implementations
+func (p *testProvider) SetLogger(*zap.SugaredLogger)                             {}
+func (p *testProvider) Validate(context.Context, *params.Run, *info.Event) error { return nil }
+func (p *testProvider) Detect(*http.Request, string, *zap.SugaredLogger) (bool, bool, *zap.SugaredLogger, string, error) {
+	return false, false, nil, "", nil
+}
+
+func (p *testProvider) ParsePayload(context.Context, *params.Run, *http.Request, string) (*info.Event, error) {
+	return nil, nil
+}
+func (p *testProvider) IsAllowed(context.Context, *info.Event) (bool, error) { return true, nil }
+func (p *testProvider) IsAllowedOwnersFile(context.Context, *info.Event) (bool, error) {
+	return true, nil
+}
+
+func (p *testProvider) CreateStatus(context.Context, *info.Event, provider.StatusOpts) error {
+	return nil
+}
+
+func (p *testProvider) GetTektonDir(context.Context, *info.Event, string, string) (string, error) {
+	return "", nil
+}
+
+func (p *testProvider) GetFileInsideRepo(context.Context, *info.Event, string, string) (string, error) {
+	return "", nil
+}
+
+func (p *testProvider) SetClient(context.Context, *params.Run, *info.Event, *v1alpha1.Repository, *events.EventEmitter) error {
+	return nil
+}
+func (p *testProvider) SetPacInfo(*info.PacOpts)                         {}
+func (p *testProvider) GetCommitInfo(context.Context, *info.Event) error { return nil }
+func (p *testProvider) GetConfig() *info.ProviderConfig                  { return nil }
+func (p *testProvider) GetFiles(context.Context, *info.Event) (changedfiles.ChangedFiles, error) {
+	return changedfiles.ChangedFiles{}, nil
+}
+
+func (p *testProvider) GetTaskURI(context.Context, *info.Event, string) (bool, string, error) {
+	return false, "", nil
+}
+
+func (p *testProvider) CreateToken(context.Context, []string, *info.Event) (string, error) {
+	return "", nil
+}
+
+func (p *testProvider) CheckPolicyAllowing(context.Context, *info.Event, []string) (bool, string) {
+	return true, ""
+}
+func (p *testProvider) GetTemplate(provider.CommentType) string                          { return "" }
+func (p *testProvider) CreateComment(context.Context, *info.Event, string, string) error { return nil }

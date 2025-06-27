@@ -49,6 +49,12 @@ data:
   llm-timeout-seconds: "30"
 ```
 
+#### Kubectl
+
+```shell
+kubectl patch configmap -n pipelines-as-code --type merge -p '{"data":{"llm-enabled": "true", "llm-provider": "gemini"}}' pipelines-as-code
+```
+
 ### Environment Variables
 
 API keys for LLM providers must be set as environment variables:
@@ -56,6 +62,12 @@ API keys for LLM providers must be set as environment variables:
 - **OpenAI**: `OPENAI_API_KEY`
 - **Anthropic**: `ANTHROPIC_API_KEY`
 - **Google Gemini**: `GEMINI_API_KEY`
+
+### Command line example
+
+```zsh
+for i (watcher controller) oc set env -n pipelines-as-code deployment/pipelines-as-code-${i} GEMINI_API_KEY="$(pass show redhat/gemini-api-credentials)"
+```
 
 ### Provider-Specific Configuration
 
@@ -83,7 +95,7 @@ API keys for LLM providers must be set as environment variables:
 
 Users can execute pipeline operations using natural language:
 
-```
+```console
 /llm restart the failing test
 /llm cancel all running pipelines
 /llm run the deployment pipeline
@@ -94,12 +106,66 @@ Users can execute pipeline operations using natural language:
 
 Users can ask questions about available pipelines:
 
-```
+```console
 /llm what pipelines are available?
 /llm show me the test results
 /llm what is the status of the build?
 /llm which pipeline handles deployment?
 /llm what is the push to production pipeline?
+```
+
+### Pull Request Analysis
+
+Users can analyze pull requests for issues and security vulnerabilities:
+
+```console
+/llm analyze this pull request for security issues
+/llm review this pull request for any problems
+/llm check this PR for security vulnerabilities
+/llm are there any issues with this pull request?
+/llm code review this pull request
+/llm analyze this PR for security bugs
+```
+
+The PR analysis feature will:
+
+- Analyze the pull request title, description, and commit messages
+- Review changed files and their modifications
+- Identify potential security vulnerabilities
+- Highlight code quality issues
+- Provide recommendations for improvement
+- Return a detailed analysis with confidence score
+
+**Example Response:**
+
+```
+🤖 **AI Assistant Response**
+
+## 🔍 Pull Request Analysis
+
+This pull request introduces a new authentication system with several areas that need attention...
+
+## ⚠️ Issues Found
+
+1. Missing input validation on user credentials
+2. Hardcoded database connection string
+3. No error handling for failed authentication attempts
+
+## 🔒 Security Concerns
+
+1. Potential SQL injection vulnerability in user query
+2. Sensitive data logged in plain text
+3. Weak password hashing algorithm used
+
+## 💡 Recommendations
+
+1. Implement proper input sanitization
+2. Use environment variables for configuration
+3. Add comprehensive error handling
+4. Upgrade to bcrypt for password hashing
+5. Add security headers to responses
+
+**Confidence Score:** 85.0%
 ```
 
 ## How It Works

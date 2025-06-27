@@ -42,6 +42,7 @@ var (
 	OkToTestCommentEventType     = EventType("ok-to-test-comment")
 	LLMCommentEventType          = EventType("llm-comment")
 	LLMQueryEventType            = EventType("llm-query")
+	LLMPRAnalysisEventType       = EventType("llm-pr-analysis")
 )
 
 const (
@@ -50,27 +51,81 @@ const (
 	cancelComment = "/cancel"
 )
 
+// CommentEventType returns the event type based on the comment content.
 func CommentEventType(comment string) EventType {
-	switch {
-	case retestAllRegex.MatchString(comment):
-		return RetestAllCommentEventType
-	case retestSingleRegex.MatchString(comment):
-		return RetestSingleCommentEventType
-	case testAllRegex.MatchString(comment):
-		return TestAllCommentEventType
-	case testSingleRegex.MatchString(comment):
-		return TestSingleCommentEventType
-	case oktotestRegex.MatchString(comment):
-		return OkToTestCommentEventType
-	case cancelAllRegex.MatchString(comment):
-		return CancelCommentAllEventType
-	case cancelSingleRegex.MatchString(comment):
-		return CancelCommentSingleEventType
-	case llmRegex.MatchString(comment):
-		return LLMCommentEventType
-	default:
+	comment = strings.TrimSpace(comment)
+	if comment == "" {
 		return NoOpsCommentEventType
 	}
+
+	// Check for LLM commands first
+	if llmRegex.MatchString(comment) {
+		llmCommand := GetLLMCommand(comment)
+		if isPRAnalysisCommand(llmCommand) {
+			return LLMPRAnalysisEventType
+		}
+		return LLMCommentEventType
+	}
+
+	// Check for test commands
+	if testAllRegex.MatchString(comment) {
+		return TestAllCommentEventType
+	}
+	if testSingleRegex.MatchString(comment) {
+		return TestSingleCommentEventType
+	}
+
+	// Check for retest commands
+	if retestAllRegex.MatchString(comment) {
+		return RetestAllCommentEventType
+	}
+	if retestSingleRegex.MatchString(comment) {
+		return RetestSingleCommentEventType
+	}
+
+	// Check for cancel commands
+	if cancelAllRegex.MatchString(comment) {
+		return CancelCommentAllEventType
+	}
+	if cancelSingleRegex.MatchString(comment) {
+		return CancelCommentSingleEventType
+	}
+
+	// Check for ok-to-test command
+	if oktotestRegex.MatchString(comment) {
+		return OkToTestCommentEventType
+	}
+
+	return NoOpsCommentEventType
+}
+
+// isPRAnalysisCommand checks if the LLM command is requesting PR analysis.
+func isPRAnalysisCommand(command string) bool {
+	command = strings.ToLower(command)
+	prAnalysisKeywords := []string{
+		"analyze this pull request",
+		"analyze this pr",
+		"review this pull request",
+		"review this pr",
+		"check this pull request",
+		"check this pr",
+		"security issues",
+		"security vulnerabilities",
+		"security bugs",
+		"security concerns",
+		"any issues",
+		"any problems",
+		"any bugs",
+		"code review",
+		"code analysis",
+	}
+
+	for _, keyword := range prAnalysisKeywords {
+		if strings.Contains(command, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 // SetEventTypeAndTargetPR function will set the event type and target test pipeline run in an event.
