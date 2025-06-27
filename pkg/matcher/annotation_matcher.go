@@ -192,18 +192,9 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 		return MatchPipelinerunByLLMComment(ctx, logger, pruns, cs, event, vcx, eventEmitter, repo, llmClient)
 	}
 
-	// Check if this is an LLM query
-	if event.EventType == opscomments.LLMQueryEventType.String() {
-		// Handle LLM query response
-		if event.TriggerComment != "" {
-			err := vcx.CreateLLMQueryResponse(ctx, event, event.TriggerComment)
-			if err != nil {
-				logger.Errorf("Failed to create LLM query response: %v", err)
-				return nil, err
-			}
-			logger.Infof("Successfully posted LLM query response")
-		}
-		return []Match{}, nil
+	// Check if this is an LLM PR analysis
+	if event.EventType == opscomments.LLMPRAnalysisEventType.String() && llmClient != nil {
+		return MatchPipelinerunByLLMComment(ctx, logger, pruns, cs, event, vcx, eventEmitter, repo, llmClient)
 	}
 
 	matchedPRs := []Match{}
@@ -449,13 +440,13 @@ func MatchRunningPipelineRunForIncomingWebhook(eventType, incomingPipelineRun st
 }
 
 // MatchPipelinerunByLLMComment processes LLM comments and returns matching pipelines.
-func MatchPipelinerunByLLMComment(ctx context.Context, logger *zap.SugaredLogger, pruns []*tektonv1.PipelineRun, _ *params.Run, event *info.Event, _ provider.Interface, _ *events.EventEmitter, repo *apipac.Repository, llmClient *llm.Client) ([]Match, error) {
+func MatchPipelinerunByLLMComment(ctx context.Context, logger *zap.SugaredLogger, pruns []*tektonv1.PipelineRun, _ *params.Run, event *info.Event, vcx provider.Interface, _ *events.EventEmitter, repo *apipac.Repository, llmClient *llm.Client) ([]Match, error) {
 	if llmClient == nil {
 		return nil, fmt.Errorf("LLM client is not configured")
 	}
 
-	// Create LLM processor
-	processor := llm.NewProcessor(llmClient, logger)
+	// Create LLM processor with provider
+	processor := llm.NewProcessor(llmClient, logger, vcx)
 
 	// Process the LLM comment
 	result, err := processor.ProcessLLMComment(ctx, event.TriggerComment, event, pruns)
@@ -464,13 +455,26 @@ func MatchPipelinerunByLLMComment(ctx context.Context, logger *zap.SugaredLogger
 		return nil, err
 	}
 
-	// Handle query actions - return empty matches but store query response
+	// Handle query actions - post response as comment and return empty matches
 	if result.Action == "query" {
 		// Store query response in event for later use
 		event.TriggerComment = result.QueryResponse
 		event.EventType = opscomments.LLMQueryEventType.String()
 
 		logger.Infof("LLM query response: %s", result.QueryResponse)
+
+		// Post the response as a comment if we have a provider
+		if vcx != nil {
+			if err := vcx.CreateLLMQueryResponse(ctx, event, result.QueryResponse); err != nil {
+				logger.Errorf("Failed to post LLM query response as comment: %v", err)
+				// Don't return error here, just log it - we still want to return the matches
+			} else {
+				logger.Infof("Successfully posted LLM query response as comment")
+			}
+		} else {
+			logger.Warnf("No provider available to post LLM query response as comment")
+		}
+
 		return []Match{}, nil
 	}
 

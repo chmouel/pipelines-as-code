@@ -8,6 +8,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 )
@@ -16,13 +17,15 @@ import (
 type Processor struct {
 	client *Client
 	logger *zap.SugaredLogger
+	vcx    provider.Interface
 }
 
 // NewProcessor creates a new LLM processor.
-func NewProcessor(client *Client, logger *zap.SugaredLogger) *Processor {
+func NewProcessor(client *Client, logger *zap.SugaredLogger, vcx provider.Interface) *Processor {
 	return &Processor{
 		client: client,
 		logger: logger,
+		vcx:    vcx,
 	}
 }
 
@@ -32,6 +35,11 @@ func (p *Processor) ProcessLLMComment(ctx context.Context, comment string, event
 	llmCommand := opscomments.GetLLMCommand(comment)
 	if llmCommand == "" {
 		return nil, fmt.Errorf("failed to extract LLM command from comment: %s", comment)
+	}
+
+	// Check if this is a PR analysis request
+	if p.isPRAnalysisRequest(llmCommand) {
+		return p.processPRAnalysisRequest(ctx, llmCommand, event)
 	}
 
 	// Convert available pipelines to PipelineInfo for LLM analysis
@@ -63,10 +71,7 @@ func (p *Processor) ProcessLLMComment(ctx context.Context, comment string, event
 	}
 
 	// Find matching pipelines based on LLM analysis
-	if len(resp.TargetPipelines) == 0 {
-		// Target all pipelines
-		result.TargetPipelines = availablePipelines
-	} else {
+	if len(resp.TargetPipelines) != 0 {
 		// Target specific pipelines
 		for _, targetName := range resp.TargetPipelines {
 			for _, pipeline := range availablePipelines {
@@ -183,4 +188,197 @@ func (p *Processor) matchesPipelineName(pipeline *tektonv1.PipelineRun, targetNa
 	}
 
 	return false
+}
+
+// isPRAnalysisRequest checks if the LLM command is requesting PR analysis.
+func (p *Processor) isPRAnalysisRequest(command string) bool {
+	command = strings.ToLower(command)
+	prAnalysisKeywords := []string{
+		"analyze this pull request",
+		"analyze this pr",
+		"review this pull request",
+		"review this pr",
+		"check this pull request",
+		"check this pr",
+		"security issues",
+		"security vulnerabilities",
+		"security bugs",
+		"security concerns",
+		"any issues",
+		"any problems",
+		"any bugs",
+		"code review",
+		"code analysis",
+	}
+
+	for _, keyword := range prAnalysisKeywords {
+		if strings.Contains(command, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+// processPRAnalysisRequest processes a PR analysis request.
+func (p *Processor) processPRAnalysisRequest(ctx context.Context, command string, event *info.Event) (*Result, error) {
+	// Create PR analysis request
+	req := &PRAnalysisRequest{
+		UserQuestion:      command,
+		Repository:        event.Repository,
+		Organization:      event.Organization,
+		PullRequestNumber: event.PullRequestNumber,
+		BaseBranch:        event.BaseBranch,
+		HeadBranch:        event.HeadBranch,
+		Labels:            event.PullRequestLabel,
+		Title:             event.PullRequestTitle,
+		Description:       event.SHATitle, // Use commit message as description for now
+		ChangedFiles:      p.convertChangedFiles(ctx, event),
+		Commits:           p.convertCommits(ctx, event),
+	}
+
+	// Analyze the PR with LLM
+	resp, err := p.client.AnalyzePullRequest(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to analyze pull request with LLM: %w", err)
+	}
+
+	// Format the response for display
+	formattedResponse := p.formatPRAnalysisResponse(resp)
+
+	// Return result with query action
+	result := &Result{
+		OriginalCommand: command,
+		Action:          "query",
+		Confidence:      resp.Confidence,
+		Explanation:     "PR analysis completed",
+		QueryResponse:   formattedResponse,
+		TargetPipelines: []*tektonv1.PipelineRun{},
+	}
+
+	p.logger.Infof("PR analysis result: confidence=%.2f, issues=%d, security_concerns=%d, recommendations=%d",
+		result.Confidence, len(resp.Issues), len(resp.SecurityConcerns), len(resp.Recommendations))
+
+	return result, nil
+}
+
+// convertChangedFiles converts the changed files from the provider to the LLM format.
+func (p *Processor) convertChangedFiles(ctx context.Context, event *info.Event) []ChangedFile {
+	if p.vcx == nil {
+		return []ChangedFile{}
+	}
+
+	changedFiles, err := p.vcx.GetFiles(ctx, event)
+	if err != nil {
+		p.logger.Warnf("Failed to get changed files: %v", err)
+		return []ChangedFile{}
+	}
+
+	result := make([]ChangedFile, 0, len(changedFiles.All))
+
+	// Process added files
+	for _, file := range changedFiles.Added {
+		result = append(result, ChangedFile{
+			Path:      file,
+			Status:    "added",
+			Additions: 0, // We don't have this info from GetFiles
+			Deletions: 0,
+		})
+	}
+
+	// Process deleted files
+	for _, file := range changedFiles.Deleted {
+		result = append(result, ChangedFile{
+			Path:      file,
+			Status:    "deleted",
+			Additions: 0,
+			Deletions: 0,
+		})
+	}
+
+	// Process modified files
+	for _, file := range changedFiles.Modified {
+		result = append(result, ChangedFile{
+			Path:      file,
+			Status:    "modified",
+			Additions: 0,
+			Deletions: 0,
+		})
+	}
+
+	// Process renamed files
+	for _, file := range changedFiles.Renamed {
+		result = append(result, ChangedFile{
+			Path:      file,
+			Status:    "renamed",
+			Additions: 0,
+			Deletions: 0,
+		})
+	}
+
+	return result
+}
+
+// convertCommits converts the commits from the provider to the LLM format.
+func (p *Processor) convertCommits(ctx context.Context, event *info.Event) []CommitInfo {
+	if p.vcx == nil {
+		return []CommitInfo{}
+	}
+
+	// For now, we'll use the current commit information from the event
+	// In the future, we could implement a method to get all commits in a PR
+	commits := []CommitInfo{}
+
+	// Add the current commit if we have SHA information
+	if event.SHA != "" {
+		commit := CommitInfo{
+			SHA:     event.SHA,
+			Message: event.SHATitle,
+			Author:  event.Sender,
+			Date:    "", // We don't have this in the event
+		}
+		commits = append(commits, commit)
+	}
+
+	// For pull requests, we could potentially get more commits
+	// This would require implementing a method in the provider interface
+	// to get all commits in a pull request, similar to how GetFiles works
+
+	return commits
+}
+
+// formatPRAnalysisResponse formats the PR analysis response for display.
+func (p *Processor) formatPRAnalysisResponse(resp *PRAnalysisResponse) string {
+	var result strings.Builder
+
+	result.WriteString("## 🔍 Pull Request Analysis\n\n")
+	result.WriteString(resp.Analysis)
+	result.WriteString("\n\n")
+
+	if len(resp.Issues) > 0 {
+		result.WriteString("## ⚠️ Issues Found\n\n")
+		for i, issue := range resp.Issues {
+			result.WriteString(fmt.Sprintf("%d. %s\n", i+1, issue))
+		}
+		result.WriteString("\n")
+	}
+
+	if len(resp.SecurityConcerns) > 0 {
+		result.WriteString("## 🔒 Security Concerns\n\n")
+		for i, concern := range resp.SecurityConcerns {
+			result.WriteString(fmt.Sprintf("%d. %s\n", i+1, concern))
+		}
+		result.WriteString("\n")
+	}
+
+	if len(resp.Recommendations) > 0 {
+		result.WriteString("## 💡 Recommendations\n\n")
+		for i, rec := range resp.Recommendations {
+			result.WriteString(fmt.Sprintf("%d. %s\n", i+1, rec))
+		}
+		result.WriteString("\n")
+	}
+
+	result.WriteString(fmt.Sprintf("**Confidence Score:** %.1f%%\n", resp.Confidence*100))
+
+	return result.String()
 }
