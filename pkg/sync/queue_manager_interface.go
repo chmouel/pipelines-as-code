@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/generated/clientset/versioned"
@@ -19,14 +18,4 @@ type QueueManagerInterface interface {
 	AddToPendingQueue(repo *v1alpha1.Repository, list []string) error
 	RemoveFromQueue(repoKey, prKey string) bool
 	RemoveAndTakeItemFromQueue(repo *v1alpha1.Repository, run *tektonv1.PipelineRun) string
-	ValidateQueueConsistency(ctx context.Context, tekton tektonVersionedClient.Interface, pac versioned.Interface) ([]QueueValidationResult, error)
-	RepairQueue(ctx context.Context, tekton tektonVersionedClient.Interface, pac versioned.Interface) error
-}
-
-func RepoKey(repo *v1alpha1.Repository) string {
-	return fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
-}
-
-func PrKey(run *tektonv1.PipelineRun) string {
-	return fmt.Sprintf("%s/%s", run.Namespace, run.Name)
 }

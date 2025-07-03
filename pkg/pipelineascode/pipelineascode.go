@@ -129,23 +129,6 @@ func (p *PacRun) Run(ctx context.Context) error {
 		}(match, i)
 	}
 	wg.Wait()
-
-	order, prs := p.manager.GetExecutionOrder()
-	if order != "" {
-		for _, pr := range prs {
-			wg.Add(1)
-
-			go func(order string, pr tektonv1.PipelineRun) {
-				defer wg.Done()
-				if _, err := action.PatchPipelineRun(ctx, p.logger, "execution order", p.run.Clients.Tekton, &pr, getExecutionOrderPatch(order)); err != nil {
-					errMsg := fmt.Sprintf("Failed to patch pipelineruns %s execution order: %s", pr.GetGenerateName(), err.Error())
-					p.eventEmitter.EmitMessage(repo, zap.ErrorLevel, "RepositoryPipelineRun", errMsg)
-					return
-				}
-			}(order, *pr)
-		}
-	}
-	wg.Wait()
 	return nil
 }
 
@@ -288,16 +271,6 @@ func getMergePatch(annotations, labels map[string]string) map[string]any {
 		"metadata": map[string]any{
 			"annotations": annotations,
 			"labels":      labels,
-		},
-	}
-}
-
-func getExecutionOrderPatch(order string) map[string]any {
-	return map[string]any{
-		"metadata": map[string]any{
-			"annotations": map[string]string{
-				keys.ExecutionOrder: order,
-			},
 		},
 	}
 }

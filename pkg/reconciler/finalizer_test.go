@@ -104,9 +104,13 @@ func TestReconciler_FinalizeKind(t *testing.T) {
 				testData.Repositories = []*v1alpha1.Repository{}
 			}
 			stdata, informers := testclient.SeedTestData(t, ctx, testData)
+			// Create temporary SQLite queue manager for test
+			sqliteQM, sqliteErr := sync.NewSQLiteQueueManager("/tmp/test-finalizer.db")
+			assert.NilError(t, sqliteErr)
+
 			r := Reconciler{
 				repoLister: informers.Repository.Lister(),
-				qm:         sync.NewQueueManager(fakelogger),
+				qm:         sync.NewQueueManager(fakelogger, sqliteQM),
 				run: &params.Run{
 					Clients: clients.Clients{
 						PipelineAsCode: stdata.PipelineAsCode,

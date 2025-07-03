@@ -5,16 +5,14 @@ import (
 )
 
 type Semaphore interface {
-	acquire(string) bool
-	acquireLatest() string
-	tryAcquire(string) (bool, string)
-	release(string) bool
-	resize(int) bool
-	addToQueue(string, time.Time) bool
-	addToPendingQueue(string, time.Time) bool
-	removeFromQueue(string)
-	getName() string
-	getLimit() int
-	getCurrentRunning() []string
-	getCurrentPending() []string
+	AddToQueue(repo, id string, priority int64, creationTime time.Time) error
+	AcquireNext(repo string) (string, error)
+	Release(repo, id string) error
+	RemoveFromQueue(repo, id string) error
+	GetCurrentPending(repo string) ([]string, error)
+	GetCurrentRunning(repo string) ([]string, error)
+	GetLimit(repo string) (int, error)
+	SetLimit(repo string, n int) error
+	ResetRunning(repo string) error
+	Close() error
 }

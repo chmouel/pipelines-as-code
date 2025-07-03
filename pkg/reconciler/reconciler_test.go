@@ -186,9 +186,13 @@ func TestReconciler_ReconcileKind(t *testing.T) {
 			metrics, err := metrics.NewRecorder()
 			assert.NilError(t, err)
 
+			// Create temporary SQLite queue manager for test
+			sqliteQM, sqliteErr := sync.NewSQLiteQueueManager("/tmp/test-reconciler.db")
+			assert.NilError(t, sqliteErr)
+
 			r := Reconciler{
 				repoLister: informers.Repository.Lister(),
-				qm:         sync.NewQueueManager(fakelogger),
+				qm:         sync.NewQueueManager(fakelogger, sqliteQM),
 				run: &params.Run{
 					Clients: clients.Clients{
 						PipelineAsCode: stdata.PipelineAsCode,

@@ -10,6 +10,7 @@ import (
 	pipelinerunreconciler "github.com/tektoncd/pipeline/pkg/client/injection/reconciler/pipeline/v1/pipelinerun"
 	tektonv1lister "github.com/tektoncd/pipeline/pkg/client/listers/pipeline/v1"
 	"go.uber.org/zap"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
@@ -219,24 +220,21 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	}
 
 	// remove pipelineRun from Queue and start the next one
-	for {
-		next := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
-		if next == "" {
-			break
+	// Get the next PipelineRun from the queue
+	nextPrKey := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
+	if nextPrKey != "" {
+		key := strings.Split(nextPrKey, "/")
+		if len(key) == 2 {
+			nextPr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
+			if err != nil {
+				logger.Errorf("cannot get pipeline for next in queue: %w", err)
+			} else {
+				if err := r.updatePipelineRunToInProgress(ctx, logger, repo, nextPr); err != nil {
+					logger.Errorf("failed to update status: %w", err)
+					_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), nextPrKey)
+				}
+			}
 		}
-		key := strings.Split(next, "/")
-		pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
-		if err != nil {
-			logger.Errorf("cannot get pipeline for next in queue: %w", err)
-			continue
-		}
-
-		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-			logger.Errorf("failed to update status: %w", err)
-			_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), sync.PrKey(pr))
-			continue
-		}
-		break
 	}
 
 	if err := r.cleanupPipelineRuns(ctx, logger, pacInfo, repo, pr); err != nil {
@@ -345,4 +343,105 @@ func (r *Reconciler) updatePipelineRunState(ctx context.Context, logger *zap.Sug
 		return pr, fmt.Errorf("error patching the pipelinerun: %w", err)
 	}
 	return patchedPR, nil
+}
+
+// queuePipelineRun handles PipelineRuns that are in queued state and pending status
+// using the SQLite-based queue manager.
+func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) error {
+	// check if repository annotation exists
+	repoName, exist := pr.GetAnnotations()[keys.Repository]
+	if !exist {
+		return fmt.Errorf("no %s annotation found", keys.Repository)
+	}
+	if repoName == "" {
+		return fmt.Errorf("annotation %s is empty", keys.Repository)
+	}
+
+	repo, err := r.repoLister.Repositories(pr.Namespace).Get(repoName)
+	if err != nil {
+		// if repository is not found, then skip processing the pipelineRun and return nil
+		if errors.IsNotFound(err) {
+			r.qm.RemoveRepository(&v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      repoName,
+					Namespace: pr.Namespace,
+				},
+			})
+			return nil
+		}
+		return fmt.Errorf("error getting repository: %w", err)
+	}
+
+	// merge local repo with global repo here in order to derive settings from global
+	// for further concurrency and other operations.
+	if r.globalRepo, err = r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && r.globalRepo != nil {
+		logger.Info("Merging global repository settings with local repository settings")
+		repo.Spec.Merge(r.globalRepo.Spec)
+	}
+
+	// if concurrency was set and later removed or changed to zero
+	// then remove pipelineRun from Queue and update pending state to running
+	if repo.Spec.ConcurrencyLimit != nil && *repo.Spec.ConcurrencyLimit == 0 {
+		_ = r.qm.RemoveAndTakeItemFromQueue(repo, pr)
+		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+			return fmt.Errorf("failed to update PipelineRun to in_progress: %w", err)
+		}
+		return nil
+	}
+
+	// Add the PipelineRun to the queue
+	prKey := sync.PrKey(pr)
+	err = r.qm.AddToPendingQueue(repo, []string{prKey})
+	if err != nil {
+		return fmt.Errorf("failed to add PipelineRun to queue: %w", err)
+	}
+
+	// Try to start the next PipelineRun from the queue
+	var processed bool
+	var iterated int
+	maxIterations := 5
+
+	for {
+		acquired, err := r.qm.AddListToRunningQueue(repo, []string{prKey})
+		if err != nil {
+			return fmt.Errorf("failed to add to running queue: %s: %w", pr.GetName(), err)
+		}
+		if len(acquired) == 0 {
+			logger.Infof("no new PipelineRun acquired for repo %s", repo.GetName())
+			break
+		}
+
+		for _, acquiredPrKey := range acquired {
+			nsName := strings.Split(acquiredPrKey, "/")
+			if len(nsName) != 2 {
+				logger.Errorf("invalid PipelineRun key format: %s", acquiredPrKey)
+				continue
+			}
+
+			acquiredPr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(nsName[0]).Get(ctx, nsName[1], metav1.GetOptions{})
+			if err != nil {
+				logger.Errorf("failed to get PipelineRun %s/%s: %v", nsName[0], nsName[1], err)
+				_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), acquiredPrKey)
+				continue
+			}
+
+			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, acquiredPr); err != nil {
+				logger.Errorf("failed to update PipelineRun to in_progress: %w", err)
+				_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), acquiredPrKey)
+			} else {
+				processed = true
+			}
+		}
+
+		if processed {
+			break
+		}
+
+		if iterated >= maxIterations {
+			return fmt.Errorf("max iterations reached of %d times trying to get a pipelinerun started for %s", maxIterations, repo.GetName())
+		}
+		iterated++
+	}
+
+	return nil
 }
