@@ -3,6 +3,8 @@ package sync
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -24,6 +26,12 @@ type SQLiteQueueManager struct {
 }
 
 func NewSQLiteQueueManager(dbPath string) (*SQLiteQueueManager, error) {
+	// Ensure the directory exists
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, err

@@ -52,7 +52,7 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 		// Create SQLite queue manager
 		sqliteQM, err := sync.NewSQLiteQueueManager("/tmp/pac-queue.db")
 		if err != nil {
-			log.Fatal("failed to create SQLite queue manager: ", err)
+			log.Fatal("failed to create SQLite queue manager at /tmp/pac-queue.db: ", err)
 		}
 
 		r := &Reconciler{
