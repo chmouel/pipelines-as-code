@@ -95,10 +95,12 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 		return r.queuePipelineRun(ctx, logger, pr)
 	}
 
-	// Watcher logic: Process the queue to start PipelineRuns when we have capacity
-	// This should happen for any PipelineRun reconciliation to ensure queue processing
-	if err := r.processQueue(ctx, logger); err != nil {
-		logger.Warnf("failed to process queue: %v", err)
+	// Watcher logic: Process the queue when a PipelineRun is completed to start the next one
+	// This ensures that when one PipelineRun finishes, the next one in queue starts
+	if exist && (state == kubeinteraction.StateCompleted || state == kubeinteraction.StateFailed) {
+		if err := r.processQueue(ctx, logger); err != nil {
+			logger.Warnf("failed to process queue: %v", err)
+		}
 	}
 
 	if !pr.IsDone() && !pr.IsCancelled() {
@@ -424,6 +426,11 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 	// The watcher will pick up PipelineRuns from the queue and start them based on concurrency limits
 	// We don't try to start them here - that's the watcher's job
 	logger.Infof("added PipelineRun %s to queue for repo %s - watcher will pick it up", pr.GetName(), repo.GetName())
+
+	// Process the queue to start PipelineRuns if there's capacity
+	if err := r.processQueue(ctx, logger); err != nil {
+		logger.Warnf("failed to process queue after adding PipelineRun: %v", err)
+	}
 
 	return nil
 }
