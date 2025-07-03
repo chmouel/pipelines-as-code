@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -158,4 +159,55 @@ func TestSQLiteQueueManager_ResetRunning(t *testing.T) {
 	running, err := mgr.GetCurrentRunning("test-repo")
 	assert.NoError(t, err)
 	assert.Len(t, running, 0)
+}
+
+func TestSQLiteQueueManager_StateSync(t *testing.T) {
+	tmpfile, err := os.CreateTemp("", "test-*.db")
+	assert.NoError(t, err)
+	defer os.Remove(tmpfile.Name())
+	defer tmpfile.Close()
+
+	mgr, err := NewSQLiteQueueManager(tmpfile.Name())
+	assert.NoError(t, err)
+	defer mgr.Close()
+
+	repo := "test-repo"
+	prID := "namespace/pipeline-run-1"
+
+	testCases := []struct {
+		annotationState string
+		expectedSQLite  QueueState
+	}{
+		{"queued", StatePending},
+		{"started", StateRunning},
+		{"running", StateRunning},
+		{"completed", StateFinished},
+		{"failed", StateFinished},
+		{"cancelled", StateFinished},
+		{"unknown", StatePending},
+	}
+
+	var allIDs []string
+	for i, tc := range testCases {
+		t.Run(fmt.Sprintf("sync_%s", tc.annotationState), func(t *testing.T) {
+			testPrID := fmt.Sprintf("%s-%d", prID, i)
+			allIDs = append(allIDs, testPrID)
+			err := mgr.SyncPipelineRunState(repo, testPrID, tc.annotationState)
+			assert.NoError(t, err)
+
+			state, err := mgr.GetPipelineRunState(repo, testPrID)
+			assert.NoError(t, err)
+			expectedAnnotation := mgr.convertSQLiteStateToAnnotation(string(tc.expectedSQLite))
+			assert.Equal(t, state, expectedAnnotation)
+		})
+	}
+
+	states, err := mgr.GetAllPipelineRunStates(repo)
+	assert.NoError(t, err)
+	assert.Equal(t, len(states), len(testCases))
+	for i, tc := range testCases {
+		testPrID := fmt.Sprintf("%s-%d", prID, i)
+		expectedAnnotation := mgr.convertSQLiteStateToAnnotation(string(tc.expectedSQLite))
+		assert.Equal(t, states[testPrID], expectedAnnotation)
+	}
 }

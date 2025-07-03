@@ -18,4 +18,7 @@ type QueueManagerInterface interface {
 	AddToPendingQueue(repo *v1alpha1.Repository, list []string) error
 	RemoveFromQueue(repoKey, prKey string) bool
 	RemoveAndTakeItemFromQueue(repo *v1alpha1.Repository, run *tektonv1.PipelineRun) string
+	SyncPipelineRunState(repo, prID, state string) error
+	GetPipelineRunState(repo, prID string) (string, error)
+	GetAllPipelineRunStates(repo string) (map[string]string, error)
 }

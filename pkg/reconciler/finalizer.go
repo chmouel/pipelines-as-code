@@ -16,7 +16,10 @@ import (
 
 func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
-	state, exist := pr.GetAnnotations()[keys.State]
+
+	// Get state from SQLite
+	state, exist := r.getPipelineRunState(ctx, logger, pr)
+	logger.Infof("[DEBUG] Finalizer: pr=%s/%s, repo=%s, state=%s, exist=%v", pr.Namespace, pr.Name, pr.GetAnnotations()[keys.Repository], state, exist)
 	if !exist || state == kubeinteraction.StateCompleted {
 		return nil
 	}
@@ -45,7 +48,9 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 			repo.Spec.Merge(r.globalRepo.Spec)
 		}
 		logger = logger.With("namespace", repo.Namespace)
+		logger.Infof("[DEBUG] Finalizer: calling RemoveAndTakeItemFromQueue with repo=%s/%s, pr=%s/%s", repo.Namespace, repo.Name, pr.Namespace, pr.Name)
 		next := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
+		logger.Infof("[DEBUG] Finalizer: RemoveAndTakeItemFromQueue returned next=%s", next)
 		if next != "" {
 			key := strings.Split(next, "/")
 			pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})

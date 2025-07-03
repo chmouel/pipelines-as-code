@@ -33,14 +33,14 @@ func TestCheckStateAndEnqueue(t *testing.T) {
 		Logger:        logger.Named("ValidationWebhook"),
 	})
 
-	// Create a new PipelineRun object with the "started" state label.
+	// Create a new PipelineRun object with repository annotation
 	testPR := tektontest.MakePRStatus("namespace", "force-me", []pipelinev1.ChildStatusReference{
 		tektontest.MakeChildStatusReference("first"),
 		tektontest.MakeChildStatusReference("last"),
 		tektontest.MakeChildStatusReference("middle"),
 	}, nil)
 	testPR.SetAnnotations(map[string]string{
-		keys.State: "started",
+		keys.Repository: "test-repo",
 	})
 
 	// Call the checkStateAndEnqueue function with the PipelineRun object.
@@ -66,18 +66,18 @@ func TestCtrlOpts(t *testing.T) {
 	// Assert that the finalizer name is set correctly.
 	assert.Equal(t, path.Join(pipelinesascode.GroupName, pipelinesascode.FinalizerName), opts.FinalizerName)
 
-	// Create a new PipelineRun object with the "started" state label.
+	// Create a new PipelineRun object with repository annotation
 	pr := &pipelinev1.PipelineRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "test-pipeline-run",
 			Namespace:   "test-namespace",
-			Annotations: map[string]string{keys.State: "started"},
+			Annotations: map[string]string{keys.Repository: "test-repo"},
 		},
 	}
 
 	// Call the promote filter function with the PipelineRun object.
 	promote := opts.PromoteFilterFunc(pr)
 
-	// Assert that the promote filter function returns true.
+	// Assert that the promote filter function returns true for PipelineRuns with repository annotation.
 	assert.Assert(t, promote)
 }

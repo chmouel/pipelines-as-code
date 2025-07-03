@@ -55,8 +55,11 @@ var (
 func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun) pkgreconciler.Event {
 	ctx = info.StoreNS(ctx, system.Namespace())
 	logger := logging.FromContext(ctx).With("namespace", pr.GetNamespace())
+
+	// Get state from SQLite with fallback to annotations
+	state, exist := r.getPipelineRunState(ctx, logger, pr)
+
 	// if pipelineRun is in completed or failed state then return
-	state, exist := pr.GetAnnotations()[keys.State]
 	if exist && (state == kubeinteraction.StateCompleted || state == kubeinteraction.StateFailed) {
 		return nil
 	}
@@ -321,28 +324,36 @@ func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *
 }
 
 func (r *Reconciler) updatePipelineRunState(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun, state string) (*tektonv1.PipelineRun, error) {
-	mergePatch := map[string]any{
-		"metadata": map[string]any{
-			"labels": map[string]string{
-				keys.State: state,
-			},
-			"annotations": map[string]string{
-				keys.State: state,
-			},
-		},
-	}
-	// if state is started then remove pipelineRun pending status
+	// Only update spec status if state is started (remove pending status)
+	var mergePatch map[string]any
 	if state == kubeinteraction.StateStarted {
-		mergePatch["spec"] = map[string]any{
-			"status": "",
+		mergePatch = map[string]any{
+			"spec": map[string]any{
+				"status": "",
+			},
+		}
+		actionLog := state + " state"
+		patchedPR, err := action.PatchPipelineRun(ctx, logger, actionLog, r.run.Clients.Tekton, pr, mergePatch)
+		if err != nil {
+			return pr, fmt.Errorf("error patching the pipelinerun: %w", err)
+		}
+		pr = patchedPR
+	}
+
+	// Sync state to SQLite (primary state storage)
+	if repoName, exists := pr.GetAnnotations()[keys.Repository]; exists && repoName != "" {
+		prKey := sync.PrKey(pr)
+		// Use the annotation value directly as it now contains the full repo key
+		repoKey := repoName
+		logger.Debugf("getPipelineRunState: looking up state for repoKey=%s, prKey=%s", repoKey, prKey)
+		if err := r.qm.SyncPipelineRunState(repoKey, prKey, state); err != nil {
+			logger.Warnf("failed to sync PipelineRun state to SQLite: %v", err)
+		} else {
+			logger.Infof("synced PipelineRun %s state '%s' to SQLite", pr.GetName(), state)
 		}
 	}
-	actionLog := state + " state"
-	patchedPR, err := action.PatchPipelineRun(ctx, logger, actionLog, r.run.Clients.Tekton, pr, mergePatch)
-	if err != nil {
-		return pr, fmt.Errorf("error patching the pipelinerun: %w", err)
-	}
-	return patchedPR, nil
+
+	return pr, nil
 }
 
 // queuePipelineRun handles PipelineRuns that are in queued state and pending status
@@ -396,6 +407,14 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 		return fmt.Errorf("failed to add PipelineRun to queue: %w", err)
 	}
 
+	// Sync initial state to SQLite
+	repoKey := sync.RepoKey(repo)
+	if err := r.qm.SyncPipelineRunState(repoKey, prKey, kubeinteraction.StateQueued); err != nil {
+		logger.Warnf("failed to sync initial state to SQLite for PipelineRun %s: %v", pr.GetName(), err)
+	} else {
+		logger.Infof("synced initial state 'queued' to SQLite for PipelineRun %s", pr.GetName())
+	}
+
 	// Try to start the next PipelineRun from the queue
 	var processed bool
 	var iterated int
@@ -444,4 +463,23 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 	}
 
 	return nil
+}
+
+// getPipelineRunState gets the state from SQLite only
+func (r *Reconciler) getPipelineRunState(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) (string, bool) {
+	// Get state from SQLite only
+	if repoName, exists := pr.GetAnnotations()[keys.Repository]; exists && repoName != "" {
+		prKey := sync.PrKey(pr)
+		// Use the annotation value directly as it now contains the full repo key
+		repoKey := repoName
+		fmt.Printf("[DEBUG] getPipelineRunState: looking up state for repoKey=%s, prKey=%s\n", repoKey, prKey)
+		if state, err := r.qm.GetPipelineRunState(repoKey, prKey); err == nil && state != "" {
+			logger.Debugf("got state '%s' from SQLite for PipelineRun %s", state, pr.GetName())
+			return state, true
+		}
+		logger.Debugf("getPipelineRunState: no state found for repoKey=%s, prKey=%s", repoKey, prKey)
+	}
+
+	// No state found in SQLite
+	return "", false
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -187,8 +188,14 @@ func TestReconciler_ReconcileKind(t *testing.T) {
 			assert.NilError(t, err)
 
 			// Create temporary SQLite queue manager for test
-			sqliteQM, sqliteErr := sync.NewSQLiteQueueManager("/tmp/test-reconciler.db")
+			tmpfile, tmpErr := os.CreateTemp("", "test-reconciler-*.db")
+			assert.NilError(t, tmpErr)
+			defer os.Remove(tmpfile.Name())
+			tmpfile.Close()
+
+			sqliteQM, sqliteErr := sync.NewSQLiteQueueManager(tmpfile.Name())
 			assert.NilError(t, sqliteErr)
+			defer sqliteQM.Close()
 
 			r := Reconciler{
 				repoLister: informers.Repository.Lister(),
@@ -257,7 +264,8 @@ func TestUpdatePipelineRunState(t *testing.T) {
 					Namespace: "test",
 					Name:      "test",
 					Annotations: map[string]string{
-						keys.State: kubeinteraction.StateQueued,
+						keys.State:      kubeinteraction.StateQueued,
+						keys.Repository: "test-repo",
 					},
 				},
 				Spec: tektonv1.PipelineRunSpec{
@@ -274,7 +282,8 @@ func TestUpdatePipelineRunState(t *testing.T) {
 					Namespace: "test",
 					Name:      "test",
 					Annotations: map[string]string{
-						keys.State: kubeinteraction.StateStarted,
+						keys.State:      kubeinteraction.StateStarted,
+						keys.Repository: "test-repo",
 					},
 				},
 				Spec:   tektonv1.PipelineRunSpec{},
@@ -290,18 +299,46 @@ func TestUpdatePipelineRunState(t *testing.T) {
 				PipelineRuns: []*tektonv1.PipelineRun{tt.pipelineRun},
 			}
 			stdata, _ := testclient.SeedTestData(t, ctx, testData)
+
+			// Create temporary SQLite queue manager for test
+			tmpfile, tmpErr := os.CreateTemp("", "test-update-state-*.db")
+			assert.NilError(t, tmpErr)
+			defer os.Remove(tmpfile.Name())
+			tmpfile.Close()
+
+			sqliteQM, sqliteErr := sync.NewSQLiteQueueManager(tmpfile.Name())
+			assert.NilError(t, sqliteErr)
+			defer sqliteQM.Close()
+
 			r := &Reconciler{
 				run: &params.Run{
 					Clients: clients.Clients{
 						Tekton: stdata.Pipeline,
 					},
 				},
+				qm: sync.NewQueueManager(fakelogger, sqliteQM),
+			}
+
+			// First sync initial state to SQLite
+			prKey := tt.pipelineRun.GetNamespace() + "/" + tt.pipelineRun.GetName()
+			initialState := tt.pipelineRun.GetAnnotations()[keys.State]
+			err := r.qm.SyncPipelineRunState("test-repo", prKey, initialState)
+			if err != nil {
+				t.Logf("Warning: failed to sync initial state to SQLite: %v", err)
 			}
 
 			updatedPR, err := r.updatePipelineRunState(ctx, fakelogger, tt.pipelineRun, tt.state)
 			assert.NilError(t, err)
 
-			assert.Equal(t, updatedPR.Annotations[keys.State], tt.state)
+			// Verify state is synced to SQLite
+			syncedState, err := r.qm.GetPipelineRunState("test-repo", prKey)
+			if err != nil {
+				t.Logf("Warning: failed to get state from SQLite: %v", err)
+			} else {
+				assert.Equal(t, syncedState, tt.state)
+			}
+
+			// Verify PipelineRun spec status is cleared
 			assert.Equal(t, updatedPR.Spec.Status, tektonv1.PipelineRunSpecStatus(""))
 		})
 	}

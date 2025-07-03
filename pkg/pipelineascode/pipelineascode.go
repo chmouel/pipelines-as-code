@@ -159,14 +159,10 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 		p.logger.Errorf("Error adding labels/annotations to PipelineRun '%s' in namespace '%s': %v", match.PipelineRun.GetName(), match.Repo.GetNamespace(), err)
 	}
 
-	// if concurrency is defined then start the pipelineRun in pending state and
-	// state as queued
+	// if concurrency is defined then start the pipelineRun in pending state
 	if match.Repo.Spec.ConcurrencyLimit != nil && *match.Repo.Spec.ConcurrencyLimit != 0 {
 		// pending status
 		match.PipelineRun.Spec.Status = tektonv1.PipelineRunSpecStatusPending
-		// pac state as queued
-		match.PipelineRun.Labels[keys.State] = kubeinteraction.StateQueued
-		match.PipelineRun.Annotations[keys.State] = kubeinteraction.StateQueued
 	}
 
 	// Create the actual pipelineRun
@@ -232,14 +228,9 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 		if status.Text, err = mt.MakeTemplate(p.vcx.GetTemplate(provider.QueueingPipelineType)); err != nil {
 			return nil, fmt.Errorf("cannot create message template: %w", err)
 		}
-		// If the PipelineRun is in the "queued" state, add the appropriate label and annotation.
-		// These are later used by the watcher to determine whether the PipelineRun status
-		// should be reported back to the Git provider. We do add the `state` annotations and label when
-		// concurrency is enabled but this would happen when PipelineRun's status has been changed by
-		// the other controller and PaC is not aware of that change.
-		whatPatching = "annotations.state and labels.state"
-		patchAnnotations[keys.State] = kubeinteraction.StateQueued
-		patchLabels[keys.State] = kubeinteraction.StateQueued
+		// If the PipelineRun is in the "queued" state, sync state to SQLite
+		// State is now managed in SQLite instead of annotations
+		whatPatching = "SQLite state sync"
 	}
 
 	if err := p.vcx.CreateStatus(ctx, p.event, status); err != nil {

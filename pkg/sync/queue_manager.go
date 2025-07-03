@@ -72,6 +72,9 @@ func (qm *QueueManager) AddToPendingQueue(repo *v1alpha1.Repository, list []stri
 func (qm *QueueManager) RemoveFromQueue(repoKey, prKey string) bool {
 	qm.lock.Lock()
 	defer qm.lock.Unlock()
+	if qm.logger != nil {
+		qm.logger.Infof("[DEBUG] RemoveFromQueue called with repoKey=%s, prKey=%s", repoKey, prKey)
+	}
 	_ = qm.db.Release(repoKey, prKey)
 	_ = qm.db.RemoveFromQueue(repoKey, prKey)
 	qm.logger.Infof("removed (%s) for repository (%s)", prKey, repoKey)
@@ -81,6 +84,7 @@ func (qm *QueueManager) RemoveFromQueue(repoKey, prKey string) bool {
 func (qm *QueueManager) RemoveAndTakeItemFromQueue(repo *v1alpha1.Repository, run *tektonv1.PipelineRun) string {
 	repoKey := RepoKey(repo)
 	prKey := PrKey(run)
+	qm.logger.Debugf("RemoveAndTakeItemFromQueue called with repoKey=%s, prKey=%s", repoKey, prKey)
 	if !qm.RemoveFromQueue(repoKey, prKey) {
 		return ""
 	}
@@ -132,7 +136,34 @@ func (qm *QueueManager) RemoveRepository(repo *v1alpha1.Repository) {
 	qm.logger.Infof("removed repository (%s) from queue", repoKey)
 }
 
-// Helper functions for repo and pr keys.
+// SyncPipelineRunState syncs a PipelineRun's state from annotations to SQLite
+func (qm *QueueManager) SyncPipelineRunState(repo, prID, state string) error {
+	qm.lock.Lock()
+	defer qm.lock.Unlock()
+	// repo parameter now contains the full repo key (namespace/name)
+	return qm.db.SyncPipelineRunState(repo, prID, state)
+}
+
+// GetPipelineRunState gets the state of a PipelineRun from SQLite
+func (qm *QueueManager) GetPipelineRunState(repo, prID string) (string, error) {
+	qm.lock.Lock()
+	defer qm.lock.Unlock()
+	fmt.Printf("[DEBUG] QueueManager.GetPipelineRunState: repo=%s, prID=%s\n", repo, prID)
+	// repo parameter now contains the full repo key (namespace/name)
+	state, err := qm.db.GetPipelineRunState(repo, prID)
+	fmt.Printf("[DEBUG] QueueManager.GetPipelineRunState: result state=%s, err=%v\n", state, err)
+	return state, err
+}
+
+// GetAllPipelineRunStates gets all PipelineRun states for a repository
+func (qm *QueueManager) GetAllPipelineRunStates(repo string) (map[string]string, error) {
+	qm.lock.Lock()
+	defer qm.lock.Unlock()
+	// repo parameter now contains the full repo key (namespace/name)
+	return qm.db.GetAllPipelineRunStates(repo)
+}
+
+// Helper functions for repo and pr keys
 func RepoKey(repo *v1alpha1.Repository) string {
 	return fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
 }

@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -107,6 +108,7 @@ func (q *SQLiteQueueManager) AcquireNext(repo string) (string, error) {
 func (q *SQLiteQueueManager) Release(repo, id string) error {
 	q.lock.Lock()
 	defer q.lock.Unlock()
+	fmt.Printf("[DEBUG] SQLiteQueueManager.Release called with repo=%s, id=%s\n", repo, id)
 	_, err := q.db.ExecContext(context.Background(), `UPDATE queue SET state = ?, end_time = ? WHERE id = ? AND repo = ? AND state = ?`,
 		StateFinished, time.Now().UnixNano(), id, repo, StateRunning)
 	return err
@@ -176,6 +178,7 @@ func (q *SQLiteQueueManager) SetLimit(repo string, n int) error {
 func (q *SQLiteQueueManager) RemoveFromQueue(repo, id string) error {
 	q.lock.Lock()
 	defer q.lock.Unlock()
+	fmt.Printf("[DEBUG] SQLiteQueueManager.RemoveFromQueue called with repo=%s, id=%s\n", repo, id)
 	_, err := q.db.ExecContext(context.Background(), `DELETE FROM queue WHERE repo = ? AND id = ?`, repo, id)
 	return err
 }
@@ -198,6 +201,91 @@ func (q *SQLiteQueueManager) RemoveRepository(repo string) error {
 	}
 	_, err = q.db.ExecContext(context.Background(), `DELETE FROM repo_limits WHERE repo = ?`, repo)
 	return err
+}
+
+// SyncPipelineRunState syncs a PipelineRun's state from annotations to SQLite
+func (q *SQLiteQueueManager) SyncPipelineRunState(repo, prID, state string) error {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	// Convert annotation state to SQLite state
+	sqliteState := q.convertAnnotationStateToSQLite(state)
+
+	// Use INSERT OR REPLACE for better compatibility
+	_, err := q.db.ExecContext(context.Background(), `
+		INSERT OR REPLACE INTO queue (id, repo, state, priority, creation_time) 
+		VALUES (?, ?, ?, ?, ?)
+	`, prID, repo, sqliteState, time.Now().UnixNano(), time.Now().UnixNano())
+
+	return err
+}
+
+// GetPipelineRunState gets the state of a PipelineRun from SQLite
+func (q *SQLiteQueueManager) GetPipelineRunState(repo, prID string) (string, error) {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	var state string
+	err := q.db.QueryRowContext(context.Background(),
+		`SELECT state FROM queue WHERE repo = ? AND id = ?`, repo, prID).Scan(&state)
+	if err != nil {
+		return "", err
+	}
+
+	// Convert SQLite state back to annotation state
+	return q.convertSQLiteStateToAnnotation(state), nil
+}
+
+// GetAllPipelineRunStates gets all PipelineRun states for a repository
+func (q *SQLiteQueueManager) GetAllPipelineRunStates(repo string) (map[string]string, error) {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	rows, err := q.db.QueryContext(context.Background(),
+		`SELECT id, state FROM queue WHERE repo = ?`, repo)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	states := make(map[string]string)
+	for rows.Next() {
+		var id, state string
+		if err := rows.Scan(&id, &state); err != nil {
+			return nil, err
+		}
+		states[id] = q.convertSQLiteStateToAnnotation(state)
+	}
+
+	return states, nil
+}
+
+// convertAnnotationStateToSQLite converts annotation state to SQLite state
+func (q *SQLiteQueueManager) convertAnnotationStateToSQLite(annotationState string) QueueState {
+	switch annotationState {
+	case "queued":
+		return StatePending
+	case "started", "running":
+		return StateRunning
+	case "completed", "failed", "cancelled":
+		return StateFinished
+	default:
+		return StatePending
+	}
+}
+
+// convertSQLiteStateToAnnotation converts SQLite state back to annotation state
+func (q *SQLiteQueueManager) convertSQLiteStateToAnnotation(sqliteState string) string {
+	switch QueueState(sqliteState) {
+	case StatePending:
+		return "queued"
+	case StateRunning:
+		return "started"
+	case StateFinished:
+		return "completed"
+	default:
+		return "queued"
+	}
 }
 
 // Close closes the DB connection.

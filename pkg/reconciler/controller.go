@@ -78,13 +78,13 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 	}
 }
 
-// enqueue only the pipelineruns which are in `started` state
-// pipelinerun will have a label `pipelinesascode.tekton.dev/state` to describe the state.
+// enqueue pipelineruns that are managed by PAC (have repository annotation)
 func checkStateAndEnqueue(impl *controller.Impl) func(obj any) {
 	return func(obj any) {
 		object, err := kmeta.DeletionHandlingAccessor(obj)
 		if err == nil {
-			_, exist := object.GetAnnotations()[keys.State]
+			// Enqueue if PipelineRun is managed by PAC (has repository annotation)
+			_, exist := object.GetAnnotations()[keys.Repository]
 			if exist {
 				impl.EnqueueKey(types.NamespacedName{Namespace: object.GetNamespace(), Name: object.GetName()})
 			}
@@ -97,7 +97,7 @@ func ctrlOpts() func(impl *controller.Impl) controller.Options {
 		return controller.Options{
 			FinalizerName: path.Join(pipelinesascode.GroupName, pipelinesascode.FinalizerName),
 			PromoteFilterFunc: func(obj any) bool {
-				_, exist := obj.(*tektonv1.PipelineRun).GetAnnotations()[keys.State]
+				_, exist := obj.(*tektonv1.PipelineRun).GetAnnotations()[keys.Repository]
 				return exist
 			},
 		}
