@@ -44,5 +44,6 @@ func Root(clients *params.Run) *cobra.Command {
 	cmd.AddCommand(bootstrap.Command(clients, ioStreams))
 	cmd.AddCommand(generate.Command(clients, ioStreams))
 	cmd.AddCommand(webhook.Root(clients, ioStreams))
+	cmd.AddCommand(queueCommand(clients))
 	return cmd
 }

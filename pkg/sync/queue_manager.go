@@ -205,29 +205,41 @@ func (qm *QueueManager) InitQueues(ctx context.Context, tekton versioned2.Interf
 			continue
 		}
 
-		// add all pipelineRuns in started state to pending queue
+		qm.logger.Infof("Initializing queue for repository %s/%s with concurrency limit %d",
+			repo.Namespace, repo.Name, *repo.Spec.ConcurrencyLimit)
+
+		// add all pipelineRuns in started state to running queue
 		prs, err := tekton.TektonV1().PipelineRuns(repo.Namespace).
 			List(ctx, v1.ListOptions{
 				LabelSelector: fmt.Sprintf("%s=%s", keys.State, kubeinteraction.StateStarted),
 			})
 		if err != nil {
-			return err
+			qm.logger.Errorf("Failed to list started PipelineRuns for repo %s/%s: %v", repo.Namespace, repo.Name, err)
+			continue // Continue with other repos instead of failing completely
 		}
 
 		// sort the pipelinerun by creation time before adding to queue
 		sortedPRs := sortPipelineRunsByCreationTimestamp(prs.Items)
 
+		recoveryErrors := []string{}
 		for _, pr := range sortedPRs {
 			order, exist := pr.GetAnnotations()[keys.ExecutionOrder]
 			if !exist {
-				// if the pipelineRun doesn't have order label then wait
-				return nil
+				recoveryErrors = append(recoveryErrors,
+					fmt.Sprintf("PipelineRun %s/%s missing execution_order annotation", pr.Namespace, pr.Name))
+				continue // Skip this PipelineRun but continue with others
 			}
+
 			orderedList := FilterPipelineRunByState(ctx, tekton, strings.Split(order, ","), "", kubeinteraction.StateStarted)
+			if len(orderedList) == 0 {
+				qm.logger.Warnf("No valid PipelineRuns found in execution order for %s/%s", pr.Namespace, pr.Name)
+				continue
+			}
 
 			_, err = qm.AddListToRunningQueue(&repo, orderedList)
 			if err != nil {
-				qm.logger.Error("failed to init queue for repo: ", repo.GetName())
+				recoveryErrors = append(recoveryErrors,
+					fmt.Sprintf("Failed to add PipelineRun %s/%s to running queue: %v", pr.Namespace, pr.Name, err))
 			}
 		}
 
@@ -237,7 +249,8 @@ func (qm *QueueManager) InitQueues(ctx context.Context, tekton versioned2.Interf
 				LabelSelector: fmt.Sprintf("%s=%s", keys.State, kubeinteraction.StateQueued),
 			})
 		if err != nil {
-			return err
+			qm.logger.Errorf("Failed to list queued PipelineRuns for repo %s/%s: %v", repo.Namespace, repo.Name, err)
+			continue
 		}
 
 		// sort the pipelinerun by creation time before adding to queue
@@ -246,13 +259,38 @@ func (qm *QueueManager) InitQueues(ctx context.Context, tekton versioned2.Interf
 		for _, pr := range sortedPRs {
 			order, exist := pr.GetAnnotations()[keys.ExecutionOrder]
 			if !exist {
-				// if the pipelineRun doesn't have order label then wait
-				return nil
+				recoveryErrors = append(recoveryErrors,
+					fmt.Sprintf("PipelineRun %s/%s missing execution_order annotation", pr.Namespace, pr.Name))
+				continue // Skip this PipelineRun but continue with others
 			}
+
 			orderedList := FilterPipelineRunByState(ctx, tekton, strings.Split(order, ","), tektonv1.PipelineRunSpecStatusPending, kubeinteraction.StateQueued)
-			if err := qm.AddToPendingQueue(&repo, orderedList); err != nil {
-				qm.logger.Error("failed to init queue for repo: ", repo.GetName())
+			if len(orderedList) == 0 {
+				qm.logger.Warnf("No valid PipelineRuns found in execution order for %s/%s", pr.Namespace, pr.Name)
+				continue
 			}
+
+			if err := qm.AddToPendingQueue(&repo, orderedList); err != nil {
+				recoveryErrors = append(recoveryErrors,
+					fmt.Sprintf("Failed to add PipelineRun %s/%s to pending queue: %v", pr.Namespace, pr.Name, err))
+			}
+		}
+
+		// Log recovery results
+		if len(recoveryErrors) > 0 {
+			qm.logger.Warnf("Queue recovery for repo %s/%s completed with %d errors: %v",
+				repo.Namespace, repo.Name, len(recoveryErrors), recoveryErrors)
+		} else {
+			qm.logger.Infof("Queue recovery for repo %s/%s completed successfully", repo.Namespace, repo.Name)
+		}
+
+		// Log final queue state
+		sema, found := qm.queueMap[RepoKey(&repo)]
+		if found {
+			running := sema.getCurrentRunning()
+			pending := sema.getCurrentPending()
+			qm.logger.Infof("Queue state for repo %s/%s: %d running, %d pending",
+				repo.Namespace, repo.Name, len(running), len(pending))
 		}
 	}
 
@@ -301,4 +339,301 @@ func sortPipelineRunsByCreationTimestamp(prs []tektonv1.PipelineRun) []*tektonv1
 		sortedPRs = append(sortedPRs, pr)
 	}
 	return sortedPRs
+}
+
+// QueueValidationResult represents the result of queue validation
+type QueueValidationResult struct {
+	RepositoryKey string
+	IsValid       bool
+	Errors        []string
+	Warnings      []string
+	RunningCount  int
+	PendingCount  int
+	ExpectedCount int
+}
+
+// ValidateQueueConsistency validates that the in-memory queue state is consistent with
+// the actual PipelineRun states in the cluster. This helps detect and report queue
+// inconsistencies that can occur due to controller restarts or partial failures.
+func (qm *QueueManager) ValidateQueueConsistency(ctx context.Context, tekton versioned2.Interface, pac versioned.Interface) ([]QueueValidationResult, error) {
+	qm.lock.Lock()
+	defer qm.lock.Unlock()
+
+	var results []QueueValidationResult
+
+	// Get all repositories with concurrency limits
+	repos, err := pac.PipelinesascodeV1alpha1().Repositories("").List(ctx, v1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list repositories: %w", err)
+	}
+
+	for _, repo := range repos.Items {
+		if repo.Spec.ConcurrencyLimit == nil || *repo.Spec.ConcurrencyLimit == 0 {
+			continue
+		}
+
+		repoKey := RepoKey(&repo)
+		result := QueueValidationResult{
+			RepositoryKey: repoKey,
+			IsValid:       true,
+		}
+
+		// Get current queue state
+		sema, found := qm.queueMap[repoKey]
+		if !found {
+			result.Errors = append(result.Errors, "No queue found for repository")
+			result.IsValid = false
+			results = append(results, result)
+			continue
+		}
+
+		runningInQueue := sema.getCurrentRunning()
+		pendingInQueue := sema.getCurrentPending()
+		result.RunningCount = len(runningInQueue)
+		result.PendingCount = len(pendingInQueue)
+
+		// Validate running PipelineRuns
+		for _, prKey := range runningInQueue {
+			parts := strings.Split(prKey, "/")
+			if len(parts) != 2 {
+				result.Errors = append(result.Errors, fmt.Sprintf("Invalid PipelineRun key format: %s", prKey))
+				result.IsValid = false
+				continue
+			}
+
+			pr, err := tekton.TektonV1().PipelineRuns(parts[0]).Get(ctx, parts[1], v1.GetOptions{})
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("PipelineRun %s not found in cluster: %v", prKey, err))
+				result.IsValid = false
+				continue
+			}
+
+			// Check if PipelineRun is actually in started state
+			state, exists := pr.GetAnnotations()[keys.State]
+			if !exists || state != kubeinteraction.StateStarted {
+				result.Errors = append(result.Errors,
+					fmt.Sprintf("PipelineRun %s in queue as running but has state '%s'", prKey, state))
+				result.IsValid = false
+			}
+
+			// Check if PipelineRun is actually running (not pending)
+			if pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
+				result.Errors = append(result.Errors,
+					fmt.Sprintf("PipelineRun %s in queue as running but has pending status", prKey))
+				result.IsValid = false
+			}
+		}
+
+		// Validate pending PipelineRuns
+		for _, prKey := range pendingInQueue {
+			parts := strings.Split(prKey, "/")
+			if len(parts) != 2 {
+				result.Errors = append(result.Errors, fmt.Sprintf("Invalid PipelineRun key format: %s", prKey))
+				result.IsValid = false
+				continue
+			}
+
+			pr, err := tekton.TektonV1().PipelineRuns(parts[0]).Get(ctx, parts[1], v1.GetOptions{})
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("PipelineRun %s not found in cluster: %v", prKey, err))
+				result.IsValid = false
+				continue
+			}
+
+			// Check if PipelineRun is actually in queued state
+			state, exists := pr.GetAnnotations()[keys.State]
+			if !exists || state != kubeinteraction.StateQueued {
+				result.Errors = append(result.Errors,
+					fmt.Sprintf("PipelineRun %s in queue as pending but has state '%s'", prKey, state))
+				result.IsValid = false
+			}
+
+			// Check if PipelineRun is actually pending
+			if pr.Spec.Status != tektonv1.PipelineRunSpecStatusPending {
+				result.Errors = append(result.Errors,
+					fmt.Sprintf("PipelineRun %s in queue as pending but has status '%s'", prKey, pr.Spec.Status))
+				result.IsValid = false
+			}
+		}
+
+		// Check for orphaned PipelineRuns (in cluster but not in queue)
+		startedPRs, err := tekton.TektonV1().PipelineRuns(repo.Namespace).
+			List(ctx, v1.ListOptions{
+				LabelSelector: fmt.Sprintf("%s=%s", keys.State, kubeinteraction.StateStarted),
+			})
+		if err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Failed to list started PipelineRuns: %v", err))
+		} else {
+			for _, pr := range startedPRs.Items {
+				prKey := PrKey(&pr)
+				found := false
+				for _, running := range runningInQueue {
+					if running == prKey {
+						found = true
+						break
+					}
+				}
+				if !found {
+					result.Warnings = append(result.Warnings,
+						fmt.Sprintf("PipelineRun %s in cluster as started but not in queue", prKey))
+				}
+			}
+		}
+
+		queuedPRs, err := tekton.TektonV1().PipelineRuns(repo.Namespace).
+			List(ctx, v1.ListOptions{
+				LabelSelector: fmt.Sprintf("%s=%s", keys.State, kubeinteraction.StateQueued),
+			})
+		if err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Failed to list queued PipelineRuns: %v", err))
+		} else {
+			for _, pr := range queuedPRs.Items {
+				prKey := PrKey(&pr)
+				found := false
+				for _, pending := range pendingInQueue {
+					if pending == prKey {
+						found = true
+						break
+					}
+				}
+				if !found {
+					result.Warnings = append(result.Warnings,
+						fmt.Sprintf("PipelineRun %s in cluster as queued but not in queue", prKey))
+				}
+			}
+		}
+
+		// Check concurrency limit compliance
+		expectedRunning := *repo.Spec.ConcurrencyLimit
+		if len(runningInQueue) > expectedRunning {
+			result.Errors = append(result.Errors,
+				fmt.Sprintf("Queue has %d running PipelineRuns but limit is %d",
+					len(runningInQueue), expectedRunning))
+			result.IsValid = false
+		}
+
+		result.ExpectedCount = expectedRunning
+		results = append(results, result)
+	}
+
+	return results, nil
+}
+
+// RepairQueue attempts to repair queue inconsistencies by removing invalid entries
+// and rebuilding the queue state from the actual PipelineRun states in the cluster.
+func (qm *QueueManager) RepairQueue(ctx context.Context, tekton versioned2.Interface, pac versioned.Interface) error {
+	qm.logger.Info("Starting queue repair process")
+
+	// First validate to identify issues
+	validationResults, err := qm.ValidateQueueConsistency(ctx, tekton, pac)
+	if err != nil {
+		return fmt.Errorf("failed to validate queue consistency: %w", err)
+	}
+
+	repairCount := 0
+	for _, result := range validationResults {
+		if result.IsValid {
+			continue
+		}
+
+		qm.logger.Infof("Repairing queue for repository %s", result.RepositoryKey)
+		repoKey := result.RepositoryKey
+
+		// Get the semaphore for this repository
+		sema, found := qm.queueMap[repoKey]
+		if !found {
+			qm.logger.Warnf("No queue found for repository %s, skipping repair", repoKey)
+			continue
+		}
+
+		// Remove invalid running entries
+		runningInQueue := sema.getCurrentRunning()
+		for _, prKey := range runningInQueue {
+			parts := strings.Split(prKey, "/")
+			if len(parts) != 2 {
+				qm.logger.Warnf("Removing invalid PipelineRun key from running queue: %s", prKey)
+				sema.release(prKey)
+				sema.removeFromQueue(prKey)
+				repairCount++
+				continue
+			}
+
+			pr, err := tekton.TektonV1().PipelineRuns(parts[0]).Get(ctx, parts[1], v1.GetOptions{})
+			if err != nil {
+				qm.logger.Warnf("Removing non-existent PipelineRun from running queue: %s", prKey)
+				sema.release(prKey)
+				sema.removeFromQueue(prKey)
+				repairCount++
+				continue
+			}
+
+			// Check if PipelineRun is actually in started state
+			state, exists := pr.GetAnnotations()[keys.State]
+			if !exists || state != kubeinteraction.StateStarted {
+				qm.logger.Warnf("Removing PipelineRun with invalid state from running queue: %s (state: %s)", prKey, state)
+				sema.release(prKey)
+				sema.removeFromQueue(prKey)
+				repairCount++
+				continue
+			}
+
+			// Check if PipelineRun is actually running (not pending)
+			if pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
+				qm.logger.Warnf("Removing pending PipelineRun from running queue: %s", prKey)
+				sema.release(prKey)
+				sema.removeFromQueue(prKey)
+				repairCount++
+				continue
+			}
+		}
+
+		// Remove invalid pending entries
+		pendingInQueue := sema.getCurrentPending()
+		for _, prKey := range pendingInQueue {
+			parts := strings.Split(prKey, "/")
+			if len(parts) != 2 {
+				qm.logger.Warnf("Removing invalid PipelineRun key from pending queue: %s", prKey)
+				sema.removeFromQueue(prKey)
+				repairCount++
+				continue
+			}
+
+			pr, err := tekton.TektonV1().PipelineRuns(parts[0]).Get(ctx, parts[1], v1.GetOptions{})
+			if err != nil {
+				qm.logger.Warnf("Removing non-existent PipelineRun from pending queue: %s", prKey)
+				sema.removeFromQueue(prKey)
+				repairCount++
+				continue
+			}
+
+			// Check if PipelineRun is actually in queued state
+			state, exists := pr.GetAnnotations()[keys.State]
+			if !exists || state != kubeinteraction.StateQueued {
+				qm.logger.Warnf("Removing PipelineRun with invalid state from pending queue: %s (state: %s)", prKey, state)
+				sema.removeFromQueue(prKey)
+				repairCount++
+				continue
+			}
+
+			// Check if PipelineRun is actually pending
+			if pr.Spec.Status != tektonv1.PipelineRunSpecStatusPending {
+				qm.logger.Warnf("Removing non-pending PipelineRun from pending queue: %s (status: %s)", prKey, pr.Spec.Status)
+				sema.removeFromQueue(prKey)
+				repairCount++
+				continue
+			}
+		}
+
+		// Try to acquire more PipelineRuns if we have slots available
+		for {
+			next := sema.acquireLatest()
+			if next == "" {
+				break
+			}
+			qm.logger.Infof("Started next PipelineRun from queue: %s", next)
+		}
+	}
+
+	qm.logger.Infof("Queue repair completed. Fixed %d inconsistencies", repairCount)
+	return nil
 }
