@@ -1,1 +1,7 @@
 defaultBaseImage: gcr.io/distroless/base-debian11:nonroot
+builds:
+  - id: watcher
+    dir: .
+    main: ./cmd/pipelines-as-code-watcher/main.go
+    env:
+      - CGO_ENABLED=1
