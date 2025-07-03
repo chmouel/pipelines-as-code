@@ -9,6 +9,7 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/generated/clientset/versioned"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/sort"
@@ -136,8 +137,16 @@ func (qm *QueueManager) RemoveFromQueue(repoKey, prKey string) bool {
 		return false
 	}
 
+	// Release the semaphore lock to avoid deadlock, then re-acquire
+	qm.lock.Unlock()
+
+	// Call semaphore methods (they have their own internal locks)
 	sema.release(prKey)
 	sema.removeFromQueue(prKey)
+
+	// Re-acquire the queue manager lock for logging
+	qm.lock.Lock()
+
 	qm.logger.Infof("removed (%s) for repository (%s)", prKey, repoKey)
 	return true
 }
@@ -209,9 +218,12 @@ func (qm *QueueManager) InitQueues(ctx context.Context, tekton versioned2.Interf
 			repo.Namespace, repo.Name, *repo.Spec.ConcurrencyLimit)
 
 		// add all pipelineRuns in started state to running queue
+		// CRITICAL: Only get PipelineRuns that belong to this PAC repository
 		prs, err := tekton.TektonV1().PipelineRuns(repo.Namespace).
 			List(ctx, v1.ListOptions{
-				LabelSelector: fmt.Sprintf("%s=%s", keys.State, kubeinteraction.StateStarted),
+				LabelSelector: fmt.Sprintf("%s=%s,%s=%s",
+					keys.State, kubeinteraction.StateStarted,
+					keys.Repository, formatting.CleanValueKubernetes(repo.Name)),
 			})
 		if err != nil {
 			qm.logger.Errorf("Failed to list started PipelineRuns for repo %s/%s: %v", repo.Namespace, repo.Name, err)
@@ -223,6 +235,12 @@ func (qm *QueueManager) InitQueues(ctx context.Context, tekton versioned2.Interf
 
 		recoveryErrors := []string{}
 		for _, pr := range sortedPRs {
+			// Additional validation: ensure this PipelineRun is actually managed by PAC
+			if !isPACManagedPipelineRun(pr) {
+				qm.logger.Debugf("Skipping non-PAC PipelineRun %s/%s", pr.Namespace, pr.Name)
+				continue
+			}
+
 			order, exist := pr.GetAnnotations()[keys.ExecutionOrder]
 			if !exist {
 				recoveryErrors = append(recoveryErrors,
@@ -244,9 +262,12 @@ func (qm *QueueManager) InitQueues(ctx context.Context, tekton versioned2.Interf
 		}
 
 		// now fetch all queued pipelineRun
+		// CRITICAL: Only get PipelineRuns that belong to this PAC repository
 		prs, err = tekton.TektonV1().PipelineRuns(repo.Namespace).
 			List(ctx, v1.ListOptions{
-				LabelSelector: fmt.Sprintf("%s=%s", keys.State, kubeinteraction.StateQueued),
+				LabelSelector: fmt.Sprintf("%s=%s,%s=%s",
+					keys.State, kubeinteraction.StateQueued,
+					keys.Repository, formatting.CleanValueKubernetes(repo.Name)),
 			})
 		if err != nil {
 			qm.logger.Errorf("Failed to list queued PipelineRuns for repo %s/%s: %v", repo.Namespace, repo.Name, err)
@@ -257,6 +278,12 @@ func (qm *QueueManager) InitQueues(ctx context.Context, tekton versioned2.Interf
 		sortedPRs = sortPipelineRunsByCreationTimestamp(prs.Items)
 
 		for _, pr := range sortedPRs {
+			// Additional validation: ensure this PipelineRun is actually managed by PAC
+			if !isPACManagedPipelineRun(pr) {
+				qm.logger.Debugf("Skipping non-PAC PipelineRun %s/%s", pr.Namespace, pr.Name)
+				continue
+			}
+
 			order, exist := pr.GetAnnotations()[keys.ExecutionOrder]
 			if !exist {
 				recoveryErrors = append(recoveryErrors,
@@ -352,6 +379,21 @@ type QueueValidationResult struct {
 	ExpectedCount int
 }
 
+// isPACManagedPipelineRun validates that a PipelineRun is actually managed by PAC
+func isPACManagedPipelineRun(pr *tektonv1.PipelineRun) bool {
+	// Check if it has the PAC managed-by label
+	if managedBy, exists := pr.GetLabels()["app.kubernetes.io/managed-by"]; !exists || managedBy != "pipelinesascode.tekton.dev" {
+		return false
+	}
+
+	// Check if it has the repository annotation
+	if _, exists := pr.GetAnnotations()[keys.Repository]; !exists {
+		return false
+	}
+
+	return true
+}
+
 // ValidateQueueConsistency validates that the in-memory queue state is consistent with
 // the actual PipelineRun states in the cluster. This helps detect and report queue
 // inconsistencies that can occur due to controller restarts or partial failures.
@@ -387,8 +429,12 @@ func (qm *QueueManager) ValidateQueueConsistency(ctx context.Context, tekton ver
 			continue
 		}
 
+		// Release lock temporarily to call semaphore methods safely
+		qm.lock.Unlock()
 		runningInQueue := sema.getCurrentRunning()
 		pendingInQueue := sema.getCurrentPending()
+		qm.lock.Lock()
+
 		result.RunningCount = len(runningInQueue)
 		result.PendingCount = len(pendingInQueue)
 
@@ -404,6 +450,22 @@ func (qm *QueueManager) ValidateQueueConsistency(ctx context.Context, tekton ver
 			pr, err := tekton.TektonV1().PipelineRuns(parts[0]).Get(ctx, parts[1], v1.GetOptions{})
 			if err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("PipelineRun %s not found in cluster: %v", prKey, err))
+				result.IsValid = false
+				continue
+			}
+
+			// Check if PipelineRun is actually managed by PAC
+			if !isPACManagedPipelineRun(pr) {
+				result.Errors = append(result.Errors, fmt.Sprintf("PipelineRun %s is not managed by PAC", prKey))
+				result.IsValid = false
+				continue
+			}
+
+			// Check if PipelineRun belongs to this repository
+			if repoName, exists := pr.GetAnnotations()[keys.Repository]; !exists || repoName != repo.Name {
+				result.Errors = append(result.Errors,
+					fmt.Sprintf("PipelineRun %s belongs to repository '%s' but queue is for '%s'",
+						prKey, repoName, repo.Name))
 				result.IsValid = false
 				continue
 			}
@@ -440,6 +502,22 @@ func (qm *QueueManager) ValidateQueueConsistency(ctx context.Context, tekton ver
 				continue
 			}
 
+			// Check if PipelineRun is actually managed by PAC
+			if !isPACManagedPipelineRun(pr) {
+				result.Errors = append(result.Errors, fmt.Sprintf("PipelineRun %s is not managed by PAC", prKey))
+				result.IsValid = false
+				continue
+			}
+
+			// Check if PipelineRun belongs to this repository
+			if repoName, exists := pr.GetAnnotations()[keys.Repository]; !exists || repoName != repo.Name {
+				result.Errors = append(result.Errors,
+					fmt.Sprintf("PipelineRun %s belongs to repository '%s' but queue is for '%s'",
+						prKey, repoName, repo.Name))
+				result.IsValid = false
+				continue
+			}
+
 			// Check if PipelineRun is actually in queued state
 			state, exists := pr.GetAnnotations()[keys.State]
 			if !exists || state != kubeinteraction.StateQueued {
@@ -459,12 +537,19 @@ func (qm *QueueManager) ValidateQueueConsistency(ctx context.Context, tekton ver
 		// Check for orphaned PipelineRuns (in cluster but not in queue)
 		startedPRs, err := tekton.TektonV1().PipelineRuns(repo.Namespace).
 			List(ctx, v1.ListOptions{
-				LabelSelector: fmt.Sprintf("%s=%s", keys.State, kubeinteraction.StateStarted),
+				LabelSelector: fmt.Sprintf("%s=%s,%s=%s",
+					keys.State, kubeinteraction.StateStarted,
+					keys.Repository, formatting.CleanValueKubernetes(repo.Name)),
 			})
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("Failed to list started PipelineRuns: %v", err))
 		} else {
 			for _, pr := range startedPRs.Items {
+				// Only consider PAC-managed PipelineRuns
+				if !isPACManagedPipelineRun(&pr) {
+					continue
+				}
+
 				prKey := PrKey(&pr)
 				found := false
 				for _, running := range runningInQueue {
@@ -482,12 +567,19 @@ func (qm *QueueManager) ValidateQueueConsistency(ctx context.Context, tekton ver
 
 		queuedPRs, err := tekton.TektonV1().PipelineRuns(repo.Namespace).
 			List(ctx, v1.ListOptions{
-				LabelSelector: fmt.Sprintf("%s=%s", keys.State, kubeinteraction.StateQueued),
+				LabelSelector: fmt.Sprintf("%s=%s,%s=%s",
+					keys.State, kubeinteraction.StateQueued,
+					keys.Repository, formatting.CleanValueKubernetes(repo.Name)),
 			})
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("Failed to list queued PipelineRuns: %v", err))
 		} else {
 			for _, pr := range queuedPRs.Items {
+				// Only consider PAC-managed PipelineRuns
+				if !isPACManagedPipelineRun(&pr) {
+					continue
+				}
+
 				prKey := PrKey(&pr)
 				found := false
 				for _, pending := range pendingInQueue {
@@ -546,14 +638,22 @@ func (qm *QueueManager) RepairQueue(ctx context.Context, tekton versioned2.Inter
 			continue
 		}
 
-		// Remove invalid running entries
+		// Release lock temporarily to call semaphore methods safely
+		qm.lock.Unlock()
 		runningInQueue := sema.getCurrentRunning()
+		pendingInQueue := sema.getCurrentPending()
+		qm.lock.Lock()
+
+		// Remove invalid running entries
 		for _, prKey := range runningInQueue {
 			parts := strings.Split(prKey, "/")
 			if len(parts) != 2 {
 				qm.logger.Warnf("Removing invalid PipelineRun key from running queue: %s", prKey)
+				// Release lock to call semaphore methods safely
+				qm.lock.Unlock()
 				sema.release(prKey)
 				sema.removeFromQueue(prKey)
+				qm.lock.Lock()
 				repairCount++
 				continue
 			}
@@ -561,8 +661,23 @@ func (qm *QueueManager) RepairQueue(ctx context.Context, tekton versioned2.Inter
 			pr, err := tekton.TektonV1().PipelineRuns(parts[0]).Get(ctx, parts[1], v1.GetOptions{})
 			if err != nil {
 				qm.logger.Warnf("Removing non-existent PipelineRun from running queue: %s", prKey)
+				// Release lock to call semaphore methods safely
+				qm.lock.Unlock()
 				sema.release(prKey)
 				sema.removeFromQueue(prKey)
+				qm.lock.Lock()
+				repairCount++
+				continue
+			}
+
+			// Check if PipelineRun is actually managed by PAC
+			if !isPACManagedPipelineRun(pr) {
+				qm.logger.Warnf("Removing non-PAC PipelineRun from running queue: %s", prKey)
+				// Release lock to call semaphore methods safely
+				qm.lock.Unlock()
+				sema.release(prKey)
+				sema.removeFromQueue(prKey)
+				qm.lock.Lock()
 				repairCount++
 				continue
 			}
@@ -571,8 +686,11 @@ func (qm *QueueManager) RepairQueue(ctx context.Context, tekton versioned2.Inter
 			state, exists := pr.GetAnnotations()[keys.State]
 			if !exists || state != kubeinteraction.StateStarted {
 				qm.logger.Warnf("Removing PipelineRun with invalid state from running queue: %s (state: %s)", prKey, state)
+				// Release lock to call semaphore methods safely
+				qm.lock.Unlock()
 				sema.release(prKey)
 				sema.removeFromQueue(prKey)
+				qm.lock.Lock()
 				repairCount++
 				continue
 			}
@@ -580,20 +698,25 @@ func (qm *QueueManager) RepairQueue(ctx context.Context, tekton versioned2.Inter
 			// Check if PipelineRun is actually running (not pending)
 			if pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
 				qm.logger.Warnf("Removing pending PipelineRun from running queue: %s", prKey)
+				// Release lock to call semaphore methods safely
+				qm.lock.Unlock()
 				sema.release(prKey)
 				sema.removeFromQueue(prKey)
+				qm.lock.Lock()
 				repairCount++
 				continue
 			}
 		}
 
 		// Remove invalid pending entries
-		pendingInQueue := sema.getCurrentPending()
 		for _, prKey := range pendingInQueue {
 			parts := strings.Split(prKey, "/")
 			if len(parts) != 2 {
 				qm.logger.Warnf("Removing invalid PipelineRun key from pending queue: %s", prKey)
+				// Release lock to call semaphore methods safely
+				qm.lock.Unlock()
 				sema.removeFromQueue(prKey)
+				qm.lock.Lock()
 				repairCount++
 				continue
 			}
@@ -601,7 +724,21 @@ func (qm *QueueManager) RepairQueue(ctx context.Context, tekton versioned2.Inter
 			pr, err := tekton.TektonV1().PipelineRuns(parts[0]).Get(ctx, parts[1], v1.GetOptions{})
 			if err != nil {
 				qm.logger.Warnf("Removing non-existent PipelineRun from pending queue: %s", prKey)
+				// Release lock to call semaphore methods safely
+				qm.lock.Unlock()
 				sema.removeFromQueue(prKey)
+				qm.lock.Lock()
+				repairCount++
+				continue
+			}
+
+			// Check if PipelineRun is actually managed by PAC
+			if !isPACManagedPipelineRun(pr) {
+				qm.logger.Warnf("Removing non-PAC PipelineRun from pending queue: %s", prKey)
+				// Release lock to call semaphore methods safely
+				qm.lock.Unlock()
+				sema.removeFromQueue(prKey)
+				qm.lock.Lock()
 				repairCount++
 				continue
 			}
@@ -610,7 +747,10 @@ func (qm *QueueManager) RepairQueue(ctx context.Context, tekton versioned2.Inter
 			state, exists := pr.GetAnnotations()[keys.State]
 			if !exists || state != kubeinteraction.StateQueued {
 				qm.logger.Warnf("Removing PipelineRun with invalid state from pending queue: %s (state: %s)", prKey, state)
+				// Release lock to call semaphore methods safely
+				qm.lock.Unlock()
 				sema.removeFromQueue(prKey)
+				qm.lock.Lock()
 				repairCount++
 				continue
 			}
@@ -618,7 +758,10 @@ func (qm *QueueManager) RepairQueue(ctx context.Context, tekton versioned2.Inter
 			// Check if PipelineRun is actually pending
 			if pr.Spec.Status != tektonv1.PipelineRunSpecStatusPending {
 				qm.logger.Warnf("Removing non-pending PipelineRun from pending queue: %s (status: %s)", prKey, pr.Spec.Status)
+				// Release lock to call semaphore methods safely
+				qm.lock.Unlock()
 				sema.removeFromQueue(prKey)
+				qm.lock.Lock()
 				repairCount++
 				continue
 			}
@@ -626,7 +769,11 @@ func (qm *QueueManager) RepairQueue(ctx context.Context, tekton versioned2.Inter
 
 		// Try to acquire more PipelineRuns if we have slots available
 		for {
+			// Release lock to call semaphore methods safely
+			qm.lock.Unlock()
 			next := sema.acquireLatest()
+			qm.lock.Lock()
+
 			if next == "" {
 				break
 			}
