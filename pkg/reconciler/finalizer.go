@@ -18,7 +18,7 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 	logger := logging.FromContext(ctx)
 
 	// Get state from SQLite
-	state, exist := r.getPipelineRunState(ctx, logger, pr)
+	state, exist := r.getPipelineRunState(logger, pr)
 	logger.Infof("[DEBUG] Finalizer: pr=%s/%s, repo=%s, state=%s, exist=%v", pr.Namespace, pr.Name, pr.GetAnnotations()[keys.Repository], state, exist)
 	if !exist || state == kubeinteraction.StateCompleted {
 		return nil

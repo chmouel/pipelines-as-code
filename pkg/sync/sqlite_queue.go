@@ -3,7 +3,6 @@ package sync
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -108,7 +107,6 @@ func (q *SQLiteQueueManager) AcquireNext(repo string) (string, error) {
 func (q *SQLiteQueueManager) Release(repo, id string) error {
 	q.lock.Lock()
 	defer q.lock.Unlock()
-	fmt.Printf("[DEBUG] SQLiteQueueManager.Release called with repo=%s, id=%s\n", repo, id)
 	_, err := q.db.ExecContext(context.Background(), `UPDATE queue SET state = ?, end_time = ? WHERE id = ? AND repo = ? AND state = ?`,
 		StateFinished, time.Now().UnixNano(), id, repo, StateRunning)
 	return err
@@ -178,7 +176,6 @@ func (q *SQLiteQueueManager) SetLimit(repo string, n int) error {
 func (q *SQLiteQueueManager) RemoveFromQueue(repo, id string) error {
 	q.lock.Lock()
 	defer q.lock.Unlock()
-	fmt.Printf("[DEBUG] SQLiteQueueManager.RemoveFromQueue called with repo=%s, id=%s\n", repo, id)
 	_, err := q.db.ExecContext(context.Background(), `DELETE FROM queue WHERE repo = ? AND id = ?`, repo, id)
 	return err
 }
@@ -203,7 +200,7 @@ func (q *SQLiteQueueManager) RemoveRepository(repo string) error {
 	return err
 }
 
-// SyncPipelineRunState syncs a PipelineRun's state from annotations to SQLite
+// SyncPipelineRunState syncs a PipelineRun's state from annotations to SQLite.
 func (q *SQLiteQueueManager) SyncPipelineRunState(repo, prID, state string) error {
 	q.lock.Lock()
 	defer q.lock.Unlock()
@@ -220,7 +217,7 @@ func (q *SQLiteQueueManager) SyncPipelineRunState(repo, prID, state string) erro
 	return err
 }
 
-// GetPipelineRunState gets the state of a PipelineRun from SQLite
+// GetPipelineRunState gets the state of a PipelineRun from SQLite.
 func (q *SQLiteQueueManager) GetPipelineRunState(repo, prID string) (string, error) {
 	q.lock.Lock()
 	defer q.lock.Unlock()
@@ -236,7 +233,7 @@ func (q *SQLiteQueueManager) GetPipelineRunState(repo, prID string) (string, err
 	return q.convertSQLiteStateToAnnotation(state), nil
 }
 
-// GetAllPipelineRunStates gets all PipelineRun states for a repository
+// GetAllPipelineRunStates gets all PipelineRun states for a repository.
 func (q *SQLiteQueueManager) GetAllPipelineRunStates(repo string) (map[string]string, error) {
 	q.lock.Lock()
 	defer q.lock.Unlock()
@@ -260,7 +257,7 @@ func (q *SQLiteQueueManager) GetAllPipelineRunStates(repo string) (map[string]st
 	return states, nil
 }
 
-// convertAnnotationStateToSQLite converts annotation state to SQLite state
+// convertAnnotationStateToSQLite converts annotation state to SQLite state.
 func (q *SQLiteQueueManager) convertAnnotationStateToSQLite(annotationState string) QueueState {
 	switch annotationState {
 	case "queued":
@@ -274,7 +271,7 @@ func (q *SQLiteQueueManager) convertAnnotationStateToSQLite(annotationState stri
 	}
 }
 
-// convertSQLiteStateToAnnotation converts SQLite state back to annotation state
+// convertSQLiteStateToAnnotation converts SQLite state back to annotation state.
 func (q *SQLiteQueueManager) convertSQLiteStateToAnnotation(sqliteState string) string {
 	switch QueueState(sqliteState) {
 	case StatePending:

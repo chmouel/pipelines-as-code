@@ -57,7 +57,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 	logger := logging.FromContext(ctx).With("namespace", pr.GetNamespace())
 
 	// Get state from SQLite with fallback to annotations
-	state, exist := r.getPipelineRunState(ctx, logger, pr)
+	state, exist := r.getPipelineRunState(logger, pr)
 
 	// if pipelineRun is in completed or failed state then return
 	if exist && (state == kubeinteraction.StateCompleted || state == kubeinteraction.StateFailed) {
@@ -93,6 +93,14 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 	// if status is not pending, it could be canceled so let it be reported, even if state is queued
 	if state == kubeinteraction.StateQueued && pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
 		return r.queuePipelineRun(ctx, logger, pr)
+	}
+
+	// Watcher logic: Try to start PipelineRuns from the queue when we have capacity
+	if state == kubeinteraction.StateQueued && pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
+		// Try to start this PipelineRun if we have capacity
+		if err := r.tryStartPipelineRunFromQueue(ctx, logger, pr); err != nil {
+			logger.Warnf("failed to try starting PipelineRun from queue: %v", err)
+		}
 	}
 
 	if !pr.IsDone() && !pr.IsCancelled() {
@@ -356,8 +364,8 @@ func (r *Reconciler) updatePipelineRunState(ctx context.Context, logger *zap.Sug
 	return pr, nil
 }
 
-// queuePipelineRun handles PipelineRuns that are in queued state and pending status
-// using the SQLite-based queue manager.
+// queuePipelineRun handles PipelineRuns that are in queued state and pending status.
+// This method only adds PipelineRuns to the queue - the watcher will pick them up and start them.
 func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) error {
 	// check if repository annotation exists
 	repoName, exist := pr.GetAnnotations()[keys.Repository]
@@ -400,7 +408,7 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 		return nil
 	}
 
-	// Add the PipelineRun to the queue
+	// Add the PipelineRun to the queue (this is what the controller should do)
 	prKey := sync.PrKey(pr)
 	err = r.qm.AddToPendingQueue(repo, []string{prKey})
 	if err != nil {
@@ -415,64 +423,75 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 		logger.Infof("synced initial state 'queued' to SQLite for PipelineRun %s", pr.GetName())
 	}
 
-	// Try to start the next PipelineRun from the queue
-	var processed bool
-	var iterated int
-	maxIterations := 5
-
-	for {
-		acquired, err := r.qm.AddListToRunningQueue(repo, []string{prKey})
-		if err != nil {
-			return fmt.Errorf("failed to add to running queue: %s: %w", pr.GetName(), err)
-		}
-		if len(acquired) == 0 {
-			logger.Infof("no new PipelineRun acquired for repo %s", repo.GetName())
-			break
-		}
-
-		for _, acquiredPrKey := range acquired {
-			nsName := strings.Split(acquiredPrKey, "/")
-			if len(nsName) != 2 {
-				logger.Errorf("invalid PipelineRun key format: %s", acquiredPrKey)
-				continue
-			}
-
-			acquiredPr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(nsName[0]).Get(ctx, nsName[1], metav1.GetOptions{})
-			if err != nil {
-				logger.Errorf("failed to get PipelineRun %s/%s: %v", nsName[0], nsName[1], err)
-				_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), acquiredPrKey)
-				continue
-			}
-
-			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, acquiredPr); err != nil {
-				logger.Errorf("failed to update PipelineRun to in_progress: %w", err)
-				_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), acquiredPrKey)
-			} else {
-				processed = true
-			}
-		}
-
-		if processed {
-			break
-		}
-
-		if iterated >= maxIterations {
-			return fmt.Errorf("max iterations reached of %d times trying to get a pipelinerun started for %s", maxIterations, repo.GetName())
-		}
-		iterated++
-	}
+	// The watcher will pick up PipelineRuns from the queue and start them based on concurrency limits
+	// We don't try to start them here - that's the watcher's job
+	logger.Infof("added PipelineRun %s to queue for repo %s - watcher will pick it up", pr.GetName(), repo.GetName())
 
 	return nil
 }
 
-// getPipelineRunState gets the state from SQLite only
-func (r *Reconciler) getPipelineRunState(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) (string, bool) {
+// tryStartPipelineRunFromQueue attempts to start a PipelineRun from the queue if there's capacity.
+// This is the watcher logic that picks up PipelineRuns from the queue.
+func (r *Reconciler) tryStartPipelineRunFromQueue(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) error {
+	// Get repository info
+	repoName, exist := pr.GetAnnotations()[keys.Repository]
+	if !exist || repoName == "" {
+		return fmt.Errorf("no valid repository annotation found")
+	}
+
+	repo, err := r.repoLister.Repositories(pr.Namespace).Get(repoName)
+	if err != nil {
+		return fmt.Errorf("error getting repository: %w", err)
+	}
+
+	// Merge with global repo settings
+	if r.globalRepo, err = r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && r.globalRepo != nil {
+		repo.Spec.Merge(r.globalRepo.Spec)
+	}
+
+	// If no concurrency limit, start immediately
+	if repo.Spec.ConcurrencyLimit == nil || *repo.Spec.ConcurrencyLimit == 0 {
+		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+			return fmt.Errorf("failed to update PipelineRun to in_progress: %w", err)
+		}
+		return nil
+	}
+
+	// Try to acquire this PipelineRun from the queue
+	prKey := sync.PrKey(pr)
+	acquired, err := r.qm.AddListToRunningQueue(repo, []string{prKey})
+	if err != nil {
+		return fmt.Errorf("failed to try acquiring PipelineRun from queue: %w", err)
+	}
+
+	// If this PipelineRun was acquired, start it
+	if len(acquired) > 0 {
+		for _, acquiredPrKey := range acquired {
+			if acquiredPrKey == prKey {
+				// This PipelineRun was acquired, start it
+				if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+					logger.Errorf("failed to update PipelineRun to in_progress: %w", err)
+					_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), prKey)
+					return err
+				}
+				logger.Infof("started PipelineRun %s from queue for repo %s", pr.GetName(), repo.GetName())
+				return nil
+			}
+		}
+	}
+
+	// This PipelineRun wasn't acquired (no capacity), leave it in queue
+	logger.Debugf("PipelineRun %s remains in queue for repo %s (no capacity)", pr.GetName(), repo.GetName())
+	return nil
+}
+
+// getPipelineRunState gets the state from SQLite only.
+func (r *Reconciler) getPipelineRunState(logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) (string, bool) {
 	// Get state from SQLite only
 	if repoName, exists := pr.GetAnnotations()[keys.Repository]; exists && repoName != "" {
 		prKey := sync.PrKey(pr)
 		// Use the annotation value directly as it now contains the full repo key
 		repoKey := repoName
-		fmt.Printf("[DEBUG] getPipelineRunState: looking up state for repoKey=%s, prKey=%s\n", repoKey, prKey)
 		if state, err := r.qm.GetPipelineRunState(repoKey, prKey); err == nil && state != "" {
 			logger.Debugf("got state '%s' from SQLite for PipelineRun %s", state, pr.GetName())
 			return state, true

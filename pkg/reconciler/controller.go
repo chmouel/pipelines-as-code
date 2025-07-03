@@ -78,7 +78,7 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 	}
 }
 
-// enqueue pipelineruns that are managed by PAC (have repository annotation)
+// enqueue pipelineruns that are managed by PAC (have repository annotation).
 func checkStateAndEnqueue(impl *controller.Impl) func(obj any) {
 	return func(obj any) {
 		object, err := kmeta.DeletionHandlingAccessor(obj)
