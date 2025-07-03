@@ -95,12 +95,10 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 		return r.queuePipelineRun(ctx, logger, pr)
 	}
 
-	// Watcher logic: Try to start PipelineRuns from the queue when we have capacity
-	if state == kubeinteraction.StateQueued && pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
-		// Try to start this PipelineRun if we have capacity
-		if err := r.tryStartPipelineRunFromQueue(ctx, logger, pr); err != nil {
-			logger.Warnf("failed to try starting PipelineRun from queue: %v", err)
-		}
+	// Watcher logic: Process the queue to start PipelineRuns when we have capacity
+	// This should happen for any PipelineRun reconciliation to ensure queue processing
+	if err := r.processQueue(ctx, logger); err != nil {
+		logger.Warnf("failed to process queue: %v", err)
 	}
 
 	if !pr.IsDone() && !pr.IsCancelled() {
@@ -430,58 +428,106 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 	return nil
 }
 
-// tryStartPipelineRunFromQueue attempts to start a PipelineRun from the queue if there's capacity.
-// This is the watcher logic that picks up PipelineRuns from the queue.
-func (r *Reconciler) tryStartPipelineRunFromQueue(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) error {
-	// Get repository info
-	repoName, exist := pr.GetAnnotations()[keys.Repository]
-	if !exist || repoName == "" {
-		return fmt.Errorf("no valid repository annotation found")
-	}
-
-	repo, err := r.repoLister.Repositories(pr.Namespace).Get(repoName)
+// processQueue scans all repositories and tries to start PipelineRuns from their queues.
+// This is the main watcher logic that processes the queue.
+func (r *Reconciler) processQueue(ctx context.Context, logger *zap.SugaredLogger) error {
+	// Get all repositories to process their queues
+	repos, err := r.repoLister.List(nil)
 	if err != nil {
-		return fmt.Errorf("error getting repository: %w", err)
+		return fmt.Errorf("failed to list repositories: %w", err)
 	}
 
+	for _, repo := range repos {
+		r.processRepositoryQueue(ctx, logger, repo)
+	}
+
+	return nil
+}
+
+// processRepositoryQueue processes the queue for a specific repository.
+func (r *Reconciler) processRepositoryQueue(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository) {
 	// Merge with global repo settings
-	if r.globalRepo, err = r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && r.globalRepo != nil {
-		repo.Spec.Merge(r.globalRepo.Spec)
+	if globalRepo, err := r.repoLister.Repositories(r.run.Info.Kube.Namespace).Get(r.run.Info.Controller.GlobalRepository); err == nil && globalRepo != nil {
+		repo.Spec.Merge(globalRepo.Spec)
 	}
 
-	// If no concurrency limit, start immediately
+	// If no concurrency limit, nothing to process
 	if repo.Spec.ConcurrencyLimit == nil || *repo.Spec.ConcurrencyLimit == 0 {
-		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-			return fmt.Errorf("failed to update PipelineRun to in_progress: %w", err)
+		return
+	}
+
+	// Get queued PipelineRuns
+	queuedPRs := r.qm.QueuedPipelineRuns(repo)
+	if len(queuedPRs) == 0 {
+		return
+	}
+
+	// Get running PipelineRuns
+	runningPRs := r.qm.RunningPipelineRuns(repo)
+	currentRunning := len(runningPRs)
+	limit := *repo.Spec.ConcurrencyLimit
+
+	// If we're at the limit, nothing to do
+	if currentRunning >= limit {
+		logger.Debugf("repo %s has %d running PRs (limit: %d), no capacity for queued PRs", repo.GetName(), currentRunning, limit)
+		return
+	}
+
+	// Calculate how many we can start
+	canStart := limit - currentRunning
+	if canStart > len(queuedPRs) {
+		canStart = len(queuedPRs)
+	}
+
+	logger.Infof("repo %s: %d running, %d queued, can start %d", repo.GetName(), currentRunning, len(queuedPRs), canStart)
+
+	// Try to start the first 'canStart' PipelineRuns
+	for i := 0; i < canStart; i++ {
+		prKey := queuedPRs[i]
+		if err := r.startPipelineRunFromQueue(ctx, logger, repo, prKey); err != nil {
+			logger.Errorf("failed to start PipelineRun %s from queue: %v", prKey, err)
+			// Remove failed PipelineRun from queue
+			_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), prKey)
 		}
-		return nil
+	}
+}
+
+// startPipelineRunFromQueue starts a specific PipelineRun from the queue.
+func (r *Reconciler) startPipelineRunFromQueue(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, prKey string) error {
+	// Parse the PipelineRun key
+	nsName := strings.Split(prKey, "/")
+	if len(nsName) != 2 {
+		return fmt.Errorf("invalid PipelineRun key format: %s", prKey)
+	}
+
+	// Get the PipelineRun
+	pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(nsName[0]).Get(ctx, nsName[1], metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get PipelineRun %s: %w", prKey, err)
 	}
 
 	// Try to acquire this PipelineRun from the queue
-	prKey := sync.PrKey(pr)
 	acquired, err := r.qm.AddListToRunningQueue(repo, []string{prKey})
 	if err != nil {
-		return fmt.Errorf("failed to try acquiring PipelineRun from queue: %w", err)
+		return fmt.Errorf("failed to acquire PipelineRun from queue: %w", err)
 	}
 
-	// If this PipelineRun was acquired, start it
-	if len(acquired) > 0 {
-		for _, acquiredPrKey := range acquired {
-			if acquiredPrKey == prKey {
-				// This PipelineRun was acquired, start it
-				if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-					logger.Errorf("failed to update PipelineRun to in_progress: %w", err)
-					_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), prKey)
-					return err
-				}
-				logger.Infof("started PipelineRun %s from queue for repo %s", pr.GetName(), repo.GetName())
-				return nil
+	// Check if this PipelineRun was acquired
+	for _, acquiredPrKey := range acquired {
+		if acquiredPrKey == prKey {
+			// This PipelineRun was acquired, start it
+			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+				logger.Errorf("failed to update PipelineRun to in_progress: %w", err)
+				_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), prKey)
+				return err
 			}
+			logger.Infof("started PipelineRun %s from queue for repo %s", pr.GetName(), repo.GetName())
+			return nil
 		}
 	}
 
-	// This PipelineRun wasn't acquired (no capacity), leave it in queue
-	logger.Debugf("PipelineRun %s remains in queue for repo %s (no capacity)", pr.GetName(), repo.GetName())
+	// This PipelineRun wasn't acquired (race condition or capacity changed)
+	logger.Debugf("PipelineRun %s was not acquired from queue for repo %s", prKey, repo.GetName())
 	return nil
 }
 
