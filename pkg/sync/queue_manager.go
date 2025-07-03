@@ -29,22 +29,51 @@ func NewQueueManager(logger *zap.SugaredLogger, db *SQLiteQueueManager) *QueueMa
 }
 
 // AddListToRunningQueue adds PipelineRuns to the queue and tries to acquire up to the concurrency limit.
+// This method should only be used for PipelineRuns that are not already in the queue.
 func (qm *QueueManager) AddListToRunningQueue(repo *v1alpha1.Repository, list []string) ([]string, error) {
 	qm.lock.Lock()
 	defer qm.lock.Unlock()
 
 	repoKey := RepoKey(repo)
+	
+	// If no concurrency limit is set, treat as unlimited (all PipelineRuns start immediately)
 	if repo.Spec.ConcurrencyLimit == nil {
-		return nil, fmt.Errorf("concurrency limit not set for repo %s", repoKey)
+		for _, pr := range list {
+			_ = qm.db.AddToQueue(repoKey, pr, time.Now().UnixNano(), time.Now())
+		}
+		// For unlimited concurrency, all PipelineRuns are considered "acquired"
+		return list, nil
 	}
+	
 	limit := *repo.Spec.ConcurrencyLimit
 	if err := qm.db.SetLimit(repoKey, limit); err != nil {
 		return nil, err
 	}
 
+	// Only add PipelineRuns that are not already in the queue
 	for _, pr := range list {
-		// Use current time as priority for FIFO
-		_ = qm.db.AddToQueue(repoKey, pr, time.Now().UnixNano(), time.Now())
+		// Check if this PipelineRun is already in the queue
+		existingPending, _ := qm.db.GetCurrentPending(repoKey)
+		existingRunning, _ := qm.db.GetCurrentRunning(repoKey)
+		
+		alreadyInQueue := false
+		for _, pending := range existingPending {
+			if pending == pr {
+				alreadyInQueue = true
+				break
+			}
+		}
+		for _, running := range existingRunning {
+			if running == pr {
+				alreadyInQueue = true
+				break
+			}
+		}
+		
+		if !alreadyInQueue {
+			// Use current time as priority for FIFO
+			_ = qm.db.AddToQueue(repoKey, pr, time.Now().UnixNano(), time.Now())
+		}
 	}
 
 	acquiredList := []string{}
@@ -159,6 +188,20 @@ func (qm *QueueManager) GetAllPipelineRunStates(repo string) (map[string]string,
 	defer qm.lock.Unlock()
 	// repo parameter now contains the full repo key (namespace/name)
 	return qm.db.GetAllPipelineRunStates(repo)
+}
+
+// AcquireNext acquires the next pending PipelineRun from the queue.
+func (qm *QueueManager) AcquireNext(repo string) (string, error) {
+	qm.lock.Lock()
+	defer qm.lock.Unlock()
+	return qm.db.AcquireNext(repo)
+}
+
+// Release releases a running PipelineRun back to the queue or marks it as finished.
+func (qm *QueueManager) Release(repo, id string) error {
+	qm.lock.Lock()
+	defer qm.lock.Unlock()
+	return qm.db.Release(repo, id)
 }
 
 // Helper functions for repo and pr keys.

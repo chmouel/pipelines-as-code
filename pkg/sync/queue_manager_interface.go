@@ -21,4 +21,7 @@ type QueueManagerInterface interface {
 	SyncPipelineRunState(repo, prID, state string) error
 	GetPipelineRunState(repo, prID string) (string, error)
 	GetAllPipelineRunStates(repo string) (map[string]string, error)
+	// Direct SQLite operations for queue management
+	AcquireNext(repo string) (string, error)
+	Release(repo, id string) error
 }

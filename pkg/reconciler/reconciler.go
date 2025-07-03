@@ -98,6 +98,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 	// Watcher logic: Process the queue when a PipelineRun is completed to start the next one
 	// This ensures that when one PipelineRun finishes, the next one in queue starts
 	if exist && (state == kubeinteraction.StateCompleted || state == kubeinteraction.StateFailed) {
+		// Process the queue to start the next PipelineRun
 		if err := r.processQueue(ctx, logger); err != nil {
 			logger.Warnf("failed to process queue: %v", err)
 		}
@@ -230,22 +231,21 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		logger.Error("failed to emit metrics: ", err)
 	}
 
-	// remove pipelineRun from Queue and start the next one
-	// Get the next PipelineRun from the queue
-	nextPrKey := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
-	if nextPrKey != "" {
-		key := strings.Split(nextPrKey, "/")
-		if len(key) == 2 {
-			nextPr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
-			if err != nil {
-				logger.Errorf("cannot get pipeline for next in queue: %w", err)
-			} else {
-				if err := r.updatePipelineRunToInProgress(ctx, logger, repo, nextPr); err != nil {
-					logger.Errorf("failed to update status: %w", err)
-					_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), nextPrKey)
-				}
-			}
-		}
+	// Remove the completed PipelineRun from the queue and start the next one
+	prKey := sync.PrKey(pr)
+	repoKey := sync.RepoKey(repo)
+
+	// Release and remove the completed PipelineRun from the queue
+	if err := r.qm.Release(repoKey, prKey); err != nil {
+		logger.Warnf("failed to release PipelineRun %s from queue: %v", prKey, err)
+	}
+	if r.qm.RemoveFromQueue(repoKey, prKey) {
+		logger.Infof("removed completed PipelineRun %s from queue", prKey)
+	}
+
+	// Process the queue to start the next PipelineRun
+	if err := r.processQueue(ctx, logger); err != nil {
+		logger.Warnf("failed to process queue after completion: %v", err)
 	}
 
 	if err := r.cleanupPipelineRuns(ctx, logger, pacInfo, repo, pr); err != nil {
@@ -438,6 +438,10 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 // processQueue scans all repositories and tries to start PipelineRuns from their queues.
 // This is the main watcher logic that processes the queue.
 func (r *Reconciler) processQueue(ctx context.Context, logger *zap.SugaredLogger) error {
+	if r.repoLister == nil {
+		logger.Error("repoLister is nil in processQueue; this will cause a panic. Check controller initialization and informer injection.")
+		return fmt.Errorf("repoLister is nil in processQueue")
+	}
 	// Get all repositories to process their queues
 	repos, err := r.repoLister.List(nil)
 	if err != nil {
@@ -460,12 +464,14 @@ func (r *Reconciler) processRepositoryQueue(ctx context.Context, logger *zap.Sug
 
 	// If no concurrency limit, nothing to process
 	if repo.Spec.ConcurrencyLimit == nil || *repo.Spec.ConcurrencyLimit == 0 {
+		logger.Debugf("repo %s has no concurrency limit, skipping queue processing", repo.GetName())
 		return
 	}
 
 	// Get queued PipelineRuns
 	queuedPRs := r.qm.QueuedPipelineRuns(repo)
 	if len(queuedPRs) == 0 {
+		logger.Debugf("repo %s has no queued PipelineRuns", repo.GetName())
 		return
 	}
 
@@ -473,6 +479,8 @@ func (r *Reconciler) processRepositoryQueue(ctx context.Context, logger *zap.Sug
 	runningPRs := r.qm.RunningPipelineRuns(repo)
 	currentRunning := len(runningPRs)
 	limit := *repo.Spec.ConcurrencyLimit
+
+	logger.Infof("repo %s: %d running, %d queued, limit: %d", repo.GetName(), currentRunning, len(queuedPRs), limit)
 
 	// If we're at the limit, nothing to do
 	if currentRunning >= limit {
@@ -486,21 +494,26 @@ func (r *Reconciler) processRepositoryQueue(ctx context.Context, logger *zap.Sug
 		canStart = len(queuedPRs)
 	}
 
-	logger.Infof("repo %s: %d running, %d queued, can start %d", repo.GetName(), currentRunning, len(queuedPRs), canStart)
+	logger.Infof("repo %s: starting %d PipelineRuns from queue", repo.GetName(), canStart)
 
 	// Try to start the first 'canStart' PipelineRuns
 	for i := 0; i < canStart; i++ {
 		prKey := queuedPRs[i]
+		logger.Infof("attempting to start PipelineRun %s from queue for repo %s", prKey, repo.GetName())
 		if err := r.startPipelineRunFromQueue(ctx, logger, repo, prKey); err != nil {
 			logger.Errorf("failed to start PipelineRun %s from queue: %v", prKey, err)
 			// Remove failed PipelineRun from queue
 			_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), prKey)
+		} else {
+			logger.Infof("successfully started PipelineRun %s from queue for repo %s", prKey, repo.GetName())
 		}
 	}
 }
 
 // startPipelineRunFromQueue starts a specific PipelineRun from the queue.
 func (r *Reconciler) startPipelineRunFromQueue(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, prKey string) error {
+	logger.Infof("startPipelineRunFromQueue: attempting to start %s for repo %s", prKey, repo.GetName())
+	
 	// Parse the PipelineRun key
 	nsName := strings.Split(prKey, "/")
 	if len(nsName) != 2 {
@@ -514,27 +527,41 @@ func (r *Reconciler) startPipelineRunFromQueue(ctx context.Context, logger *zap.
 	}
 
 	// Try to acquire this PipelineRun from the queue
-	acquired, err := r.qm.AddListToRunningQueue(repo, []string{prKey})
+	repoKey := sync.RepoKey(repo)
+	logger.Infof("startPipelineRunFromQueue: attempting to acquire from queue for repo %s", repoKey)
+	acquired, err := r.qm.AcquireNext(repoKey)
 	if err != nil {
+		logger.Errorf("startPipelineRunFromQueue: failed to acquire from queue: %v", err)
 		return fmt.Errorf("failed to acquire PipelineRun from queue: %w", err)
 	}
-
-	// Check if this PipelineRun was acquired
-	for _, acquiredPrKey := range acquired {
-		if acquiredPrKey == prKey {
-			// This PipelineRun was acquired, start it
-			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-				logger.Errorf("failed to update PipelineRun to in_progress: %w", err)
-				_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), prKey)
-				return err
-			}
-			logger.Infof("started PipelineRun %s from queue for repo %s", pr.GetName(), repo.GetName())
-			return nil
-		}
+	
+	logger.Infof("startPipelineRunFromQueue: acquired %s, wanted %s", acquired, prKey)
+	
+	// Check if this specific PipelineRun was acquired
+	if acquired != prKey {
+		logger.Debugf("PipelineRun %s was not acquired from queue for repo %s (acquired: %s)", prKey, repo.GetName(), acquired)
+		return nil
 	}
 
-	// This PipelineRun wasn't acquired (race condition or capacity changed)
-	logger.Debugf("PipelineRun %s was not acquired from queue for repo %s", prKey, repo.GetName())
+	logger.Infof("startPipelineRunFromQueue: PipelineRun %s was acquired, updating state", prKey)
+
+	// This PipelineRun was acquired, update its state and start it
+	repoKeyForState := sync.RepoKey(repo)
+	if err := r.qm.SyncPipelineRunState(repoKeyForState, prKey, kubeinteraction.StateStarted); err != nil {
+		logger.Errorf("failed to sync state to started for PipelineRun %s: %w", prKey, err)
+		// Release the acquired PipelineRun back to pending
+		_ = r.qm.Release(repoKey, prKey)
+		return err
+	}
+
+	if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+		logger.Errorf("failed to update PipelineRun to in_progress: %w", err)
+		// Release the acquired PipelineRun back to pending
+		_ = r.qm.Release(repoKey, prKey)
+		return err
+	}
+	
+	logger.Infof("started PipelineRun %s from queue for repo %s", pr.GetName(), repo.GetName())
 	return nil
 }
 

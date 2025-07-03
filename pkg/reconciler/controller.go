@@ -55,11 +55,21 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 			log.Fatal("failed to create SQLite queue manager at /tmp/pac-queue.db: ", err)
 		}
 
+		// Get repository informer and validate it's properly injected
+		repoInformer := repository.Get(ctx)
+		if repoInformer == nil {
+			log.Fatal("repository informer is nil - check if Repository CRD is installed and informer injection is working")
+		}
+		repoLister := repoInformer.Lister()
+		if repoLister == nil {
+			log.Fatal("repository lister is nil - check if Repository CRD is installed and informer injection is working")
+		}
+
 		r := &Reconciler{
 			run:               run,
 			kinteract:         kinteract,
 			pipelineRunLister: pipelineRunInformer.Lister(),
-			repoLister:        repository.Get(ctx).Lister(),
+			repoLister:        repoLister,
 			qm:                sync.NewQueueManager(run.Clients.Log, sqliteQM),
 			metrics:           metrics,
 			eventEmitter:      events.NewEventEmitter(run.Clients.Kube, run.Clients.Log),
