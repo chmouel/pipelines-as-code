@@ -21,6 +21,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/metrics"
+	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 )
 
@@ -175,36 +176,36 @@ func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusOpts
 	if v.giteaClient == nil {
 		return fmt.Errorf("cannot set status on gitea no token or url set")
 	}
+
+	// Set title as before
 	switch statusOpts.Conclusion {
 	case "success":
 		statusOpts.Title = "Success"
-		statusOpts.Summary = "has <b>successfully</b> validated your commit."
 	case "failure":
 		statusOpts.Title = "Failed"
-		statusOpts.Summary = "has <b>failed</b>."
 	case "pending":
-		// for concurrency set title as pending
 		if statusOpts.Title == "" {
 			statusOpts.Title = "Pending"
 		}
-		// for unauthorized user set title as Pending approval
-		statusOpts.Summary = "is skipping this commit."
 	case "neutral":
 		statusOpts.Title = "Unknown"
-		statusOpts.Summary = "doesn't know what happened with this commit."
 	}
-
 	if statusOpts.Status == "in_progress" {
 		statusOpts.Title = "CI has Started"
-		statusOpts.Summary = "is running.\n"
 	}
+
+	// Render summary using provider-agnostic utility
+	var pr *tektonv1.PipelineRun
+	if statusOpts.PipelineRun != nil {
+		pr = statusOpts.PipelineRun
+	}
+	summary := provider.RenderStatusSummary(pr, v.pacInfo.ProviderStatusSummaryTemplate)
 
 	onPr := ""
 	if statusOpts.PipelineRunName != "" {
 		onPr = fmt.Sprintf("/%s", statusOpts.PipelineRunName)
 	}
-	// gitea show weirdly the <br>
-	statusOpts.Summary = fmt.Sprintf("%s%s %s", v.pacInfo.ApplicationName, onPr, statusOpts.Summary)
+	statusOpts.Summary = fmt.Sprintf("%s%s %s", v.pacInfo.ApplicationName, onPr, summary)
 
 	return v.createStatusCommit(event, v.pacInfo, statusOpts)
 }
@@ -239,9 +240,22 @@ func (v *Provider) createStatusCommit(event *info.Event, pacopts *info.PacOpts, 
 	}
 	if status.Text != "" && (eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
 		status.Text = strings.ReplaceAll(strings.TrimSpace(status.Text), "<br>", "\n")
+		var commentBody string
+		if status.PipelineRun != nil {
+			pr := status.PipelineRun
+			summary := provider.RenderStatusSummary(pr, pacopts.ProviderStatusSummaryTemplate)
+			onPr := ""
+			if status.PipelineRunName != "" {
+				onPr = fmt.Sprintf("/%s", status.PipelineRunName)
+			}
+			commentSummary := fmt.Sprintf("%s%s %s", pacopts.ApplicationName, onPr, summary)
+			commentBody = fmt.Sprintf("%s\n%s", commentSummary, status.Text)
+		} else {
+			commentBody = "\n" + status.Text
+		}
 		_, _, err := v.Client().CreateIssueComment(event.Organization, event.Repository,
 			int64(event.PullRequestNumber), gitea.CreateIssueCommentOption{
-				Body: fmt.Sprintf("%s\n%s", status.Summary, status.Text),
+				Body: commentBody,
 			},
 		)
 		if err != nil {

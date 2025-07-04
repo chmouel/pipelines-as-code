@@ -672,3 +672,47 @@ func TestProviderGetExistingCheckRunID(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderCheckRunSummary_CustomTemplate(t *testing.T) {
+	pr := &tektonv1.PipelineRun{
+		// Add minimal fields for template rendering
+		ObjectMeta: metav1.ObjectMeta{Name: "my-pipelinerun"},
+	}
+	log, _ := logger.GetLogger()
+	provider := &Provider{Logger: log}
+	pacopts := &info.PacOpts{
+		Settings: settings.Settings{
+			ProviderStatusSummaryTemplate: "Custom: {{ .PipelineRun.ObjectMeta.Name }}",
+		},
+	}
+	out := provider.renderCheckRunSummary(pr, pacopts)
+	assert.Equal(t, out, "Custom: my-pipelinerun")
+}
+
+func TestRenderCheckRunSummary_FallbackToDefault(t *testing.T) {
+	pr := &tektonv1.PipelineRun{ObjectMeta: metav1.ObjectMeta{Name: "my-pipelinerun"}}
+	log, _ := logger.GetLogger()
+	provider := &Provider{Logger: log}
+	pacopts := &info.PacOpts{
+		Settings: settings.Settings{
+			ProviderStatusSummaryTemplate: "{{ .PipelineRun.DoesNotExist }}", // invalid field
+		},
+	}
+	out := provider.renderCheckRunSummary(pr, pacopts)
+	assert.Assert(t, strings.Contains(out, "Failed to render summary") || strings.Contains(out, "my-pipelinerun"))
+}
+
+func TestRenderCheckRunSummary_Truncation(t *testing.T) {
+	pr := &tektonv1.PipelineRun{ObjectMeta: metav1.ObjectMeta{Name: "my-pipelinerun"}}
+	log, _ := logger.GetLogger()
+	providerObj := &Provider{Logger: log}
+	longStr := strings.Repeat("A", provider.StatusSummaryMaxLen+100)
+	pacopts := &info.PacOpts{
+		Settings: settings.Settings{
+			ProviderStatusSummaryTemplate: longStr,
+		},
+	}
+	out := providerObj.renderCheckRunSummary(pr, pacopts)
+	assert.Assert(t, len(out) <= provider.StatusSummaryMaxLen)
+	assert.Assert(t, strings.Contains(out, "Output truncated"))
+}

@@ -75,6 +75,9 @@ type Settings struct {
 	CustomConsoleNamespaceURL string `json:"custom-console-url-namespace"`
 
 	RememberOKToTest bool `json:"remember-ok-to-test"`
+
+	// Status summary template (Go template string, provider-agnostic)
+	ProviderStatusSummaryTemplate string `json:"provider-status-summary-template"`
 }
 
 func (s *Settings) DeepCopy(out *Settings) {

@@ -25,7 +25,7 @@ const (
 	pendingApproval = "Pending approval, waiting for an /ok-to-test"
 )
 
-const taskStatusTemplate = `
+var taskStatusTemplate = `
 <table>
   <tr><th>Status</th><th>Duration</th><th>Name</th></tr>
 
@@ -39,6 +39,13 @@ const taskStatusTemplate = `
 </td></tr>
 {{- end }}
 </table>`
+
+// renderCheckRunSummary renders the summary for the GitHub CheckRun using a custom template if set, otherwise falls back to the default.
+// It exposes the full PipelineRun object and helper functions to the template context, and truncates output if needed.
+func (v *Provider) renderCheckRunSummary(pr *tektonv1.PipelineRun, pacopts *info.PacOpts) string {
+	// Always use the provider-agnostic summary rendering utility and config
+	return provider.RenderStatusSummary(pr, pacopts.ProviderStatusSummaryTemplate)
+}
 
 func (v *Provider) getExistingCheckRunID(ctx context.Context, runevent *info.Event, status provider.StatusOpts) (*int64, error) {
 	opt := github.ListOptions{PerPage: v.PaginedNumber}
@@ -245,6 +252,13 @@ func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info
 		if pacopts.ErrorDetection {
 			checkRunOutput.Annotations = v.getFailuresMessageAsAnnotations(ctx, statusOpts.PipelineRun, pacopts)
 		}
+		// Render summary using custom or default template
+		customSummary := provider.RenderStatusSummary(statusOpts.PipelineRun, pacopts.ProviderStatusSummaryTemplate)
+		checkRunOutput.Summary = &customSummary
+	} else {
+		// If PipelineRun is nil, provide a minimal summary
+		fallback := provider.RenderStatusSummary(nil, pacopts.ProviderStatusSummaryTemplate)
+		checkRunOutput.Summary = &fallback
 	}
 
 	checkRunOutput.Text = github.Ptr(text)

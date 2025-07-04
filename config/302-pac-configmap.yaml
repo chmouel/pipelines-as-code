@@ -159,6 +159,12 @@ data:
   # custom-console-url-pr-details: https://url/ns/{{ namespace }}/{{ pr }}
   # custom-console-url-pr-tasklog: https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ task }}
 
+  # Optional: Custom Go template for the status summary screen (provider-agnostic).
+  # If empty or invalid, the default summary template will be used.
+  # The template context is the PipelineRun object, with helper functions like formatDuration and formatCondition.
+  # The rendered output must not exceed 65,535 characters (provider limitation).
+  provider-status-summary-template: ""
+
 kind: ConfigMap
 metadata:
   name: pipelines-as-code
