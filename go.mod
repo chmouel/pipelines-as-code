@@ -21,6 +21,7 @@ require (
 	github.com/jonboulle/clockwork v0.5.0
 	github.com/juju/ansiterm v1.0.0
 	github.com/ktrysmt/go-bitbucket v0.9.85
+	github.com/lib/pq v1.10.9
 	github.com/mattn/go-colorable v0.1.14
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
@@ -30,6 +31,8 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/tektoncd/pipeline v1.0.0
 	gitlab.com/gitlab-org/api/client-go v0.128.0
+	go.etcd.io/etcd/api/v3 v3.6.1
+	go.etcd.io/etcd/client/v3 v3.6.1
 	go.opencensus.io v0.24.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0
@@ -54,6 +57,8 @@ require (
 	github.com/cert-manager/cert-manager v1.17.2 // indirect
 	github.com/cloudevents/sdk-go/sql/v2 v2.0.0-20240712172937-3ce6b2f1f011 // indirect
 	github.com/coreos/go-oidc/v3 v3.14.1 // indirect
+	github.com/coreos/go-semver v0.3.1 // indirect
+	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.8.0 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.4 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.0 // indirect
@@ -61,6 +66,7 @@ require (
 	github.com/rickb777/plural v1.4.3 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	go.etcd.io/etcd/client/pkg/v3 v3.6.1 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	sigs.k8s.io/gateway-api v1.1.0 // indirect

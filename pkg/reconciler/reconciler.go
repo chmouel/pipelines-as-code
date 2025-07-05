@@ -18,7 +18,9 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/action"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/concurrency"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/customparams"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/etcd"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	pacapi "github.com/openshift-pipelines/pipelines-as-code/pkg/generated/listers/pipelinesascode/v1alpha1"
@@ -34,15 +36,17 @@ import (
 
 // Reconciler implements controller.Reconciler for PipelineRun resources.
 type Reconciler struct {
-	run               *params.Run
-	repoLister        pacapi.RepositoryLister
-	pipelineRunLister tektonv1lister.PipelineRunLister
-	kinteract         kubeinteraction.Interface
-	qm                sync.QueueManagerInterface
-	metrics           *metrics.Recorder
-	eventEmitter      *events.EventEmitter
-	globalRepo        *v1alpha1.Repository
-	secretNS          string
+	run                *params.Run
+	repoLister         pacapi.RepositoryLister
+	pipelineRunLister  tektonv1lister.PipelineRunLister
+	kinteract          kubeinteraction.Interface
+	qm                 sync.QueueManagerInterface
+	metrics            *metrics.Recorder
+	eventEmitter       *events.EventEmitter
+	globalRepo         *v1alpha1.Repository
+	secretNS           string
+	etcdStateManager   *etcd.StateManager   // etcd-based state manager
+	concurrencyManager *concurrency.Manager // new abstracted concurrency manager
 }
 
 var (
@@ -323,6 +327,13 @@ func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *
 }
 
 func (r *Reconciler) updatePipelineRunState(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun, state string) (*tektonv1.PipelineRun, error) {
+	// If etcd state manager is available, use it for state management
+	if r.etcdStateManager != nil {
+		if err := r.etcdStateManager.SetPipelineRunState(ctx, pr, state); err != nil {
+			logger.Warnf("Failed to set state in etcd, falling back to annotation: %v", err)
+		}
+	}
+
 	mergePatch := map[string]any{
 		"metadata": map[string]any{
 			"labels": map[string]string{

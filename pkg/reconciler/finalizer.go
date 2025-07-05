@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
@@ -32,6 +33,14 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 			r.qm.RemoveRepository(&v1alpha1.Repository{
 				ObjectMeta: metav1.ObjectMeta{Name: repoName, Namespace: pr.Namespace},
 			})
+			// Also cleanup concurrency state if using new system
+			if r.concurrencyManager != nil {
+				if err := r.concurrencyManager.CleanupRepository(ctx, &v1alpha1.Repository{
+					ObjectMeta: metav1.ObjectMeta{Name: repoName, Namespace: pr.Namespace},
+				}); err != nil {
+					logger.Errorf("failed to cleanup concurrency state for repository %s/%s: %v", pr.Namespace, repoName, err)
+				}
+			}
 			return nil
 		}
 		if err != nil {
@@ -45,6 +54,18 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 			repo.Spec.Merge(r.globalRepo.Spec)
 		}
 		logger = logger.With("namespace", repo.Namespace)
+
+		// Release concurrency slot if using new system
+		if r.concurrencyManager != nil {
+			prKey := fmt.Sprintf("%s/%s", pr.Namespace, pr.Name)
+			repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+			// Note: We don't have the leaseID here, so the driver will need to handle this
+			// by looking up the slot based on the pipeline run key
+			if err := r.concurrencyManager.ReleaseSlot(ctx, nil, prKey, repoKey); err != nil {
+				logger.Warnf("failed to release concurrency slot for %s: %v", prKey, err)
+			}
+		}
+
 		next := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
 		if next != "" {
 			key := strings.Split(next, "/")

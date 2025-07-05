@@ -373,7 +373,7 @@ func TestProcessTemplates(t *testing.T) {
 				repo = &v1alpha1.Repository{}
 			}
 			ctx, _ := rtesting.SetupFakeContext(t)
-			run := &params.Run{Clients: clients.Clients{}}
+			run := &params.Run{Clients: clients.Clients{}, Info: info.NewInfo()}
 			if tt.event == nil {
 				tt.event = &info.Event{}
 			}

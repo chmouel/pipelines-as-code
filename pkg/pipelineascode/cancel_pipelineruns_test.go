@@ -1,12 +1,16 @@
 package pipelineascode
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"strconv"
 	"testing"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
@@ -17,6 +21,7 @@ import (
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 
 	"github.com/google/go-github/v71/github"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	pipelinev1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
@@ -72,6 +77,61 @@ var (
 		keys.Repository:     "foo",
 	}
 )
+
+// mockProvider implements provider.Interface with no-op methods for testing
+type mockProvider struct{}
+
+func (m *mockProvider) SetLogger(_ *zap.SugaredLogger)                                 {}
+func (m *mockProvider) Validate(_ context.Context, _ *params.Run, _ *info.Event) error { return nil }
+func (m *mockProvider) Detect(_ *http.Request, _ string, _ *zap.SugaredLogger) (bool, bool, *zap.SugaredLogger, string, error) {
+	return false, false, nil, "", nil
+}
+
+func (m *mockProvider) ParsePayload(_ context.Context, _ *params.Run, _ *http.Request, _ string) (*info.Event, error) {
+	return nil, nil
+}
+func (m *mockProvider) IsAllowed(_ context.Context, _ *info.Event) (bool, error) { return true, nil }
+func (m *mockProvider) IsAllowedOwnersFile(_ context.Context, _ *info.Event) (bool, error) {
+	return true, nil
+}
+
+func (m *mockProvider) CreateStatus(_ context.Context, _ *info.Event, _ provider.StatusOpts) error {
+	return nil
+}
+
+func (m *mockProvider) GetTektonDir(_ context.Context, _ *info.Event, _, _ string) (string, error) {
+	return "", nil
+}
+
+func (m *mockProvider) GetFileInsideRepo(_ context.Context, _ *info.Event, _, _ string) (string, error) {
+	return "", nil
+}
+
+func (m *mockProvider) SetClient(_ context.Context, _ *params.Run, _ *info.Event, _ *v1alpha1.Repository, _ *events.EventEmitter) error {
+	return nil
+}
+func (m *mockProvider) SetPacInfo(_ *info.PacOpts)                           {}
+func (m *mockProvider) GetCommitInfo(_ context.Context, _ *info.Event) error { return nil }
+func (m *mockProvider) GetConfig() *info.ProviderConfig                      { return &info.ProviderConfig{} }
+func (m *mockProvider) GetFiles(_ context.Context, _ *info.Event) (changedfiles.ChangedFiles, error) {
+	return changedfiles.ChangedFiles{}, nil
+}
+
+func (m *mockProvider) GetTaskURI(_ context.Context, _ *info.Event, _ string) (bool, string, error) {
+	return false, "", nil
+}
+
+func (m *mockProvider) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {
+	return "", nil
+}
+
+func (m *mockProvider) CheckPolicyAllowing(_ context.Context, _ *info.Event, _ []string) (bool, string) {
+	return true, ""
+}
+func (m *mockProvider) GetTemplate(_ provider.CommentType) string { return "" }
+func (m *mockProvider) CreateComment(_ context.Context, _ *info.Event, _, _ string) error {
+	return nil
+}
 
 func TestCancelPipelinerunOpsComment(t *testing.T) {
 	observer, _ := zapobserver.New(zap.InfoLevel)
@@ -294,18 +354,19 @@ func TestCancelPipelinerunOpsComment(t *testing.T) {
 				PipelineRuns: tt.pipelineRuns,
 			}
 			stdata, _ := testclient.SeedTestData(t, ctx, tdata)
-			cs := &params.Run{
+			run := &params.Run{
 				Clients: clients.Clients{
 					Log:    logger,
 					Tekton: stdata.Pipeline,
 					Kube:   stdata.Kube,
 				},
+				Info: info.NewInfo(),
 			}
-			pac := NewPacs(tt.event, nil, cs, &info.PacOpts{}, nil, logger, nil)
+			pac := NewPacs(tt.event, &mockProvider{}, run, &info.PacOpts{}, nil, logger, nil)
 			err := pac.cancelPipelineRunsOpsComment(ctx, tt.repo)
 			assert.NilError(t, err)
 
-			got, err := cs.Clients.Tekton.TektonV1().PipelineRuns("foo").List(ctx, metav1.ListOptions{})
+			got, err := run.Clients.Tekton.TektonV1().PipelineRuns("foo").List(ctx, metav1.ListOptions{})
 			assert.NilError(t, err)
 
 			for _, pr := range got.Items {
@@ -1130,12 +1191,13 @@ func TestCancelInProgressMatchingPipelineRun(t *testing.T) {
 				PipelineRuns: tt.pipelineRuns,
 			}
 			stdata, _ := testclient.SeedTestData(t, ctx, tdata)
-			cs := &params.Run{
+			run := &params.Run{
 				Clients: clients.Clients{
 					Log:    logger,
 					Tekton: stdata.Pipeline,
 					Kube:   stdata.Kube,
 				},
+				Info: info.NewInfo(),
 			}
 			pacInfo := &info.PacOpts{
 				Settings: settings.Settings{
@@ -1143,7 +1205,7 @@ func TestCancelInProgressMatchingPipelineRun(t *testing.T) {
 					EnableCancelInProgressOnPush:         tt.cancelInProgressOnPush,
 				},
 			}
-			pac := NewPacs(tt.event, nil, cs, pacInfo, nil, logger, nil)
+			pac := NewPacs(tt.event, &mockProvider{}, run, pacInfo, nil, logger, nil)
 			var firstPr *pipelinev1.PipelineRun
 			if len(tt.pipelineRuns) > 0 {
 				firstPr = tt.pipelineRuns[0]
@@ -1156,7 +1218,7 @@ func TestCancelInProgressMatchingPipelineRun(t *testing.T) {
 			assert.NilError(t, err)
 
 			// the fake k8 test library don't set cancellation status, so we can't check the status :\
-			got, err := cs.Clients.Tekton.TektonV1().PipelineRuns("foo").List(ctx, metav1.ListOptions{})
+			got, err := run.Clients.Tekton.TektonV1().PipelineRuns("foo").List(ctx, metav1.ListOptions{})
 			assert.NilError(t, err)
 
 			for _, pr := range got.Items {
@@ -1460,23 +1522,24 @@ func TestCancelAllInProgressBelongingToClosedPullRequest(t *testing.T) {
 				PipelineRuns: tt.pipelineRuns,
 			}
 			stdata, _ := testclient.SeedTestData(t, ctx, tdata)
-			cs := &params.Run{
+			run := &params.Run{
 				Clients: clients.Clients{
 					Log:    logger,
 					Tekton: stdata.Pipeline,
 					Kube:   stdata.Kube,
 				},
+				Info: info.NewInfo(),
 			}
 			pacInfo := &info.PacOpts{
 				Settings: settings.Settings{
 					EnableCancelInProgressOnPullRequests: tt.cancelInProgressOnPR,
 				},
 			}
-			pac := NewPacs(tt.event, nil, cs, pacInfo, nil, logger, nil)
+			pac := NewPacs(tt.event, &mockProvider{}, run, pacInfo, nil, logger, nil)
 			err := pac.cancelAllInProgressBelongingToClosedPullRequest(ctx, tt.repo)
 			assert.NilError(t, err)
 
-			got, err := cs.Clients.Tekton.TektonV1().PipelineRuns("foo").List(ctx, metav1.ListOptions{})
+			got, err := run.Clients.Tekton.TektonV1().PipelineRuns("foo").List(ctx, metav1.ListOptions{})
 			assert.NilError(t, err)
 
 			for _, pr := range got.Items {

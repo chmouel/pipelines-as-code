@@ -75,6 +75,18 @@ type Settings struct {
 	CustomConsoleNamespaceURL string `json:"custom-console-url-namespace"`
 
 	RememberOKToTest bool `json:"remember-ok-to-test"`
+
+	// ETCD Configuration
+	EtcdEnabled     bool   `json:"etcd-enabled"`
+	EtcdMode        string `json:"etcd-mode"`
+	EtcdEndpoints   string `json:"etcd-endpoints"`
+	EtcdDialTimeout int    `json:"etcd-dial-timeout"`
+	EtcdUsername    string `json:"etcd-username"`
+	EtcdPassword    string `json:"etcd-password"`
+	EtcdCertFile    string `json:"etcd-cert-file"`
+	EtcdKeyFile     string `json:"etcd-key-file"`
+	EtcdCAFile      string `json:"etcd-ca-file"`
+	EtcdServerName  string `json:"etcd-server-name"`
 }
 
 func (s *Settings) DeepCopy(out *Settings) {

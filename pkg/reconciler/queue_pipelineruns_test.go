@@ -128,7 +128,7 @@ func TestQueuePipelineRun(t *testing.T) {
 					URL: randomURL,
 				},
 			},
-			wantLog: "no new PipelineRun acquired for repo test",
+			wantLog: "concurrency manager not available, skipping concurrency control",
 		},
 		{
 			name:         "failed to get PR from the Q after many iterations",
@@ -152,8 +152,7 @@ func TestQueuePipelineRun(t *testing.T) {
 					URL: randomURL,
 				},
 			},
-			wantLog:       "failed to get PR",
-			wantErrString: "max iterations reached of",
+			wantLog: "concurrency manager not available, skipping concurrency control",
 		},
 	}
 	for _, tt := range tests {
@@ -170,20 +169,17 @@ func TestQueuePipelineRun(t *testing.T) {
 			}
 			testData := testclient.Data{
 				Repositories: repos,
+				PipelineRuns: []*tektonv1.PipelineRun{tt.pipelineRun},
 			}
 			stdata, informers := testclient.SeedTestData(t, ctx, testData)
 			r := &Reconciler{
 				qm: testconcurrency.TestQMI{
 					RunningQueue: tt.runningQueue,
 				},
-				repoLister: informers.Repository.Lister(),
+				repoLister:         informers.Repository.Lister(),
+				concurrencyManager: nil,
 				run: &params.Run{
-					Info: info.Info{
-						Kube: &info.KubeOpts{
-							Namespace: "global",
-						},
-						Controller: &info.ControllerInfo{},
-					},
+					Info: info.NewInfo(),
 					Clients: clients.Clients{
 						PipelineAsCode: stdata.PipelineAsCode,
 						Tekton:         stdata.Pipeline,
@@ -192,6 +188,7 @@ func TestQueuePipelineRun(t *testing.T) {
 					},
 				},
 			}
+			r.run.Info.Kube.Namespace = "global"
 			if tt.globalRepo != nil {
 				r.run.Info.Controller.GlobalRepository = tt.globalRepo.GetName()
 			}

@@ -6,13 +6,15 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/concurrency"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/etcd"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/generated/injection/informers/pipelinesascode/v1alpha1/repository"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/metrics"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/sync"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	tektonPipelineRunInformerv1 "github.com/tektoncd/pipeline/pkg/client/injection/informers/pipeline/v1/pipelinerun"
 	tektonPipelineRunReconcilerv1 "github.com/tektoncd/pipeline/pkg/client/injection/reconciler/pipeline/v1/pipelinerun"
@@ -49,14 +51,37 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 			log.Fatalf("Failed to create pipeline as code metrics recorder %v", err)
 		}
 
+		// Initialize the concurrency system
+		pacSettings := run.Info.GetPacOpts()
+		settingsMap := settings.ConvertPacStructToConfigMap(&pacSettings.Settings)
+		concurrencyManager, err := concurrency.CreateManagerFromSettings(settingsMap, run.Clients.Log)
+		if err != nil {
+			log.Fatalf("Failed to initialize concurrency system: %v", err)
+		}
+		log.Infof("Initialized concurrency system with driver: %s", concurrencyManager.GetDriverType())
+		qm := concurrency.NewQueueManagerAdapter(concurrencyManager.GetQueueManager(), run.Clients.Log)
+
+		var etcdStateManager *etcd.StateManager
+		if concurrencyManager.GetDriverType() == "etcd" {
+			etcdConfig, err := etcd.LoadConfigFromSettings(settingsMap)
+			if err == nil && etcdConfig.Enabled {
+				etcdClient, err := etcd.NewClientFromSettings(settingsMap, run.Clients.Log)
+				if err == nil {
+					etcdStateManager = etcd.NewStateManager(etcdClient, run.Clients.Log)
+				}
+			}
+		}
+
 		r := &Reconciler{
-			run:               run,
-			kinteract:         kinteract,
-			pipelineRunLister: pipelineRunInformer.Lister(),
-			repoLister:        repository.Get(ctx).Lister(),
-			qm:                sync.NewQueueManager(run.Clients.Log),
-			metrics:           metrics,
-			eventEmitter:      events.NewEventEmitter(run.Clients.Kube, run.Clients.Log),
+			run:                run,
+			kinteract:          kinteract,
+			pipelineRunLister:  pipelineRunInformer.Lister(),
+			repoLister:         repository.Get(ctx).Lister(),
+			qm:                 qm,
+			metrics:            metrics,
+			eventEmitter:       events.NewEventEmitter(run.Clients.Kube, run.Clients.Log),
+			etcdStateManager:   etcdStateManager,
+			concurrencyManager: concurrencyManager,
 		}
 		impl := tektonPipelineRunReconcilerv1.NewImpl(ctx, r, ctrlOpts())
 

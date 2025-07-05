@@ -159,6 +159,88 @@ data:
   # custom-console-url-pr-details: https://url/ns/{{ namespace }}/{{ pr }}
   # custom-console-url-pr-tasklog: https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ task }}
 
+  # Concurrency System Configuration
+  # Enable or disable the concurrency system
+  # Default: false
+  concurrency-enabled: "false"
+
+  # Concurrency driver: "etcd", "postgresql", or "memory"
+  # Default: "etcd"
+  concurrency-driver: "etcd"
+
+  # ETCD Configuration (when using etcd driver)
+  # Enable or disable etcd for concurrency management and state storage
+  # Default: false
+  etcd-enabled: "false"
+
+  # ETCD mode: "memory" (for testing), "mock" (for development), "etcd" (for production)
+  # Default: "memory"
+  etcd-mode: "memory"
+
+  # Comma-separated list of etcd endpoints (e.g., "localhost:2379,localhost:22379")
+  # Default: "localhost:2379"
+  etcd-endpoints: "localhost:2379"
+
+  # ETCD dial timeout in seconds
+  # Default: 5
+  etcd-dial-timeout: "5"
+
+  # ETCD username for authentication (optional)
+  etcd-username: ""
+
+  # ETCD password for authentication (optional)
+  etcd-password: ""
+
+  # ETCD TLS certificate file path (optional)
+  etcd-cert-file: ""
+
+  # ETCD TLS key file path (optional)
+  etcd-key-file: ""
+
+  # ETCD TLS CA file path (optional)
+  etcd-ca-file: ""
+
+  # ETCD TLS server name (optional)
+  etcd-server-name: ""
+
+  # PostgreSQL Configuration (when using postgresql driver)
+  # PostgreSQL host
+  # Default: "localhost"
+  postgresql-host: "localhost"
+
+  # PostgreSQL port
+  # Default: "5432"
+  postgresql-port: "5432"
+
+  # PostgreSQL database name
+  # Default: "pac_concurrency"
+  postgresql-database: "pac_concurrency"
+
+  # PostgreSQL username
+  # Default: "pac_user"
+  postgresql-username: "pac_user"
+
+  # PostgreSQL SSL mode: "disable", "require", "verify-ca", "verify-full"
+  # Default: "disable"
+  postgresql-ssl-mode: "disable"
+
+  # PostgreSQL max connections
+  # Default: "10"
+  postgresql-max-connections: "10"
+
+  # PostgreSQL connection timeout
+  # Default: "30s"
+  postgresql-connection-timeout: "30s"
+
+  # PostgreSQL lease TTL
+  # Default: "1h"
+  postgresql-lease-ttl: "1h"
+
+  # Memory Configuration (when using memory driver)
+  # Memory lease TTL
+  # Default: "30m"
+  memory-lease-ttl: "30m"
+
 kind: ConfigMap
 metadata:
   name: pipelines-as-code

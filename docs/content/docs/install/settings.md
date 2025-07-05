@@ -360,6 +360,54 @@ A few settings are available to configure this feature:
 
   example: `https://mycorp.com/ns/{{ namespace }}/pipelinerun/{{ pr }}/logs/{{ task }}#{{ pod }}-{{ firstFailedStep }}`
 
+## ETCD Configuration
+
+ETCD can be used for advanced concurrency management and state storage in Pipelines-as-Code. The following settings control ETCD behavior:
+
+* `etcd-enabled`
+
+  Enable or disable etcd for concurrency management and state storage.
+  Default: `false`
+
+* `etcd-mode`
+
+  ETCD mode: "memory" (for testing), "mock" (for development), "etcd" (for production).
+  Default: `memory`
+
+* `etcd-endpoints`
+
+  Comma-separated list of etcd endpoints (e.g., "localhost:2379,localhost:22379").
+  Default: `localhost:2379`
+
+* `etcd-dial-timeout`
+
+  ETCD dial timeout in seconds.
+  Default: `5`
+
+* `etcd-username`
+
+  ETCD username for authentication (optional).
+
+* `etcd-password`
+
+  ETCD password for authentication (optional).
+
+* `etcd-cert-file`
+
+  ETCD TLS certificate file path (optional).
+
+* `etcd-key-file`
+
+  ETCD TLS key file path (optional).
+
+* `etcd-ca-file`
+
+  ETCD TLS CA file path (optional).
+
+* `etcd-server-name`
+
+  ETCD TLS server name (optional).
+
 ## Pipelines-as-Code Info
 
   There are a settings exposed through a config map for which any authenticated

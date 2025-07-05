@@ -16,7 +16,7 @@ import (
 )
 
 func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) error {
-	order, exist := pr.GetAnnotations()[keys.ExecutionOrder]
+	_, exist := pr.GetAnnotations()[keys.ExecutionOrder]
 	if !exist {
 		// if the pipelineRun doesn't have order label then wait
 		return nil
@@ -62,6 +62,85 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 		return nil
 	}
 
+	// Try to acquire a slot for this specific PipelineRun
+	prKey := fmt.Sprintf("%s/%s", pr.Namespace, pr.Name)
+
+	// Check if concurrency manager is available
+	if r.concurrencyManager == nil {
+		// Fall back to legacy system or skip concurrency control
+		logger.Info("concurrency manager not available, skipping concurrency control")
+		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+			return fmt.Errorf("failed to update PipelineRun to in_progress: %w", err)
+		}
+		return nil
+	}
+
+	success, leaseID, err := r.concurrencyManager.AcquireSlot(ctx, repo, prKey)
+	if err != nil {
+		return fmt.Errorf("failed to acquire concurrency slot: %w", err)
+	}
+
+	if success {
+		// Slot acquired, update PipelineRun to in progress
+		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+			// Release the slot if we can't update the PipelineRun
+			if releaseErr := r.concurrencyManager.ReleaseSlot(ctx, leaseID, prKey, fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)); releaseErr != nil {
+				logger.Errorf("failed to release slot after update failure: %v", releaseErr)
+			}
+			return fmt.Errorf("failed to update PipelineRun to in_progress: %w", err)
+		}
+
+		// Set up watcher for slot availability to trigger reconciliation of waiting PipelineRuns
+		r.concurrencyManager.WatchSlotAvailability(ctx, repo, func() {
+			logger.Info("slot became available, triggering reconciliation")
+			// This could trigger reconciliation of waiting PipelineRuns
+		})
+
+		logger.Infof("acquired concurrency slot for %s in repository %s/%s", prKey, repo.Namespace, repo.Name)
+		return nil
+	}
+
+	// Slot not available, PipelineRun remains in queued state
+	logger.Infof("concurrency limit reached for repository %s/%s, PipelineRun %s will wait", repo.Namespace, repo.Name, prKey)
+	return nil
+}
+
+// queuePipelineRunWithNewSystem uses the new abstracted concurrency system
+func (r *Reconciler) queuePipelineRunWithNewSystem(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun, repo *pacAPIv1alpha1.Repository, order string) error {
+	// Try to acquire a slot for this specific PipelineRun
+	prKey := fmt.Sprintf("%s/%s", pr.Namespace, pr.Name)
+	success, leaseID, err := r.concurrencyManager.AcquireSlot(ctx, repo, prKey)
+	if err != nil {
+		return fmt.Errorf("failed to acquire concurrency slot: %w", err)
+	}
+
+	if success {
+		// Slot acquired, update PipelineRun to in progress
+		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+			// Release the slot if we can't update the PipelineRun
+			if releaseErr := r.concurrencyManager.ReleaseSlot(ctx, leaseID, prKey, fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)); releaseErr != nil {
+				logger.Errorf("failed to release slot after update failure: %v", releaseErr)
+			}
+			return fmt.Errorf("failed to update PipelineRun to in_progress: %w", err)
+		}
+
+		// Set up watcher for slot availability to trigger reconciliation of waiting PipelineRuns
+		r.concurrencyManager.WatchSlotAvailability(ctx, repo, func() {
+			logger.Info("slot became available, triggering reconciliation")
+			// This could trigger reconciliation of waiting PipelineRuns
+		})
+
+		logger.Infof("acquired concurrency slot for %s in repository %s/%s", prKey, repo.Namespace, repo.Name)
+		return nil
+	}
+
+	// Slot not available, PipelineRun remains in queued state
+	logger.Infof("concurrency limit reached for repository %s/%s, PipelineRun %s will wait", repo.Namespace, repo.Name, prKey)
+	return nil
+}
+
+// queuePipelineRunWithLegacySystem uses the legacy queue manager system
+func (r *Reconciler) queuePipelineRunWithLegacySystem(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun, repo *pacAPIv1alpha1.Repository, order string) error {
 	var processed bool
 	var itered int
 	maxIterations := 5

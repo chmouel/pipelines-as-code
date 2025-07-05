@@ -1,0 +1,64 @@
+---
+alwaysApply: true
+---
+# Development Rules for Pipelines-as-Code
+
+## Testing and Quality Assurance
+
+- if you need to run test, run the test with `make test`
+- if you need to run the linter, run the linter with `make lint`
+- every time you write go code, make sure to run `make fumpt` to reformat the code
+- every time you write markdown make sure to do a `make fix-markdownlint` to fix the markdown
+- if you need to add a dependency, use `go get -u dependency` and make sure to run `make vendor` afterwards or it would not work.
+- do not try to run the e2e tests in tests/ there is a bunch of pre-requisites
+that need to be set up. Ask the user to run the e2e tests manually and copy the
+output.
+
+## Code Quality and Formatting
+
+- Always run `make fumpt` after writing Go code to ensure proper formatting
+- Use `make fix-linters` to automatically fix most linting issues
+- Run `make check` to verify both linting and tests pass before committing
+- For markdown files, use `make fix-markdownlint` to fix formatting issues
+- Use `make fix-trailing-spaces` to clean up trailing whitespace in markdown and yaml files
+
+## Documentation
+
+- Use `make dev-docs` to preview documentation changes locally at <http://localhost:1313>
+- Documentation uses Hugo with the hugo-book theme
+- Use the custom shortcodes like `tech_preview` and `support_matrix` for feature documentation
+- Follow the documentation guidelines in the developer docs
+
+## Pre-commit and Quality Gates
+
+- Install pre-commit hooks with `pre-commit install` to ensure code quality
+- The project uses multiple linters: golangci-lint, yamllint, markdownlint, ruff, shellcheck, vale, codespell
+- Pre-commit hooks run automatically on push, but can be skipped with `git push --no-verify`
+- Use `SKIP=hook-name git push` to skip specific hooks
+
+## Dependencies and Modules
+
+- Always run `make vendor` after adding new dependencies
+- Check for and remove unnecessary `replace` clauses in go.mod
+- Update Go version to match the latest RHEL version when needed
+- Use `go mod tidy -go=1.20` (or appropriate version) to update Go version
+
+## Architecture and Targets
+
+- The project targets both arm64 and amd64 architectures
+- Use `ko` for building container images in development
+- The project uses Tekton pipelines and integrates with multiple Git providers (GitHub, GitLab, Bitbucket, Gitea)
+
+## E2E Testing
+
+- Always ask the user to run the e2e tests manually and copy the output. Since
+  E2E tests require specific setup and environment variables
+- Gitea tests are the most comprehensive and self-contained
+
+## Useful Commands
+
+- `make help` - Show all available make targets
+- `make all` - Build all binaries, run tests and lint
+- `make html-coverage` - Generate HTML test coverage report
+- `make test-no-cache` - Run tests without caching
+- `make clean` - Clean build artifacts

@@ -20,7 +20,7 @@ import (
 )
 
 var (
-	concurrency      = 1
+	concurrencyLimit = 1
 	finalizeTestRepo = &v1alpha1.Repository{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pac-app",
@@ -28,7 +28,7 @@ var (
 		},
 		Spec: v1alpha1.RepositorySpec{
 			URL:              "https://github.com/sm43/pac-app",
-			ConcurrencyLimit: &concurrency,
+			ConcurrencyLimit: &concurrencyLimit,
 		},
 	}
 )

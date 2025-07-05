@@ -9,6 +9,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/customparams"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/etcd"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
@@ -35,22 +36,43 @@ const (
 )
 
 type PacRun struct {
-	event        *info.Event
-	vcx          provider.Interface
-	run          *params.Run
-	k8int        kubeinteraction.Interface
-	logger       *zap.SugaredLogger
-	eventEmitter *events.EventEmitter
-	manager      *ConcurrencyManager
-	pacInfo      *info.PacOpts
-	globalRepo   *v1alpha1.Repository
+	event            *info.Event
+	vcx              provider.Interface
+	run              *params.Run
+	k8int            kubeinteraction.Interface
+	logger           *zap.SugaredLogger
+	eventEmitter     *events.EventEmitter
+	manager          *ConcurrencyManager
+	pacInfo          *info.PacOpts
+	globalRepo       *v1alpha1.Repository
+	etcdStateManager *etcd.StateManager // etcd-based state manager
 }
 
 func NewPacs(event *info.Event, vcx provider.Interface, run *params.Run, pacInfo *info.PacOpts, k8int kubeinteraction.Interface, logger *zap.SugaredLogger, globalRepo *v1alpha1.Repository) PacRun {
+	// Initialize etcd state manager if etcd is enabled
+	var etcdStateManager *etcd.StateManager
+
+	// Get current settings from the run
+	pacSettings := run.Info.GetPacOpts()
+	settingsMap := settings.ConvertPacStructToConfigMap(&pacSettings.Settings)
+
+	etcdConfig, err := etcd.LoadConfigFromSettings(settingsMap)
+	if err != nil {
+		logger.Warnf("Failed to load etcd config: %v", err)
+	} else if etcdConfig.Enabled {
+		etcdClient, err := etcd.NewClientFromSettings(settingsMap, logger)
+		if err != nil {
+			logger.Warnf("Failed to initialize etcd client for state management: %v", err)
+		} else {
+			etcdStateManager = etcd.NewStateManager(etcdClient, logger)
+		}
+	}
+
 	return PacRun{
 		event: event, run: run, vcx: vcx, k8int: k8int, pacInfo: pacInfo, logger: logger, globalRepo: globalRepo,
-		eventEmitter: events.NewEventEmitter(run.Clients.Kube, logger),
-		manager:      NewConcurrencyManager(),
+		eventEmitter:     events.NewEventEmitter(run.Clients.Kube, logger),
+		manager:          NewConcurrencyManager(),
+		etcdStateManager: etcdStateManager,
 	}
 }
 
@@ -202,6 +224,13 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 			match.Repo.GetNamespace(), err)
 	}
 
+	// Set state in etcd if available and concurrency is enabled
+	if p.etcdStateManager != nil && match.Repo.Spec.ConcurrencyLimit != nil && *match.Repo.Spec.ConcurrencyLimit != 0 {
+		if err := p.etcdStateManager.SetPipelineRunState(ctx, pr, kubeinteraction.StateQueued); err != nil {
+			p.logger.Warnf("Failed to set queued state in etcd for PipelineRun %s/%s: %v", pr.Namespace, pr.Name, err)
+		}
+	}
+
 	// update ownerRef of secret with pipelineRun, so that it gets cleanedUp with pipelineRun
 	if p.pacInfo.SecretAutoCreation {
 		err := p.k8int.UpdateSecretWithOwnerRef(ctx, p.logger, pr.Namespace, gitAuthSecretName, pr)
@@ -277,6 +306,15 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 			// we still return the created PR with error, and allow caller to decide what to do with the PR, and avoid
 			// unneeded SIGSEGV's
 			return pr, fmt.Errorf("cannot patch pipelinerun %s: %w", pr.GetGenerateName(), err)
+		}
+
+		// Set state in etcd if available and we're patching the state
+		if p.etcdStateManager != nil {
+			if state, ok := patchAnnotations[keys.State]; ok {
+				if err := p.etcdStateManager.SetPipelineRunState(ctx, pr, state); err != nil {
+					p.logger.Warnf("Failed to set state %s in etcd for PipelineRun %s/%s: %v", state, pr.Namespace, pr.Name, err)
+				}
+			}
 		}
 	}
 
