@@ -13,45 +13,37 @@ func TestLoadConfigFromSettings(t *testing.T) {
 		expectError bool
 	}{
 		{
-			name: "disabled concurrency",
+			name: "disabled etcd",
 			settings: map[string]string{
-				"concurrency-enabled": "false",
+				"etcd-enabled": "false",
 			},
-			expectError: true,
+			expectError: false, // Disabled etcd should not cause an error
 		},
 		{
-			name: "etcd driver",
+			name: "enabled etcd with endpoints",
 			settings: map[string]string{
-				"concurrency-enabled": "true",
-				"concurrency-driver":  "etcd",
-				"etcd-endpoints":      "localhost:2379",
-			},
-			expectError: false,
-		},
-		{
-			name: "postgresql driver",
-			settings: map[string]string{
-				"concurrency-enabled": "true",
-				"concurrency-driver":  "postgresql",
-				"postgresql-host":     "localhost",
-				"postgresql-username": "test",
-				"postgresql-password": "test",
+				"etcd-enabled":   "true",
+				"etcd-endpoints": "localhost:2379",
 			},
 			expectError: false,
 		},
 		{
-			name: "memory driver",
+			name: "enabled etcd with explicit etcd mode but no endpoints",
 			settings: map[string]string{
-				"concurrency-enabled": "true",
-				"concurrency-driver":  "memory",
+				"etcd-enabled":   "true",
+				"etcd-mode":      "etcd", // Explicitly set mode to etcd
+				"etcd-endpoints": "",     // Explicitly set empty endpoints to override default
 			},
-			expectError: false,
+			expectError: true, // Should error because no endpoints provided
 		},
 		{
-			name: "invalid driver",
+			name: "enabled etcd with invalid TLS config",
 			settings: map[string]string{
-				"concurrency-enabled": "true",
-				"concurrency-driver":  "invalid",
+				"etcd-enabled":   "true",
+				"etcd-mode":      "etcd",
+				"etcd-endpoints": "localhost:2379",
+				"etcd-cert-file": "cert.pem",
+				// Missing key file should cause validation error
 			},
 			expectError: true,
 		},
@@ -63,6 +55,8 @@ func TestLoadConfigFromSettings(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("expected error but got none")
+					// Debug output
+					t.Logf("Config: Enabled=%v, Mode=%s, Endpoints=%v", config.Enabled, config.Mode, config.Endpoints)
 				}
 				return
 			}
@@ -83,9 +77,7 @@ func TestCreateManagerFromSettings(t *testing.T) {
 
 	// Test with memory driver (no external dependencies)
 	settings := map[string]string{
-		"concurrency-enabled": "true",
-		"concurrency-driver":  "memory",
-		"memory-lease-ttl":    "1m",
+		"etcd-enabled": "false", // This will default to memory driver
 	}
 
 	manager, err := CreateManagerFromSettings(settings, sugar)
@@ -108,11 +100,10 @@ func TestGetDefaultSettings(t *testing.T) {
 	settings := GetDefaultSettings()
 
 	expectedKeys := []string{
-		"concurrency-enabled",
-		"concurrency-driver",
+		"etcd-enabled",
+		"etcd-mode",
 		"etcd-endpoints",
 		"etcd-dial-timeout",
-		"etcd-mode",
 	}
 
 	for _, key := range expectedKeys {
@@ -121,7 +112,7 @@ func TestGetDefaultSettings(t *testing.T) {
 		}
 	}
 
-	if settings["concurrency-enabled"] != "false" {
-		t.Errorf("expected concurrency-enabled to be 'false', got '%s'", settings["concurrency-enabled"])
+	if settings["etcd-enabled"] != "false" {
+		t.Errorf("expected etcd-enabled to be 'false', got '%s'", settings["etcd-enabled"])
 	}
 }

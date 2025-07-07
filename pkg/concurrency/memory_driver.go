@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// MemoryDriver implements ConcurrencyDriver using in-memory storage
+// MemoryDriver implements Driver using in-memory storage.
 type MemoryDriver struct {
 	mu               sync.RWMutex
 	slots            map[string]map[string]*slotInfo // repoKey -> pipelineRunKey -> slotInfo
@@ -30,8 +30,8 @@ type slotInfo struct {
 	expiresAt  time.Time
 }
 
-// NewMemoryDriver creates a new in-memory concurrency driver
-func NewMemoryDriver(config *MemoryConfig, logger *zap.SugaredLogger) (ConcurrencyDriver, error) {
+// NewMemoryDriver creates a new in-memory concurrency driver.
+func NewMemoryDriver(config *MemoryConfig, logger *zap.SugaredLogger) (Driver, error) {
 	if config == nil {
 		config = &MemoryConfig{
 			LeaseTTL: 1 * time.Hour,
@@ -53,7 +53,7 @@ func NewMemoryDriver(config *MemoryConfig, logger *zap.SugaredLogger) (Concurren
 	return driver, nil
 }
 
-// cleanupExpiredLeases periodically removes expired concurrency slots
+// cleanupExpiredLeases periodically removes expired concurrency slots.
 func (md *MemoryDriver) cleanupExpiredLeases() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
@@ -92,7 +92,8 @@ func (md *MemoryDriver) cleanupExpiredLeases() {
 }
 
 // AcquireSlot tries to acquire a concurrency slot for a PipelineRun in a repository.
-func (md *MemoryDriver) AcquireSlot(ctx context.Context, repo *v1alpha1.Repository, pipelineRunKey string) (bool, LeaseID, error) {
+// Returns true if slot was acquired, false if concurrency limit reached.
+func (md *MemoryDriver) AcquireSlot(_ context.Context, repo *v1alpha1.Repository, pipelineRunKey string) (bool, LeaseID, error) {
 	if repo.Spec.ConcurrencyLimit == nil || *repo.Spec.ConcurrencyLimit == 0 {
 		// No concurrency limit, always allow
 		return true, 0, nil
@@ -170,7 +171,7 @@ func (md *MemoryDriver) AcquireSlot(ctx context.Context, repo *v1alpha1.Reposito
 }
 
 // countRunningSlots counts running slots for a repository at a given time
-// Must be called with md.mu held
+// Must be called with md.mu held.
 func (md *MemoryDriver) countRunningSlots(repoKey string, now time.Time) int {
 	count := 0
 	if repoSlots, exists := md.slots[repoKey]; exists {
@@ -183,13 +184,13 @@ func (md *MemoryDriver) countRunningSlots(repoKey string, now time.Time) int {
 	return count
 }
 
-// ReleaseSlot releases a concurrency slot.
-func (md *MemoryDriver) ReleaseSlot(ctx context.Context, leaseID LeaseID, pipelineRunKey, repoKey string) error {
+// ReleaseSlot releases a concurrency slot by removing the lease.
+func (md *MemoryDriver) ReleaseSlot(_ context.Context, leaseID LeaseID, pipelineRunKey, repoKey string) error {
 	md.mu.Lock()
 	defer md.mu.Unlock()
 
 	// Helper function to release slot by pipeline run key
-	releaseByKey := func() error {
+	releaseByKey := func() {
 		if repoSlots, exists := md.slots[repoKey]; exists {
 			if slot, exists := repoSlots[pipelineRunKey]; exists {
 				slotID := slot.id
@@ -201,16 +202,16 @@ func (md *MemoryDriver) ReleaseSlot(ctx context.Context, leaseID LeaseID, pipeli
 				}
 
 				md.logger.Infof("released concurrency slot for %s in repository %s (slot ID: %d)", pipelineRunKey, repoKey, slotID)
-				return nil
+				return
 			}
 		}
 		md.logger.Warnf("slot not found for release by pipeline key: repo=%s, pipeline=%s", repoKey, pipelineRunKey)
-		return nil
 	}
 
 	// If leaseID is nil, 0, or empty, find the slot by pipeline run key
 	if leaseID == nil {
-		return releaseByKey()
+		releaseByKey()
+		return nil
 	}
 
 	// Convert LeaseID to int for comparison
@@ -226,7 +227,8 @@ func (md *MemoryDriver) ReleaseSlot(ctx context.Context, leaseID LeaseID, pipeli
 
 	// If lease ID is 0, use key-based lookup
 	if slotID == 0 {
-		return releaseByKey()
+		releaseByKey()
+		return nil
 	}
 
 	// Find and remove the slot by lease ID
@@ -249,7 +251,7 @@ func (md *MemoryDriver) ReleaseSlot(ctx context.Context, leaseID LeaseID, pipeli
 }
 
 // GetCurrentSlots returns the current number of slots in use for a repository.
-func (md *MemoryDriver) GetCurrentSlots(ctx context.Context, repo *v1alpha1.Repository) (int, error) {
+func (md *MemoryDriver) GetCurrentSlots(_ context.Context, repo *v1alpha1.Repository) (int, error) {
 	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
 
 	md.mu.RLock()
@@ -270,7 +272,7 @@ func (md *MemoryDriver) GetCurrentSlots(ctx context.Context, repo *v1alpha1.Repo
 }
 
 // GetRunningPipelineRuns returns the list of currently running PipelineRuns for a repository.
-func (md *MemoryDriver) GetRunningPipelineRuns(ctx context.Context, repo *v1alpha1.Repository) ([]string, error) {
+func (md *MemoryDriver) GetRunningPipelineRuns(_ context.Context, repo *v1alpha1.Repository) ([]string, error) {
 	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
 
 	md.mu.RLock()
@@ -291,7 +293,7 @@ func (md *MemoryDriver) GetRunningPipelineRuns(ctx context.Context, repo *v1alph
 }
 
 // GetQueuedPipelineRuns returns the list of currently queued PipelineRuns for a repository.
-func (md *MemoryDriver) GetQueuedPipelineRuns(ctx context.Context, repo *v1alpha1.Repository) ([]string, error) {
+func (md *MemoryDriver) GetQueuedPipelineRuns(_ context.Context, repo *v1alpha1.Repository) ([]string, error) {
 	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
 
 	md.mu.RLock()
@@ -343,8 +345,8 @@ func (md *MemoryDriver) WatchSlotAvailability(ctx context.Context, repo *v1alpha
 	}()
 }
 
-// SetRepositoryState sets the overall state for a repository's concurrency.
-func (md *MemoryDriver) SetRepositoryState(ctx context.Context, repo *v1alpha1.Repository, state string) error {
+// SetRepositoryState sets the state of a repository.
+func (md *MemoryDriver) SetRepositoryState(_ context.Context, repo *v1alpha1.Repository, state string) error {
 	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
 
 	md.mu.Lock()
@@ -355,8 +357,8 @@ func (md *MemoryDriver) SetRepositoryState(ctx context.Context, repo *v1alpha1.R
 	return nil
 }
 
-// GetRepositoryState gets the overall state for a repository's concurrency.
-func (md *MemoryDriver) GetRepositoryState(ctx context.Context, repo *v1alpha1.Repository) (string, error) {
+// GetRepositoryState gets the state of a repository.
+func (md *MemoryDriver) GetRepositoryState(_ context.Context, repo *v1alpha1.Repository) (string, error) {
 	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
 
 	md.mu.RLock()
@@ -370,8 +372,8 @@ func (md *MemoryDriver) GetRepositoryState(ctx context.Context, repo *v1alpha1.R
 	return state, nil
 }
 
-// SetPipelineRunState sets the state for a specific PipelineRun.
-func (md *MemoryDriver) SetPipelineRunState(ctx context.Context, pipelineRunKey, state string, repo *v1alpha1.Repository) error {
+// SetPipelineRunState sets the state of a PipelineRun.
+func (md *MemoryDriver) SetPipelineRunState(_ context.Context, pipelineRunKey, state string, repo *v1alpha1.Repository) error {
 	md.mu.Lock()
 	defer md.mu.Unlock()
 
@@ -431,8 +433,8 @@ func (md *MemoryDriver) SetPipelineRunState(ctx context.Context, pipelineRunKey,
 	return nil
 }
 
-// GetPipelineRunState gets the state for a specific PipelineRun.
-func (md *MemoryDriver) GetPipelineRunState(ctx context.Context, pipelineRunKey string) (string, error) {
+// GetPipelineRunState gets the state of a PipelineRun.
+func (md *MemoryDriver) GetPipelineRunState(_ context.Context, pipelineRunKey string) (string, error) {
 	md.mu.RLock()
 	defer md.mu.RUnlock()
 
@@ -444,8 +446,8 @@ func (md *MemoryDriver) GetPipelineRunState(ctx context.Context, pipelineRunKey 
 	return state, nil
 }
 
-// CleanupRepository cleans up all memory state for a repository.
-func (md *MemoryDriver) CleanupRepository(ctx context.Context, repo *v1alpha1.Repository) error {
+// CleanupRepository removes all data for a repository.
+func (md *MemoryDriver) CleanupRepository(_ context.Context, repo *v1alpha1.Repository) error {
 	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
 
 	md.mu.Lock()

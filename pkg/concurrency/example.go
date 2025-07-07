@@ -152,7 +152,7 @@ func ExampleMemoryUsage() {
 	}
 }
 
-// ExampleQueueManagerUsage demonstrates how to use the queue manager
+// ExampleQueueManagerUsage demonstrates how to use the queue manager.
 func ExampleQueueManagerUsage() {
 	logger, _ := zap.NewDevelopment()
 	sugar := logger.Sugar()

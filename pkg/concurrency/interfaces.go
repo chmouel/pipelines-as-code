@@ -7,11 +7,11 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 )
 
-// LeaseID represents a unique identifier for a concurrency slot lease
+// LeaseID represents a unique identifier for a concurrency slot lease.
 type LeaseID interface{}
 
-// ConcurrencyDriver defines the interface for concurrency control implementations
-type ConcurrencyDriver interface {
+// ConcurrencyDriver defines the interface for concurrency control implementations.
+type Driver interface {
 	// AcquireSlot tries to acquire a concurrency slot for a PipelineRun
 	// Returns (success, leaseID, error)
 	AcquireSlot(ctx context.Context, repo *v1alpha1.Repository, pipelineRunKey string) (bool, LeaseID, error)
@@ -50,7 +50,7 @@ type ConcurrencyDriver interface {
 	Close() error
 }
 
-// QueueManager defines the interface for queue management
+// QueueManager defines the interface for queue management.
 type QueueManager interface {
 	// InitQueues initializes queues for all repositories
 	InitQueues(ctx context.Context, tektonClient, pacClient interface{}) error
@@ -83,7 +83,7 @@ type QueueManager interface {
 	SetupWatcher(ctx context.Context, repo *v1alpha1.Repository, callback func())
 }
 
-// DriverConfig holds configuration for concurrency drivers
+// DriverConfig holds configuration for concurrency drivers.
 type DriverConfig struct {
 	// Driver type: "etcd", "postgresql", "memory"
 	Driver string
@@ -94,7 +94,7 @@ type DriverConfig struct {
 	MemoryConfig     *MemoryConfig
 }
 
-// EtcdConfig holds etcd-specific configuration
+// EtcdConfig holds etcd-specific configuration.
 type EtcdConfig struct {
 	Endpoints   []string
 	DialTimeout time.Duration
@@ -104,7 +104,7 @@ type EtcdConfig struct {
 	Mode        string // "memory", "mock", or "etcd"
 }
 
-// PostgreSQLConfig holds PostgreSQL-specific configuration
+// PostgreSQLConfig holds PostgreSQL-specific configuration.
 type PostgreSQLConfig struct {
 	Host              string
 	Port              int
@@ -117,12 +117,12 @@ type PostgreSQLConfig struct {
 	LeaseTTL          time.Duration
 }
 
-// MemoryConfig holds in-memory driver configuration
+// MemoryConfig holds in-memory driver configuration.
 type MemoryConfig struct {
 	LeaseTTL time.Duration
 }
 
-// TLSConfig holds TLS configuration
+// TLSConfig holds TLS configuration.
 type TLSConfig struct {
 	CertFile   string
 	KeyFile    string

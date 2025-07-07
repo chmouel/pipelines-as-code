@@ -7,7 +7,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/concurrency"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/etcd"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/generated/injection/informers/pipelinesascode/v1alpha1/repository"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
@@ -60,17 +59,6 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 		}
 		log.Infof("Initialized concurrency system with driver: %s", concurrencyManager.GetDriverType())
 
-		var etcdStateManager *etcd.StateManager
-		if concurrencyManager.GetDriverType() == "etcd" {
-			etcdConfig, err := etcd.LoadConfigFromSettings(settingsMap)
-			if err == nil && etcdConfig.Enabled {
-				etcdClient, err := etcd.NewClientFromSettings(settingsMap, run.Clients.Log)
-				if err == nil {
-					etcdStateManager = etcd.NewStateManager(etcdClient, run.Clients.Log)
-				}
-			}
-		}
-
 		r := &Reconciler{
 			run:                run,
 			kinteract:          kinteract,
@@ -78,7 +66,6 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 			repoLister:         repository.Get(ctx).Lister(),
 			metrics:            metrics,
 			eventEmitter:       events.NewEventEmitter(run.Clients.Kube, run.Clients.Log),
-			etcdStateManager:   etcdStateManager,
 			concurrencyManager: concurrencyManager,
 		}
 		impl := tektonPipelineRunReconcilerv1.NewImpl(ctx, r, ctrlOpts())

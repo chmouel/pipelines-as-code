@@ -50,13 +50,13 @@ func (TestQMI) RemoveAndTakeItemFromQueue(_ *pacv1alpha1.Repository, _ *tektonv1
 	panic("implement me")
 }
 
-// TestConcurrencyManager is a test implementation of the concurrency manager
+// TestConcurrencyManager is a test implementation of the concurrency manager.
 type TestConcurrencyManager struct {
 	driverType   string
 	queueManager concurrency.QueueManager
 }
 
-// NewTestConcurrencyManager creates a new test concurrency manager
+// NewTestConcurrencyManager creates a new test concurrency manager.
 func NewTestConcurrencyManager() *TestConcurrencyManager {
 	return &TestConcurrencyManager{
 		driverType:   "test",
@@ -76,87 +76,105 @@ func (t *TestConcurrencyManager) Close() error {
 	return nil
 }
 
-// TestQueueManager is a test implementation of the queue manager
+// TestQueueManager is a test implementation of the queue manager.
 type TestQueueManager struct{}
 
-func (t *TestQueueManager) AcquireSlot(ctx context.Context, repo *pacv1alpha1.Repository, pipelineRunName string) (bool, concurrency.LeaseID, error) {
-	// Always succeed for testing
-	leaseID := "test-lease-1"
-	return true, leaseID, nil
+// AcquireSlot tries to acquire a concurrency slot for a PipelineRun in a repository.
+func (t *TestQueueManager) AcquireSlot(_ context.Context, _ *pacv1alpha1.Repository, _ string) (bool, concurrency.LeaseID, error) {
+	return true, 1, nil
 }
 
-func (t *TestQueueManager) ReleaseSlot(ctx context.Context, leaseID concurrency.LeaseID, pipelineRunName, repoKey string) error {
+// ReleaseSlot releases a concurrency slot.
+func (t *TestQueueManager) ReleaseSlot(_ context.Context, _ concurrency.LeaseID, _, _ string) error {
 	return nil
 }
 
-func (t *TestQueueManager) GetCurrentSlots(ctx context.Context, repo *pacv1alpha1.Repository) (int, error) {
+// GetCurrentSlots returns the current number of slots in use for a repository.
+func (t *TestQueueManager) GetCurrentSlots(_ context.Context, _ *pacv1alpha1.Repository) (int, error) {
 	return 0, nil
 }
 
-func (t *TestQueueManager) GetRunningPipelineRuns(ctx context.Context, repo *pacv1alpha1.Repository) ([]string, error) {
+// GetRunningPipelineRuns returns the list of currently running PipelineRuns for a repository.
+func (t *TestQueueManager) GetRunningPipelineRuns(_ context.Context, _ *pacv1alpha1.Repository) ([]string, error) {
 	return []string{}, nil
 }
 
-func (t *TestQueueManager) WatchSlotAvailability(ctx context.Context, repo *pacv1alpha1.Repository, callback func()) {
+// WatchSlotAvailability watches for slot availability changes.
+func (t *TestQueueManager) WatchSlotAvailability(_ context.Context, _ *pacv1alpha1.Repository, _ func()) {
 	// No-op for testing
 }
 
-func (t *TestQueueManager) SetRepositoryState(ctx context.Context, repo *pacv1alpha1.Repository, state string) error {
+// SetRepositoryState sets the state of a repository.
+func (t *TestQueueManager) SetRepositoryState(_ context.Context, _ *pacv1alpha1.Repository, _ string) error {
 	return nil
 }
 
-func (t *TestQueueManager) GetRepositoryState(ctx context.Context, repo *pacv1alpha1.Repository) (string, error) {
+// GetRepositoryState gets the state of a repository.
+func (t *TestQueueManager) GetRepositoryState(_ context.Context, _ *pacv1alpha1.Repository) (string, error) {
 	return "", nil
 }
 
-func (t *TestQueueManager) SetPipelineRunState(ctx context.Context, pipelineRunKey, state string) error {
+// SetPipelineRunState sets the state of a PipelineRun.
+func (t *TestQueueManager) SetPipelineRunState(_ context.Context, _, _ string) error {
 	return nil
 }
 
-func (t *TestQueueManager) GetPipelineRunState(ctx context.Context, pipelineRunKey string) (string, error) {
+// GetPipelineRunState gets the state of a PipelineRun.
+func (t *TestQueueManager) GetPipelineRunState(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
 
-func (t *TestQueueManager) CleanupRepository(ctx context.Context, repo *pacv1alpha1.Repository) error {
+// CleanupRepository removes all data for a repository.
+func (t *TestQueueManager) CleanupRepository(_ context.Context, _ *pacv1alpha1.Repository) error {
 	return nil
 }
 
-func (t *TestQueueManager) InitQueues(ctx context.Context, tektonClient, pacClient interface{}) error {
+// InitQueues initializes the queue manager.
+func (t *TestQueueManager) InitQueues(_ context.Context, _, _ interface{}) error {
 	return nil
 }
 
-func (t *TestQueueManager) RemoveRepository(repo *pacv1alpha1.Repository) {
+// RemoveRepository removes a repository from the queue manager.
+func (t *TestQueueManager) RemoveRepository(_ *pacv1alpha1.Repository) {
 	// No-op for testing
 }
 
-func (t *TestQueueManager) QueuedPipelineRuns(repo *pacv1alpha1.Repository) []string {
+// QueuedPipelineRuns returns the list of queued PipelineRuns for a repository.
+func (t *TestQueueManager) QueuedPipelineRuns(_ *pacv1alpha1.Repository) []string {
 	return []string{}
 }
 
-func (t *TestQueueManager) RunningPipelineRuns(repo *pacv1alpha1.Repository) []string {
+// RunningPipelineRuns returns the list of running PipelineRuns for a repository.
+func (t *TestQueueManager) RunningPipelineRuns(_ *pacv1alpha1.Repository) []string {
 	return []string{}
 }
 
-func (t *TestQueueManager) AddListToRunningQueue(repo *pacv1alpha1.Repository, list []string) ([]string, error) {
+// AddListToRunningQueue adds a list of PipelineRuns to the running queue.
+func (t *TestQueueManager) AddListToRunningQueue(_ *pacv1alpha1.Repository, list []string) ([]string, error) {
 	return list, nil
 }
 
-func (t *TestQueueManager) AddToPendingQueue(repo *pacv1alpha1.Repository, list []string) error {
+// AddToPendingQueue adds a list of PipelineRuns to the pending queue.
+func (t *TestQueueManager) AddToPendingQueue(_ *pacv1alpha1.Repository, _ []string) error {
 	return nil
 }
 
-func (t *TestQueueManager) RemoveFromQueue(repoKey, prKey string) bool {
+// RemoveFromQueue removes a PipelineRun from the queue.
+func (t *TestQueueManager) RemoveFromQueue(_, _ string) bool {
 	return true
 }
 
-func (t *TestQueueManager) RemoveAndTakeItemFromQueue(repo *pacv1alpha1.Repository, run interface{}) string {
+// RemoveAndTakeItemFromQueue removes and takes an item from the queue.
+func (t *TestQueueManager) RemoveAndTakeItemFromQueue(_ *pacv1alpha1.Repository, _ interface{}) string {
 	return ""
 }
 
-func (t *TestQueueManager) TryAcquireSlot(ctx context.Context, repo *pacv1alpha1.Repository, prKey string) (bool, concurrency.LeaseID, error) {
-	return true, "test-lease", nil
+// TryAcquireSlot tries to acquire a concurrency slot.
+func (t *TestQueueManager) TryAcquireSlot(_ context.Context, _ *pacv1alpha1.Repository, _ string) (bool, concurrency.LeaseID, error) {
+	return true, 1, nil
 }
 
-func (t *TestQueueManager) SetupWatcher(ctx context.Context, repo *pacv1alpha1.Repository, callback func()) {
+// SetupWatcher sets up a watcher for slot availability.
+func (t *TestQueueManager) SetupWatcher(_ context.Context, _ *pacv1alpha1.Repository, _ func()) {
 	// No-op for testing
 }

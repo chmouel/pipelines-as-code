@@ -11,15 +11,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// PostgreSQLDriver implements ConcurrencyDriver using PostgreSQL
+// PostgreSQLDriver implements Driver using PostgreSQL.
 type PostgreSQLDriver struct {
 	db     *sql.DB
 	config *PostgreSQLConfig
 	logger *zap.SugaredLogger
 }
 
-// NewPostgreSQLDriver creates a new PostgreSQL-based concurrency driver
-func NewPostgreSQLDriver(config *PostgreSQLConfig, logger *zap.SugaredLogger) (ConcurrencyDriver, error) {
+// NewPostgreSQLDriver creates a new PostgreSQL-based concurrency driver.
+func NewPostgreSQLDriver(config *PostgreSQLConfig, logger *zap.SugaredLogger) (Driver, error) {
 	// Build connection string
 	connStr := fmt.Sprintf("host=%s port=%d dbname=%s user=%s password=%s sslmode=%s connect_timeout=%d",
 		config.Host, config.Port, config.Database, config.Username, config.Password,
@@ -36,7 +36,7 @@ func NewPostgreSQLDriver(config *PostgreSQLConfig, logger *zap.SugaredLogger) (C
 	db.SetConnMaxLifetime(time.Hour)
 
 	// Test connection
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(context.Background()); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
@@ -56,7 +56,7 @@ func NewPostgreSQLDriver(config *PostgreSQLConfig, logger *zap.SugaredLogger) (C
 	return driver, nil
 }
 
-// initSchema creates the necessary database tables
+// initSchema creates the necessary database tables.
 func (pd *PostgreSQLDriver) initSchema() error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS concurrency_slots (
@@ -90,7 +90,7 @@ func (pd *PostgreSQLDriver) initSchema() error {
 	}
 
 	for _, query := range queries {
-		if _, err := pd.db.Exec(query); err != nil {
+		if _, err := pd.db.ExecContext(context.Background(), query); err != nil {
 			return fmt.Errorf("failed to execute schema query: %w", err)
 		}
 	}
@@ -101,17 +101,17 @@ func (pd *PostgreSQLDriver) initSchema() error {
 	return nil
 }
 
-// cleanupExpiredLeases periodically removes expired concurrency slots
+// cleanupExpiredLeases periodically removes expired concurrency slots.
 func (pd *PostgreSQLDriver) cleanupExpiredLeases() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
 
 		query := `DELETE FROM concurrency_slots WHERE expires_at < NOW()`
 		result, err := pd.db.ExecContext(ctx, query)
+		cancel() // Call cancel immediately after use
 		if err != nil {
 			pd.logger.Errorf("failed to cleanup expired leases: %v", err)
 			continue

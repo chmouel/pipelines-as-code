@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// PriorityQueueItem represents an item in the priority queue
+// PriorityQueueItem represents an item in the priority queue.
 type PriorityQueueItem struct {
 	Key          string
 	CreationTime time.Time
@@ -13,13 +13,13 @@ type PriorityQueueItem struct {
 	index        int
 }
 
-// PriorityQueue implements a priority queue for pipeline run keys
+// PriorityQueue implements a priority queue for pipeline run keys.
 type PriorityQueue struct {
 	items     []*PriorityQueueItem
 	itemByKey map[string]*PriorityQueueItem
 }
 
-// NewPriorityQueue creates a new priority queue
+// NewPriorityQueue creates a new priority queue.
 func NewPriorityQueue() *PriorityQueue {
 	return &PriorityQueue{
 		items:     make([]*PriorityQueueItem, 0),
@@ -27,7 +27,7 @@ func NewPriorityQueue() *PriorityQueue {
 	}
 }
 
-// Add adds an item to the priority queue with the given creation time as priority
+// Add adds an item to the priority queue with the given creation time as priority.
 func (pq *PriorityQueue) Add(key string, creationTime time.Time) {
 	if _, exists := pq.itemByKey[key]; exists {
 		return // Item already exists
@@ -41,7 +41,7 @@ func (pq *PriorityQueue) Add(key string, creationTime time.Time) {
 	heap.Push(pq, item)
 }
 
-// Remove removes an item from the priority queue
+// Remove removes an item from the priority queue.
 func (pq *PriorityQueue) Remove(key string) {
 	if item, exists := pq.itemByKey[key]; exists {
 		heap.Remove(pq, item.index)
@@ -49,7 +49,7 @@ func (pq *PriorityQueue) Remove(key string) {
 	}
 }
 
-// PopItem removes and returns the highest priority item
+// PopItem removes and returns the highest priority item.
 func (pq *PriorityQueue) PopItem() *PriorityQueueItem {
 	if len(pq.items) == 0 {
 		return nil
@@ -62,7 +62,7 @@ func (pq *PriorityQueue) PopItem() *PriorityQueueItem {
 	return item
 }
 
-// Peek returns the highest priority item without removing it
+// Peek returns the highest priority item without removing it.
 func (pq *PriorityQueue) Peek() *PriorityQueueItem {
 	if len(pq.items) == 0 {
 		return nil
@@ -70,13 +70,13 @@ func (pq *PriorityQueue) Peek() *PriorityQueueItem {
 	return pq.items[0]
 }
 
-// Contains checks if an item exists in the queue
+// Contains checks if an item exists in the queue.
 func (pq *PriorityQueue) Contains(key string) bool {
 	_, exists := pq.itemByKey[key]
 	return exists
 }
 
-// GetPendingItems returns all pending items as a slice of keys
+// GetPendingItems returns all pending items as a slice of keys.
 func (pq *PriorityQueue) GetPendingItems() []string {
 	keys := make([]string, 0, len(pq.items))
 	for _, item := range pq.items {
@@ -85,12 +85,12 @@ func (pq *PriorityQueue) GetPendingItems() []string {
 	return keys
 }
 
-// Len returns the number of items in the queue
+// Len returns the number of items in the queue.
 func (pq *PriorityQueue) Len() int {
 	return len(pq.items)
 }
 
-// heap.Interface implementation
+// heap.Interface implementation.
 func (pq *PriorityQueue) Less(i, j int) bool {
 	return pq.items[i].priority < pq.items[j].priority
 }

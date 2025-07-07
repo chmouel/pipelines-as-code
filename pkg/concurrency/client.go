@@ -1,10 +1,10 @@
-package etcd
+package concurrency
 
 import (
 	"context"
 	"time"
 
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/etcd/test"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/concurrency/test"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -45,13 +45,6 @@ type Config struct {
 	TLSConfig   *TLSConfig
 	Enabled     bool
 	Mode        string // "memory", "mock", or "etcd"
-}
-
-type TLSConfig struct {
-	CertFile   string
-	KeyFile    string
-	CAFile     string
-	ServerName string
 }
 
 // etcdClient implements the Client interface.

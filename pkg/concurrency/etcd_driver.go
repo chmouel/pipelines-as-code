@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/etcd"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -20,25 +19,25 @@ const (
 	defaultLeaseTTL = 3600 // 1 hour
 )
 
-// EtcdDriver implements ConcurrencyDriver using etcd
+// EtcdDriver implements Driver using etcd.
 type EtcdDriver struct {
-	client etcd.Client
+	client Client
 	logger *zap.SugaredLogger
 }
 
-// NewEtcdDriver creates a new etcd-based concurrency driver
-func NewEtcdDriver(config *EtcdConfig, logger *zap.SugaredLogger) (ConcurrencyDriver, error) {
-	etcdConfig := &etcd.Config{
+// NewEtcdDriver creates a new etcd-based concurrency driver.
+func NewEtcdDriver(config *EtcdConfig, logger *zap.SugaredLogger) (Driver, error) {
+	etcdConfig := &Config{
 		Endpoints:   config.Endpoints,
 		DialTimeout: config.DialTimeout,
 		Username:    config.Username,
 		Password:    config.Password,
-		TLSConfig:   convertTLSConfig(config.TLSConfig),
+		TLSConfig:   config.TLSConfig,
 		Enabled:     true,
 		Mode:        config.Mode,
 	}
 
-	client, err := etcd.NewClient(etcdConfig, logger)
+	client, err := NewClient(etcdConfig, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create etcd client: %w", err)
 	}
@@ -47,19 +46,6 @@ func NewEtcdDriver(config *EtcdConfig, logger *zap.SugaredLogger) (ConcurrencyDr
 		client: client,
 		logger: logger,
 	}, nil
-}
-
-// convertTLSConfig converts our TLSConfig to etcd.TLSConfig
-func convertTLSConfig(tls *TLSConfig) *etcd.TLSConfig {
-	if tls == nil {
-		return nil
-	}
-	return &etcd.TLSConfig{
-		CertFile:   tls.CertFile,
-		KeyFile:    tls.KeyFile,
-		CAFile:     tls.CAFile,
-		ServerName: tls.ServerName,
-	}
 }
 
 // AcquireSlot tries to acquire a concurrency slot for a PipelineRun in a repository.
@@ -352,7 +338,7 @@ func (ed *EtcdDriver) Close() error {
 	return ed.client.Close()
 }
 
-// Helper functions for pipeline run key management
+// Helper functions for pipeline run key management.
 func PipelineRunKey(namespace, name string) string {
 	return fmt.Sprintf("%s/%s", namespace, name)
 }
