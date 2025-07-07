@@ -45,7 +45,7 @@ graph TD
 ### Key Features of etcd-based Approach
 
 - **Atomic Operations**: Lease acquisition is atomic, preventing race conditions
-- **Automatic Cleanup**: Leases expire if controller crashes, preventing deadlocks  
+- **Automatic Cleanup**: Leases expire if controller crashes, preventing deadlocks
 - **Event-driven**: etcd watches trigger reconciliation when slots become available
 - **Distributed**: Works across multiple controller instances
 - **No Queue State**: Eliminates complex queue serialization and persistence
@@ -155,7 +155,7 @@ etcdctl --endpoints=$ETCD_ENDPOINTS lease list
 Monitor these metrics:
 
 - etcd lease count per repository
-- Lease acquisition/release rates  
+- Lease acquisition/release rates
 - etcd response times
 - Queue wait times (from state transitions)
 

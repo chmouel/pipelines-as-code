@@ -13,7 +13,8 @@ data:
   # etcd configuration (when using etcd driver)
   etcd-endpoints: "localhost:2379"
   etcd-dial-timeout: "5s"
-  etcd-mode: "etcd" # "etcd", "mock", or "memory"
+  # "etcd", "mock", or "memory"
+  etcd-mode: "etcd"
   # etcd-username: "etcd_user"
   # etcd-password: "etcd_password"
   # etcd-cert-file: "/path/to/cert.pem"

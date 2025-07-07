@@ -12,7 +12,7 @@ import (
 	tektonv1lister "github.com/tektoncd/pipeline/pkg/client/listers/pipeline/v1"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	knative "knative.dev/pkg/logging"
+	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
 	"knative.dev/pkg/system"
 
@@ -31,7 +31,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	pac "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
-	"knative.dev/pkg/logging"
 )
 
 // Reconciler implements controller.Reconciler for PipelineRun resources.
@@ -60,7 +59,7 @@ var (
 // ReconcileKind is the main entry point for reconciling PipelineRun resources.
 func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun) pkgreconciler.Event {
 	ctx = info.StoreNS(ctx, system.Namespace())
-	logger := knative.FromContext(ctx).With("namespace", pr.GetNamespace())
+	logger := logging.FromContext(ctx).With("namespace", pr.GetNamespace())
 	// if pipelineRun is in completed or failed state then return
 	state, exist := pr.GetAnnotations()[keys.State]
 	if exist && (state == kubeinteraction.StateCompleted || state == kubeinteraction.StateFailed) {

@@ -351,61 +351,8 @@ func (pd *PostgreSQLDriver) GetQueuedPipelineRunsWithTimestamps(ctx context.Cont
 // WatchSlotAvailability watches for slot availability changes in a repository.
 // Uses optimized polling with exponential backoff when no changes are detected.
 func (pd *PostgreSQLDriver) WatchSlotAvailability(ctx context.Context, repo *v1alpha1.Repository, callback func()) {
-	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
-
-	go func() {
-		// Start with shorter polling interval for responsiveness
-		initialInterval := 2 * time.Second
-		maxInterval := 30 * time.Second
-		currentInterval := initialInterval
-
-		ticker := time.NewTicker(currentInterval)
-		defer ticker.Stop()
-
-		lastCount := -1
-		consecutiveNoChanges := 0
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				count, err := pd.GetCurrentSlots(ctx, repo)
-				if err != nil {
-					pd.logger.Errorf("failed to get current slots for watching: %v", err)
-					continue
-				}
-
-				if lastCount != -1 && count < lastCount {
-					// A slot was released - trigger callback and reset to fast polling
-					pd.logger.Debugf("slot released in repository %s (count: %d -> %d), triggering callback", repoKey, lastCount, count)
-					callback()
-
-					// Reset to fast polling after detecting change
-					currentInterval = initialInterval
-					consecutiveNoChanges = 0
-					ticker.Reset(currentInterval)
-				} else if lastCount == count {
-					// No change detected - gradually increase polling interval
-					consecutiveNoChanges++
-					if consecutiveNoChanges >= 3 && currentInterval < maxInterval {
-						// Exponential backoff: double the interval up to max
-						currentInterval = time.Duration(float64(currentInterval) * 1.5)
-						if currentInterval > maxInterval {
-							currentInterval = maxInterval
-						}
-						ticker.Reset(currentInterval)
-						pd.logger.Debugf("no changes detected for repository %s, increased polling interval to %v", repoKey, currentInterval)
-					}
-				} else {
-					// Count changed (but not decreased) - reset backoff
-					consecutiveNoChanges = 0
-				}
-
-				lastCount = count
-			}
-		}
-	}()
+	config := DefaultPostgreSQLWatcherConfig()
+	AdaptiveWatcher(ctx, repo, callback, pd, config, pd.logger)
 }
 
 // SetRepositoryState sets the overall state for a repository's concurrency.

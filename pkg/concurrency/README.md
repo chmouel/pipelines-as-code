@@ -17,598 +17,556 @@ This package provides a state-based concurrency control system for Pipelines-as-
 
 ## Overview
 
-The concurrency system replaces the legacy annotation-based approach with a state-based system that:
+The concurrency system replaces the legacy annotation-based approach with a robust state-based solution that:
 
-- **Manages execution order**: Uses FIFO queues to ensure PipelineRuns execute in creation order
-- **Enforces concurrency limits**: Prevents more PipelineRuns from running than the repository's limit
-- **Provides persistence**: Survives controller restarts with etcd/PostgreSQL drivers
-- **Handles failures gracefully**: Automatic cleanup and recovery mechanisms
-- **Supports multiple backends**: Memory (testing), etcd (production), PostgreSQL (enterprise)
+- **Enforces FIFO ordering** of PipelineRuns within repositories
+- **Manages concurrency limits** per repository
+- **Persists state** across controller restarts (etcd/PostgreSQL drivers)
+- **Provides event-driven processing** via watchers
+- **Supports multiple backends** for different deployment scenarios
 
 ## Architecture
 
+```mermaid
+graph TD
+    A[PipelineRun Created] --> B[Reconciler]
+    B --> C[Concurrency Manager]
+    C --> D[Queue Manager]
+    C --> E[Driver]
+    
+    D --> F[Priority Queue]
+    E --> G[Memory/etcd/PostgreSQL]
+    
+    H[Watcher] --> I[Slot Available Event]
+    I --> J[Process Queued PRs]
+    J --> B
+    
+    style C fill:#e1f5fe
+    style E fill:#fff3e0
+    style H fill:#e8f5e8
+```
+
 ### Core Components
 
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Reconciler    │    │   Concurrency    │    │     Driver      │
-│                 │    │     Manager      │    │                 │
-│ - PipelineRun   │───▶│ - Orchestrates   │───▶│ - etcd          │
-│   lifecycle     │    │   slot mgmt      │    │ - PostgreSQL    │
-│ - State updates │    │ - Queue mgmt     │    │ - Memory        │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌──────────────────┐
-                       │   Queue Manager  │
-                       │                 │
-                       │ - FIFO queues   │
-                       │ - State sync    │
-                       │ - Watchers      │
-                       └──────────────────┘
-```
-
-### Key Interfaces
-
-- **`Driver`**: Abstract interface for backend storage (etcd, PostgreSQL, memory)
-- **`QueueManager`**: Manages in-memory queues and state synchronization
-- **`Manager`**: Coordinates between drivers and queue managers
+1. **Manager**: Main interface that orchestrates concurrency control
+2. **QueueManager**: Manages in-memory FIFO queues per repository  
+3. **Driver**: Persistent backend (memory/etcd/PostgreSQL)
+4. **Watcher**: Event-driven notifications when slots become available
 
 ## Integration Points
 
-### 1. Controller Initialization
+### Controller Integration
 
-The concurrency system is initialized in the controller startup:
+The concurrency system integrates with the Pipelines-as-Code controller at several key points:
 
-```go
-// pkg/reconciler/controller.go:55
-concurrencyManager, err := concurrency.CreateManagerFromSettings(settingsMap, run.Clients.Log)
-if err != nil {
-    log.Fatalf("Failed to initialize concurrency system: %v", err)
-}
+1. **Controller Initialization** (`pkg/reconciler/controller.go`):
 
-r := &Reconciler{
-    // ... other fields
-    concurrencyManager: concurrencyManager,
-}
+   ```go
+   // Initialize the concurrency system
+   pacSettings := run.Info.GetPacOpts()
+   settingsMap := settings.ConvertPacStructToConfigMap(&pacSettings.Settings)
+   concurrencyManager, err := concurrency.CreateManagerFromSettings(settingsMap, run.Clients.Log)
+   if err != nil {
+       log.Fatalf("Failed to initialize concurrency system: %v", err)
+   }
+   
+   // Set up reconciler with concurrency support
+   r := &Reconciler{
+       concurrencyManager: concurrencyManager,
+       activeLeases:       make(map[string]concurrency.LeaseID),
+   }
+   
+   // Initialize queues and set up watchers
+   if err := concurrencyManager.GetQueueManager().InitQueues(ctx, run.Clients.Tekton, run.Clients.PipelineAsCode); err != nil {
+       log.Fatal("failed to init queues", err)
+   }
+   ```
 
-// Initialize queues and recover state
-if err := concurrencyManager.GetQueueManager().InitQueues(ctx, run.Clients.Tekton, run.Clients.PipelineAsCode); err != nil {
-    log.Fatal("failed to init queues", err)
-}
-```
+2. **PipelineRun Processing** (`pkg/reconciler/reconciler.go`):
 
-### 2. PipelineRun Lifecycle Integration
+   ```go
+   // For queued PipelineRuns
+   if state == kubeinteraction.StateQueued && pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
+       return r.queuePipelineRun(ctx, logger, pr)
+   }
+   
+   // For completed PipelineRuns  
+   if pr.IsDone() || pr.IsCancelled() {
+       return r.reportFinalStatus(ctx, logger, &pacInfo, event, pr, detectedProvider)
+   }
+   ```
 
-The reconciler integrates concurrency control at key PipelineRun lifecycle points:
+3. **Finalizer Integration** (`pkg/reconciler/finalizer.go`):
 
-#### PipelineRun Creation (Queued State)
+   ```go
+   // Release slots when PipelineRuns are deleted
+   prKey := fmt.Sprintf("%s/%s", pr.Namespace, pr.Name)
+   repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+   
+   // Get the lease ID for proper release
+   r.leaseMutex.RLock()
+   leaseID, hasLease := r.activeLeases[prKey]
+   r.leaseMutex.RUnlock()
+   
+   if err := r.concurrencyManager.ReleaseSlot(ctx, leaseID, prKey, repoKey); err != nil {
+       logger.Warnf("failed to release concurrency slot for %s: %v", prKey, err)
+   }
+   ```
 
-```go
-// pkg/reconciler/reconciler.go:389-395
-func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) error {
-    // Add to pending queue
-    if err := r.concurrencyManager.GetQueueManager().AddToPendingQueue(repo, []string{prKey}); err != nil {
-        return err
-    }
-    
-    // Try to acquire slot
-    success, _, err := r.concurrencyManager.AcquireSlot(ctx, repo, prKey)
-    if success {
-        // Promote to running
-        return r.updatePipelineRunToInProgress(ctx, logger, repo, pr)
-    }
-    // Remain queued
-    return nil
-}
-```
+4. **Watcher Setup** (`pkg/reconciler/controller.go`):
 
-#### PipelineRun Completion (Slot Release)
-
-```go
-// pkg/reconciler/reconciler.go:222-258
-// Release concurrency slot and process next queued PipelineRun
-if r.concurrencyManager != nil {
-    prKey := fmt.Sprintf("%s/%s", pr.Namespace, pr.Name)
-    repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
-
-    // Release the slot for the completed PipelineRun
-    if err := r.concurrencyManager.ReleaseSlot(ctx, nil, prKey, repoKey); err != nil {
-        logger.Errorf("failed to release concurrency slot for %s: %v", prKey, err)
-    }
-
-    // Check if there are queued PipelineRuns that can now start
-    queuedPRs := r.concurrencyManager.GetQueueManager().QueuedPipelineRuns(repo)
-    if len(queuedPRs) > 0 {
-        // Try to start the next queued PipelineRun
-        for _, nextPRKey := range queuedPRs {
-            success, _, err := r.concurrencyManager.AcquireSlot(ctx, repo, nextPRKey)
-            if success {
-                // Start the PipelineRun
-                break
-            }
-        }
-    }
-}
-```
-
-### 3. Repository Cleanup
-
-The finalizer cleans up concurrency state when repositories are deleted:
-
-```go
-// pkg/reconciler/finalizer.go:32-33
-if r.concurrencyManager != nil {
-    if err := r.concurrencyManager.CleanupRepository(ctx, &v1alpha1.Repository{
-        ObjectMeta: metav1.ObjectMeta{
-            Namespace: repo.Namespace,
-            Name:      repo.Name,
-        },
-    }); err != nil {
-        logger.Errorf("failed to cleanup concurrency state: %v", err)
-    }
-}
-```
+   ```go
+   // Set up watchers for all repositories to enable event-driven processing
+   go func() {
+       driver := concurrencyManager.GetDriver()
+       repos, err := driver.GetAllRepositoriesWithState(ctx)
+       if err != nil {
+           log.Errorf("Failed to get repositories for watchers: %v", err)
+           return
+       }
+   
+       for _, repo := range repos {
+           concurrencyManager.GetQueueManager().SetupWatcher(ctx, repo, func() {
+               r.processQueuedPipelineRuns(ctx, repo)
+           })
+       }
+   }()
+   ```
 
 ## Call Flow
 
-### 1. PipelineRun Creation Flow
+### PipelineRun Creation Flow
 
-```
-1. Webhook receives push/PR event
-   ↓
-2. Reconciler creates PipelineRun with "queued" state
-   ↓
-3. queuePipelineRun() called
-   ↓
-4. AddToPendingQueue() - adds to in-memory queue
-   ↓
-5. AcquireSlot() - tries to get concurrency slot
-   ↓
-6a. Success: updatePipelineRunToInProgress() - starts execution
-   ↓
-6b. Failure: PipelineRun remains queued
-```
+```mermaid
+sequenceDiagram
+    participant PR as PipelineRun
+    participant R as Reconciler  
+    participant CM as ConcurrencyManager
+    participant QM as QueueManager
+    participant D as Driver
+    participant W as Watcher
 
-### 2. PipelineRun Completion Flow
-
-```
-1. PipelineRun completes (success/failure)
-   ↓
-2. Reconciler detects completion
-   ↓
-3. ReleaseSlot() - releases concurrency slot
-   ↓
-4. QueuedPipelineRuns() - gets queued PipelineRuns
-   ↓
-5. For each queued PipelineRun:
-   ↓
-6. AcquireSlot() - tries to acquire slot
-   ↓
-7. Success: updatePipelineRunToInProgress() - starts execution
+    PR->>R: Created (state=queued)
+    R->>QM: AddToPendingQueue()
+    QM->>D: SetPipelineRunState(queued)
+    R->>CM: AcquireSlot()
+    CM->>D: AcquireSlot()
+    
+    alt Slot Available
+        D-->>CM: success=true, leaseID
+        CM-->>R: success=true, leaseID
+        R->>R: Store leaseID, Update to running
+    else Slot Unavailable  
+        D-->>CM: success=false
+        CM-->>R: success=false
+        R->>R: Remain queued
+    end
 ```
 
-### 3. State Recovery Flow (After Restart)
+### PipelineRun Completion Flow
 
+```mermaid
+sequenceDiagram
+    participant PR as PipelineRun
+    participant R as Reconciler
+    participant CM as ConcurrencyManager
+    participant D as Driver
+    participant W as Watcher
+    participant QM as QueueManager
+
+    PR->>R: Completed
+    R->>CM: ReleaseSlot(leaseID)
+    CM->>D: ReleaseSlot(leaseID)
+    D->>W: Trigger slot available event
+    W->>R: processQueuedPipelineRuns()
+    R->>QM: QueuedPipelineRuns()
+    QM-->>R: [nextPR]
+    R->>CM: AcquireSlot(nextPR)
+    CM->>D: AcquireSlot(nextPR)
+    D-->>CM: success=true, leaseID
+    R->>R: Update nextPR to running
 ```
-1. Controller starts
-   ↓
-2. CreateManagerFromSettings() - creates manager with driver
-   ↓
-3. InitQueues() - initializes queue manager
-   ↓
-4. getAllRepositoriesWithState() - discovers repos with state
-   ↓
-5. For each repository:
-   ↓
-6. reconstructQueueFromState() - rebuilds in-memory queues
-   ↓
-7. System resumes normal operation
+
+### State Recovery Flow
+
+```mermaid
+sequenceDiagram
+    participant C as Controller
+    participant QM as QueueManager
+    participant D as Driver
+
+    C->>QM: InitQueues()
+    QM->>D: GetAllRepositoriesWithState()
+    D-->>QM: [repos with state]
+    
+    loop For each repository
+        QM->>QM: reconstructQueueFromState()
+        QM->>QM: ValidateStateConsistency()
+    end
 ```
 
 ## State Management
 
-### State Persistence
+### State Transitions
 
-The system maintains state across three layers:
+PipelineRuns progress through these states:
 
-1. **In-Memory Queues**: Fast access for current operations
-2. **Driver Storage**: Persistent state (etcd/PostgreSQL)
-3. **Kubernetes Resources**: PipelineRun states and annotations
+1. **Created** → `queued` (via reconciler)
+2. **Queued** → `running` (when slot acquired)  
+3. **Running** → `completed`/`failed` (when finished)
 
-### State Recovery
+### Persistent State
 
-After a controller restart:
+The system maintains state in the chosen driver:
 
-1. **Memory Driver**: All state is lost (expected behavior)
-2. **etcd Driver**: Reconstructs queues from etcd keys with timestamps
-3. **PostgreSQL Driver**: Reconstructs queues from database with creation times
+- **Memory Driver**: State lost on restart (testing only)
+- **etcd Driver**: State persisted in etcd cluster
+- **PostgreSQL Driver**: State persisted in database tables
 
-### State Synchronization
+### State Consistency
 
-The system ensures consistency through:
+The system includes validation to detect and clean up:
 
-- **Atomic Operations**: Driver operations are atomic
-- **Queue Reconstruction**: In-memory queues rebuilt from persistent state
-- **State Validation**: Cross-checks between memory and persistent state
+- **Orphaned slots**: Running in driver but PipelineRun doesn't exist
+- **Zombie PipelineRuns**: Completed but still holding slots
+- **Queue mismatches**: In-memory queue doesn't match persistent state
 
 ## Driver Implementations
 
-### Memory Driver
+### Memory Driver (`memory_driver.go`)
 
-**Use Case**: Testing and development
-**Characteristics**:
+- **Use Case**: Testing, development, single-instance deployments
+- **Persistence**: None (state lost on restart)
+- **Performance**: Fastest (in-memory operations)
+- **Concurrency**: Thread-safe with mutexes
 
-- No external dependencies
-- State lost on restart (expected)
-- Fastest performance
-- No persistence
+### etcd Driver (`etcd_driver.go`)
+
+- **Use Case**: Production clusters, high availability
+- **Persistence**: etcd cluster with strong consistency
+- **Performance**: Good (network calls to etcd)
+- **Features**:
+  - Lease-based slot management
+  - Automatic cleanup via TTL
+  - Watch-based change notifications
+
+### PostgreSQL Driver (`postgresql_driver.go`)
+
+- **Use Case**: Existing PostgreSQL infrastructure
+- **Persistence**: Database tables with ACID guarantees
+- **Performance**: Good (database operations)
+- **Features**:
+  - Connection pooling
+  - Configurable timeouts
+  - Polling-based change detection
+
+## Configuration
+
+### Via ConfigMap
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipelines-as-code
+data:
+  etcd-enabled: "true"
+  etcd-mode: "etcd"  # "memory", "mock", or "etcd"
+  etcd-endpoints: "etcd:2379"
+  etcd-dial-timeout: "5"
+  
+  # Optional etcd authentication
+  etcd-username: "etcd_user"
+  etcd-password: "etcd_password"
+  
+  # Optional etcd TLS
+  etcd-cert-file: "/path/to/cert.pem"
+  etcd-key-file: "/path/to/key.pem"
+  etcd-ca-file: "/path/to/ca.pem"
+```
+
+### Via Environment Variables
+
+```bash
+export PAC_ETCD_ENABLED=true
+export PAC_ETCD_MODE=etcd
+export PAC_ETCD_ENDPOINTS=etcd:2379
+```
+
+### Driver Selection Logic
+
+The system automatically selects drivers based on configuration:
 
 ```go
-config := &concurrency.DriverConfig{
-    Driver: "memory",
-    MemoryConfig: &concurrency.MemoryConfig{
-        LeaseTTL: 30 * time.Minute,
-    },
+// CreateManagerFromSettings determines driver based on settings
+func CreateManagerFromSettings(settings map[string]string, logger *zap.SugaredLogger) (*Manager, error) {
+    config := &DriverConfig{}
+
+    if IsEtcdEnabled(settings) {
+        config.Driver = "etcd"
+        // Configure etcd driver
+    } else {
+        config.Driver = "memory"
+        // Configure memory driver with default TTL
+    }
+
+    return NewManager(config, logger)
 }
 ```
 
-### etcd Driver
+## Usage Examples
 
-**Use Case**: Production environments with existing etcd
-**Characteristics**:
-
-- Distributed concurrency control
-- Real-time change notifications
-- Automatic lease expiration
-- High availability
+### Basic Manager Usage
 
 ```go
+// Create manager from settings map
+settings := map[string]string{
+    "etcd-enabled": "true",
+    "etcd-endpoints": "localhost:2379",
+}
+manager, err := concurrency.CreateManagerFromSettings(settings, logger)
+if err != nil {
+    return fmt.Errorf("failed to create concurrency manager: %w", err)
+}
+defer manager.Close()
+
+// Acquire slot for PipelineRun
+success, leaseID, err := manager.AcquireSlot(ctx, repo, pipelineRunKey)
+if err != nil {
+    return fmt.Errorf("failed to acquire slot: %w", err)
+}
+
+if success {
+    // PipelineRun can proceed
+    defer manager.ReleaseSlot(ctx, leaseID, pipelineRunKey, repoKey)
+    // ... process PipelineRun
+}
+```
+
+### Direct Driver Configuration
+
+```go
+// Configure etcd driver directly
 config := &concurrency.DriverConfig{
     Driver: "etcd",
     EtcdConfig: &concurrency.EtcdConfig{
         Endpoints:   []string{"localhost:2379"},
         DialTimeout: 5 * time.Second,
         Mode:        "etcd",
-        TLSConfig: &concurrency.TLSConfig{
-            CertFile:   "/path/to/cert.pem",
-            KeyFile:    "/path/to/key.pem",
-            CAFile:     "/path/to/ca.pem",
-        },
     },
 }
-```
 
-### PostgreSQL Driver
-
-**Use Case**: Enterprise environments with existing PostgreSQL
-**Characteristics**:
-
-- ACID compliance
-- Connection pooling
-- Automatic cleanup
-- Polling-based change detection
-
-```go
-config := &concurrency.DriverConfig{
-    Driver: "postgresql",
-    PostgreSQLConfig: &concurrency.PostgreSQLConfig{
-        Host:             "localhost",
-        Port:             5432,
-        Database:         "pac_concurrency",
-        Username:         "pac_user",
-        Password:         "pac_password",
-        SSLMode:          "disable",
-        MaxConnections:   10,
-        ConnectionTimeout: 30 * time.Second,
-        LeaseTTL:         1 * time.Hour,
-    },
+manager, err := concurrency.NewManager(config, logger)
+if err != nil {
+    return fmt.Errorf("failed to create manager: %w", err)
 }
-```
-
-## Configuration
-
-### Environment Variables
-
-The system is configured through Pipelines-as-Code settings:
-
-```yaml
-# configmap.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: pipelines-as-code
-data:
-  concurrency-driver: "etcd"  # memory, etcd, postgresql
-  concurrency-etcd-endpoints: "localhost:2379"
-  concurrency-etcd-username: "etcd_user"
-  concurrency-etcd-password: "etcd_password"
-  concurrency-postgresql-host: "localhost"
-  concurrency-postgresql-database: "pac_concurrency"
-  # ... other driver-specific settings
-```
-
-### Driver-Specific Settings
-
-Each driver supports specific configuration options:
-
-- **etcd**: Endpoints, TLS, authentication, timeouts
-- **PostgreSQL**: Connection string, pooling, SSL, timeouts
-- **Memory**: Lease TTL only
-
-## Usage Examples
-
-### Basic Usage
-
-```go
-import (
-    "context"
-    "time"
-    
-    "github.com/openshift-pipelines/pipelines-as-code/pkg/concurrency"
-    "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
-    "go.uber.org/zap"
-)
-
-func main() {
-    logger, _ := zap.NewDevelopment()
-    sugar := logger.Sugar()
-
-    // Configure the driver
-    config := &concurrency.DriverConfig{
-        Driver: "etcd",
-        EtcdConfig: &concurrency.EtcdConfig{
-            Endpoints:   []string{"localhost:2379"},
-            DialTimeout: 5 * time.Second,
-        },
-    }
-
-    // Create manager
-    manager, err := concurrency.NewManager(config, sugar)
-    if err != nil {
-        sugar.Fatalf("failed to create manager: %v", err)
-    }
-    defer manager.Close()
-
-    // Use the manager
-    repo := &v1alpha1.Repository{
-        Spec: v1alpha1.RepositorySpec{
-            ConcurrencyLimit: func() *int { limit := 2; return &limit }(),
-        },
-    }
-
-    ctx := context.Background()
-    success, leaseID, err := manager.AcquireSlot(ctx, repo, "namespace/pipeline-run-1")
-    if err != nil {
-        sugar.Errorf("failed to acquire slot: %v", err)
-        return
-    }
-
-    if success {
-        sugar.Infof("acquired slot with lease ID: %v", leaseID)
-        defer manager.ReleaseSlot(ctx, leaseID, "namespace/pipeline-run-1", "namespace/repo")
-    }
-}
+defer manager.Close()
 ```
 
 ### Queue Management
 
 ```go
-// Try to acquire slots for multiple pipeline runs
-pipelineRuns := []string{
-    "namespace/pipeline-run-1",
-    "namespace/pipeline-run-2",
-    "namespace/pipeline-run-3",
-}
+queueManager := manager.GetQueueManager()
 
-acquired, err := manager.GetQueueManager().AddListToRunningQueue(repo, pipelineRuns)
-if err != nil {
-    sugar.Errorf("failed to add to running queue: %v", err)
-}
+// Add PipelineRuns to pending queue
+err := queueManager.AddToPendingQueue(repo, []string{prKey1, prKey2})
 
-sugar.Infof("acquired %d slots out of %d pipeline runs", len(acquired), len(pipelineRuns))
+// Get queued PipelineRuns
+queued := queueManager.QueuedPipelineRuns(repo)
 
-// Get current state
-running := manager.GetQueueManager().RunningPipelineRuns(repo)
-queued := manager.GetQueueManager().QueuedPipelineRuns(repo)
-sugar.Infof("running: %v, queued: %v", running, queued)
+// Try to acquire slots for queued items
+acquired, err := queueManager.AddListToRunningQueue(repo, queued)
+```
+
+### Watcher Setup
+
+```go
+// Set up watcher for repository
+queueManager.SetupWatcher(ctx, repo, func() {
+    // Called when slots become available
+    processQueuedPipelineRuns(ctx, repo)
+})
 ```
 
 ### State Recovery
 
 ```go
-// After restart, sync state from driver
-if err := manager.SyncStateFromDriver(ctx, repo); err != nil {
-    sugar.Errorf("failed to sync state: %v", err)
-}
+// Initialize queues with state recovery
+err := queueManager.InitQueues(ctx, tektonClient, pacClient)
 
-// Get all repositories with state
-repos, err := manager.GetQueueManager().GetAllRepositoriesWithState(ctx)
-if err != nil {
-    sugar.Errorf("failed to get repositories: %v", err)
-}
+// Manual state synchronization
+err := manager.SyncStateFromDriver(ctx, repo)
 
-for _, repo := range repos {
-    sugar.Infof("recovered state for repository: %s/%s", repo.Namespace, repo.Name)
-}
+// Validate state consistency
+err := manager.ValidateStateConsistency(ctx, repo, tektonClient)
 ```
 
 ## Testing
 
-### Unit Testing with Memory Driver
+### Unit Tests
+
+The package includes comprehensive unit tests:
+
+```bash
+# Run concurrency package tests
+go test ./pkg/concurrency/...
+
+# Run with race detection
+go test -race ./pkg/concurrency/...
+
+# Run specific test
+go test -run TestCreateManagerFromSettings ./pkg/concurrency/...
+```
+
+### Integration Tests
+
+Test the system with different drivers:
 
 ```go
-func TestConcurrencyControl(t *testing.T) {
-    config := &concurrency.DriverConfig{
-        Driver: "memory",
-        MemoryConfig: &concurrency.MemoryConfig{
-            LeaseTTL: 1 * time.Minute,
-        },
-    }
-    
-    manager, err := concurrency.NewManager(config, logger)
-    require.NoError(t, err)
-    defer manager.Close()
+// Test with memory driver
+config := &DriverConfig{Driver: "memory"}
+manager, err := NewManager(config, logger)
 
-    repo := &v1alpha1.Repository{
-        Spec: v1alpha1.RepositorySpec{
-            ConcurrencyLimit: func() *int { limit := 1; return &limit }(),
-        },
-    }
-
-    // Test slot acquisition
-    success, leaseID, err := manager.AcquireSlot(ctx, repo, "test/pr-1")
-    assert.NoError(t, err)
-    assert.True(t, success)
-    assert.NotEmpty(t, leaseID)
-
-    // Test concurrency limit
-    success2, _, err := manager.AcquireSlot(ctx, repo, "test/pr-2")
-    assert.NoError(t, err)
-    assert.False(t, success2) // Should fail due to limit
+// Test with etcd driver (requires etcd instance)
+config := &DriverConfig{
+    Driver: "etcd",
+    EtcdConfig: &EtcdConfig{Endpoints: []string{"localhost:2379"}},
 }
 ```
 
-### Integration Testing
+### Mock Objects
+
+Use test utilities for isolated testing:
 
 ```go
-func TestEtcdDriverIntegration(t *testing.T) {
-    // Requires running etcd instance
-    config := &concurrency.DriverConfig{
-        Driver: "etcd",
-        EtcdConfig: &concurrency.EtcdConfig{
-            Endpoints:   []string{"localhost:2379"},
-            DialTimeout: 5 * time.Second,
-        },
-    }
-    
-    manager, err := concurrency.NewManager(config, logger)
-    require.NoError(t, err)
-    defer manager.Close()
-
-    // Test state persistence across restarts
-    // ... test implementation
+// Create mock concurrency manager for testing
+mockConfig := &concurrency.DriverConfig{
+    Driver: "memory",
+    MemoryConfig: &concurrency.MemoryConfig{
+        LeaseTTL: 30 * time.Minute,
+    },
 }
+mockManager, err := concurrency.NewManager(mockConfig, logger)
 ```
 
 ## Troubleshooting
 
 ### Common Issues
 
-#### 1. State Loss After Restart
+1. **PipelineRuns stuck in queued state**:
+   - Check concurrency limits in Repository spec
+   - Verify driver connectivity (etcd/PostgreSQL)
+   - Check controller logs for errors
 
-**Symptoms**: Queued PipelineRuns disappear after controller restart
-**Causes**:
+2. **State inconsistencies after restart**:
+   - Ensure persistent driver is configured correctly
+   - Check that InitQueues() completes successfully
+   - Run ValidateStateConsistency() manually
 
-- Using memory driver in production
-- Driver configuration issues
-- Network connectivity problems
-
-**Solutions**:
-
-- Use etcd or PostgreSQL driver for production
-- Verify driver configuration
-- Check network connectivity to backend
-
-#### 2. PipelineRuns Stuck in Queued State
-
-**Symptoms**: PipelineRuns remain queued even when slots are available
-**Causes**:
-
-- Driver connection issues
-- Lease expiration problems
-- Queue state corruption
-
-**Solutions**:
-
-- Check driver logs for errors
-- Verify lease TTL settings
-- Restart controller to trigger state recovery
-
-#### 3. Concurrency Limits Not Enforced
-
-**Symptoms**: More PipelineRuns running than the limit
-**Causes**:
-
-- Driver not properly configured
-- State synchronization issues
-- Race conditions
-
-**Solutions**:
-
-- Verify driver configuration
-- Check for state synchronization errors
-- Review logs for race condition indicators
+3. **Performance issues**:
+   - Monitor watcher polling intervals
+   - Check driver connection pool settings
+   - Verify etcd/PostgreSQL performance
 
 ### Debugging
 
-#### Enable Debug Logging
+Enable debug logging:
 
-```go
-logger, _ := zap.NewDevelopment()
-sugar := logger.Sugar()
-sugar.SetLevel(zap.DebugLevel)
+```yaml
+data:
+  log-level: "debug"
 ```
 
-#### Check Driver State
+Check manager status:
 
 ```go
-// Get current slots in use
-slots, err := manager.GetCurrentSlots(ctx, repo)
-if err != nil {
-    sugar.Errorf("failed to get current slots: %v", err)
-}
-sugar.Infof("current slots in use: %d", slots)
+// Get current slots
+count, err := manager.GetCurrentSlots(ctx, repo)
 
 // Get running PipelineRuns
 running, err := manager.GetRunningPipelineRuns(ctx, repo)
-if err != nil {
-    sugar.Errorf("failed to get running PipelineRuns: %v", err)
-}
-sugar.Infof("running PipelineRuns: %v", running)
+
+// Get driver type
+driverType := manager.GetDriverType()
 ```
 
-#### Monitor Queue State
+### Recovery Procedures
+
+#### Manual State Recovery
 
 ```go
-// Set up watcher for slot availability
-manager.GetQueueManager().SetupWatcher(ctx, repo, func() {
-    sugar.Info("slot became available, triggering reconciliation")
-})
+// Sync state from driver
+err := manager.SyncStateFromDriver(ctx, repo)
+
+// Validate and clean up inconsistent state
+err := manager.ValidateStateConsistency(ctx, repo, tektonClient)
 ```
 
-### Performance Considerations
+#### Repository Cleanup
 
-- **Memory Driver**: Fastest, no network overhead
-- **etcd Driver**: Good for high-frequency operations, real-time notifications
-- **PostgreSQL Driver**: Best for environments with existing database infrastructure
+```go
+// Clean up all state for a repository
+err := manager.CleanupRepository(ctx, repo)
+```
 
-### Monitoring
+## Performance Considerations
 
-Monitor these metrics:
+### Driver Selection
 
-- Slot acquisition/release rates
-- Queue lengths
-- Driver operation latencies
-- State recovery times
-- Error rates by driver type
+- **Memory**: Fastest, but no persistence
+- **etcd**: Good performance with persistence and HA
+- **PostgreSQL**: Good performance with existing DB infrastructure
 
-## Migration from Legacy System
+### Optimization Tips
 
-The new concurrency system replaces the legacy annotation-based approach:
+1. **Tune watcher intervals** based on workload patterns
+2. **Configure connection pools** for PostgreSQL driver
+3. **Use etcd lease TTL** appropriate for your environment
+4. **Monitor queue sizes** to detect bottlenecks
 
-### Key Differences
+### Scaling
 
-1. **State Management**: State-based vs annotation-based
-2. **Persistence**: Optional persistence vs no persistence
-3. **Recovery**: Automatic state recovery vs manual intervention
-4. **Scalability**: Better performance and reliability
+The system scales horizontally:
 
-### Migration Steps
+- **Multiple controller instances** can share the same persistent driver
+- **Per-repository queues** allow independent scaling
+- **Event-driven processing** reduces polling overhead
 
-1. Update configuration to use new driver settings
-2. Deploy new controller version
-3. System automatically migrates existing PipelineRuns
-4. Monitor for any issues during transition
+## Interface Reference
 
-The new system is backward compatible and will handle existing PipelineRuns gracefully.
+### Core Interfaces
+
+```go
+// Manager provides unified interface for concurrency control
+type Manager interface {
+    AcquireSlot(ctx context.Context, repo *v1alpha1.Repository, pipelineRunKey string) (bool, LeaseID, error)
+    ReleaseSlot(ctx context.Context, leaseID LeaseID, pipelineRunKey, repoKey string) error
+    GetCurrentSlots(ctx context.Context, repo *v1alpha1.Repository) (int, error)
+    GetQueueManager() QueueManager
+    GetDriver() Driver
+    Close() error
+}
+
+// Driver defines backend storage interface
+type Driver interface {
+    AcquireSlot(ctx context.Context, repo *v1alpha1.Repository, pipelineRunKey string) (bool, LeaseID, error)
+    ReleaseSlot(ctx context.Context, leaseID LeaseID, pipelineRunKey, repoKey string) error
+    GetCurrentSlots(ctx context.Context, repo *v1alpha1.Repository) (int, error)
+    WatchSlotAvailability(ctx context.Context, repo *v1alpha1.Repository, callback func())
+    GetAllRepositoriesWithState(ctx context.Context) ([]*v1alpha1.Repository, error)
+    Close() error
+}
+
+// QueueManager manages in-memory queues
+type QueueManager interface {
+    InitQueues(ctx context.Context, tektonClient, pacClient interface{}) error
+    QueuedPipelineRuns(repo *v1alpha1.Repository) []string
+    AddToPendingQueue(repo *v1alpha1.Repository, list []string) error
+    SetupWatcher(ctx context.Context, repo *v1alpha1.Repository, callback func())
+    ValidateStateConsistency(ctx context.Context, repo *v1alpha1.Repository, tektonClient interface{}) error
+}
+```
+
+---
+
+For more detailed information, see the individual driver implementations and integration examples in the test files.

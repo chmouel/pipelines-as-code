@@ -183,7 +183,7 @@ func (m *Manager) ValidateStateConsistency(ctx context.Context, repo *v1alpha1.R
 }
 
 // QueueManager interface implementation.
-func (qm *queueManager) InitQueues(ctx context.Context, tektonClient, pacClient interface{}) error {
+func (qm *queueManager) InitQueues(ctx context.Context, tektonClient, _ interface{}) error {
 	qm.logger.Info("initializing concurrency queues with state-based approach.")
 
 	// For persistent drivers (etcd, postgresql), reconstruct queues from persistent state.
@@ -296,7 +296,7 @@ func (qm *queueManager) SyncStateFromDriver(ctx context.Context, repo *v1alpha1.
 }
 
 // ValidateStateConsistency checks for state inconsistencies and cleans them up.
-func (qm *queueManager) ValidateStateConsistency(ctx context.Context, repo *v1alpha1.Repository, tektonClient interface{}) error {
+func (qm *queueManager) ValidateStateConsistency(ctx context.Context, repo *v1alpha1.Repository, _ interface{}) error {
 	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
 	qm.logger.Infof("validating state consistency for repository %s", repoKey)
 
@@ -312,7 +312,9 @@ func (qm *queueManager) ValidateStateConsistency(ctx context.Context, repo *v1al
 		return fmt.Errorf("failed to get queued PipelineRuns from driver: %w", err)
 	}
 
-	allPRsInDriver := append(runningPRs, queuedPRs...)
+	allPRsInDriver := make([]string, 0, len(runningPRs)+len(queuedPRs))
+	allPRsInDriver = append(allPRsInDriver, runningPRs...)
+	allPRsInDriver = append(allPRsInDriver, queuedPRs...)
 	orphanedSlots := []string{}
 
 	// Check each PipelineRun in the driver against Kubernetes
@@ -419,7 +421,6 @@ func (qm *queueManager) AddListToRunningQueue(repo *v1alpha1.Repository, list []
 	// This prevents race conditions and maintains proper ordering
 	limit := *repo.Spec.ConcurrencyLimit
 	acquired := []string{}
-	toRemove := []string{} // Track successfully acquired items to remove later
 
 	// Process items in order without removing them first
 	for i := 0; i < limit; i++ {
@@ -438,7 +439,6 @@ func (qm *queueManager) AddListToRunningQueue(repo *v1alpha1.Repository, list []
 
 		if success {
 			acquired = append(acquired, item.Key)
-			toRemove = append(toRemove, item.Key)
 			qm.logger.Infof("acquired slot for (%s) in repository (%s)", item.Key, repoKey)
 			// Remove the item now that we've successfully acquired the slot
 			qm.pendingQueues[repoKey].PopItem()

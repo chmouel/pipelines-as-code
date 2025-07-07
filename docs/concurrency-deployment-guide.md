@@ -49,10 +49,10 @@ metadata:
 data:
   # Enable the concurrency system
   concurrency-enabled: "true"
-  
+
   # Choose your driver
   concurrency-driver: "postgresql"  # or "etcd" or "memory"
-  
+
   # PostgreSQL Configuration
   postgresql-host: "your-postgresql-host"
   postgresql-port: "5432"
@@ -62,7 +62,7 @@ data:
   postgresql-max-connections: "10"
   postgresql-connection-timeout: "30s"
   postgresql-lease-ttl: "1h"
-  
+
   # The password will be read from the secret
   postgresql-password: ""  # Leave empty to use secret
 ```
@@ -147,21 +147,21 @@ postgresql-password: "your-password-here"
 
 ### Option 2: Using Kubernetes Secret (Recommended)
 
-1. Create the secret:
+- Create the secret:
 
-```bash
-kubectl create secret generic pac-concurrency-secret \
-  --namespace=pipelines-as-code \
-  --from-literal=postgresql-password="your-secure-password"
-```
+    ```bash
+    kubectl create secret generic pac-concurrency-secret \
+      --namespace=pipelines-as-code \
+      --from-literal=postgresql-password="your-secure-password"
+    ```
 
-2. Reference it in the ConfigMap:
+- Reference it in the ConfigMap:
 
-```yaml
-# In ConfigMap
-postgresql-password: ""  # Leave empty
-# The system will automatically read from the secret
-```
+    ```yaml
+    # In ConfigMap
+    postgresql-password: ""  # Leave empty
+    # The system will automatically read from the secret
+    ```
 
 ### Option 3: External Secret Management
 
@@ -174,49 +174,49 @@ If you're using external secret management tools like:
 You can integrate them by:
 
 1. Creating a secret with the external tool
-2. Using a sidecar or init container to fetch the secret
-3. Mounting it as a file or environment variable
+1. Using a sidecar or init container to fetch the secret
+1. Mounting it as a file or environment variable
 
 ## Database Setup
 
 ### PostgreSQL
 
-1. Create the database:
+- Create the database:
 
-```sql
-CREATE DATABASE pac_concurrency;
-```
+    ```sql
+    CREATE DATABASE pac_concurrency;
+    ```
 
-2. Create the user:
+- Create the user:
 
-```sql
-CREATE USER pac_user WITH PASSWORD 'your-secure-password';
-GRANT ALL PRIVILEGES ON DATABASE pac_concurrency TO pac_user;
-```
+    ```sql
+    CREATE USER pac_user WITH PASSWORD 'your-secure-password';
+    GRANT ALL PRIVILEGES ON DATABASE pac_concurrency TO pac_user;
+    ```
 
-3. The tables will be created automatically by the driver.
+- The tables will be created automatically by the driver.
 
-### etcd
+### etcd setup
 
-1. Install etcd (if not already installed):
+- Install etcd (if not already installed):
 
-```bash
-# Using Helm
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm install etcd bitnami/etcd \
-  --namespace pipelines-as-code \
-  --set auth.enabled=true \
-  --set auth.rbac.create=true
-```
+    ```bash
+    # Using Helm
+    helm repo add bitnami https://charts.bitnami.com/bitnami
+    helm install etcd bitnami/etcd \
+      --namespace pipelines-as-code \
+      --set auth.enabled=true \
+      --set auth.rbac.create=true
+    ```
 
-2. Get the credentials:
+- Get the credentials:
 
-```bash
-export ETCD_ROOT_PASSWORD=$(kubectl get secret --namespace pipelines-as-code etcd -o jsonpath="{.data.etcd-root-password}" | base64 -d)
-export ETCD_USERNAME=$(kubectl get secret --namespace pipelines-as-code etcd -o jsonpath="{.data.etcd-username}" | base64 -d)
-```
+    ```bash
+    export ETCD_ROOT_PASSWORD=$(kubectl get secret --namespace pipelines-as-code etcd -o jsonpath="{.data.etcd-root-password}" | base64 -d)
+    export ETCD_USERNAME=$(kubectl get secret --namespace pipelines-as-code etcd -o jsonpath="{.data.etcd-username}" | base64 -d)
+    ```
 
-3. Update the ConfigMap with the credentials.
+1. Update the ConfigMap with the credentials.
 
 ## Monitoring and Troubleshooting
 
@@ -235,10 +235,10 @@ kubectl logs -f deployment/pipelines-as-code-watcher -n pipelines-as-code
 
 ### Common Issues
 
-1. **Connection refused**: Check if the database/etcd is accessible
-2. **Authentication failed**: Verify credentials in the secret
-3. **Permission denied**: Check database user permissions
-4. **Driver not found**: Ensure the driver is correctly specified
+- **Connection refused**: Check if the database/etcd is accessible
+- **Authentication failed**: Verify credentials in the secret
+- **Permission denied**: Check database user permissions
+- **Driver not found**: Ensure the driver is correctly specified
 
 ### Logs to Monitor
 
@@ -252,35 +252,35 @@ Look for these log messages:
 
 If you're migrating from the existing etcd implementation:
 
-1. Update the ConfigMap to use the new concurrency system
-2. Set `concurrency-enabled: "true"`
-3. Choose your preferred driver
-4. Restart the PAC pods
-5. The system will automatically migrate existing state
+- Update the ConfigMap to use the new concurrency system
+- Set `concurrency-enabled: "true"`
+- Choose your preferred driver
+- Restart the PAC pods
+- The system will automatically migrate existing state
 
 ## Security Considerations
 
-1. **Use Secrets**: Never store passwords in ConfigMaps
-2. **Network Policies**: Restrict access to your database/etcd
-3. **TLS**: Enable TLS for database connections
-4. **RBAC**: Use appropriate RBAC for secret access
-5. **Audit Logs**: Monitor access to secrets and databases
+- **Use Secrets**: Never store passwords in ConfigMaps
+- **Network Policies**: Restrict access to your database/etcd
+- **TLS**: Enable TLS for database connections
+- **RBAC**: Use appropriate RBAC for secret access
+- **Audit Logs**: Monitor access to secrets and databases
 
 ## Performance Tuning
 
-### PostgreSQL
+### PostgreSQL (Performance Tuning)
 
 - Adjust `postgresql-max-connections` based on your workload
 - Monitor connection pool usage
 - Consider read replicas for high availability
 
-### etcd
+### etcd (Performance Tuning)
 
 - Use multiple etcd nodes for high availability
 - Monitor etcd performance metrics
 - Consider dedicated etcd cluster for large deployments
 
-### Memory
+### Memory (Performance Tuning)
 
 - Only use for testing/development
 - Monitor memory usage
