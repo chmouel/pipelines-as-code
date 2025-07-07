@@ -25,6 +25,9 @@ type ConcurrencyDriver interface {
 	// GetRunningPipelineRuns returns the list of currently running PipelineRuns for a repository
 	GetRunningPipelineRuns(ctx context.Context, repo *v1alpha1.Repository) ([]string, error)
 
+	// GetQueuedPipelineRuns returns the list of currently queued PipelineRuns for a repository
+	GetQueuedPipelineRuns(ctx context.Context, repo *v1alpha1.Repository) ([]string, error)
+
 	// WatchSlotAvailability watches for slot availability changes in a repository
 	WatchSlotAvailability(ctx context.Context, repo *v1alpha1.Repository, callback func())
 
@@ -35,7 +38,7 @@ type ConcurrencyDriver interface {
 	GetRepositoryState(ctx context.Context, repo *v1alpha1.Repository) (string, error)
 
 	// SetPipelineRunState sets the state for a specific PipelineRun
-	SetPipelineRunState(ctx context.Context, pipelineRunKey, state string) error
+	SetPipelineRunState(ctx context.Context, pipelineRunKey, state string, repo *v1alpha1.Repository) error
 
 	// GetPipelineRunState gets the state for a specific PipelineRun
 	GetPipelineRunState(ctx context.Context, pipelineRunKey string) (string, error)

@@ -214,6 +214,27 @@ func (ed *EtcdDriver) GetRunningPipelineRuns(ctx context.Context, repo *v1alpha1
 	return pipelineRuns, nil
 }
 
+// GetQueuedPipelineRuns returns the list of currently queued PipelineRuns for a repository.
+func (ed *EtcdDriver) GetQueuedPipelineRuns(ctx context.Context, repo *v1alpha1.Repository) ([]string, error) {
+	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+	queueKeyPrefix := fmt.Sprintf("%s/%s/queue/", concurrencyPrefix, repoKey)
+
+	resp, err := ed.client.Get(ctx, queueKeyPrefix, clientv3.WithPrefix())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get queued pipeline runs: %w", err)
+	}
+
+	pipelineRuns := []string{}
+	if resp.Count > 0 {
+		pipelineRuns = make([]string, 0, resp.Count)
+	}
+	for _, kv := range resp.Kvs {
+		pipelineRuns = append(pipelineRuns, string(kv.Value))
+	}
+
+	return pipelineRuns, nil
+}
+
 // WatchSlotAvailability watches for slot availability changes in a repository.
 func (ed *EtcdDriver) WatchSlotAvailability(ctx context.Context, repo *v1alpha1.Repository, callback func()) {
 	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
@@ -266,12 +287,22 @@ func (ed *EtcdDriver) GetRepositoryState(ctx context.Context, repo *v1alpha1.Rep
 }
 
 // SetPipelineRunState sets the state for a specific PipelineRun.
-func (ed *EtcdDriver) SetPipelineRunState(ctx context.Context, pipelineRunKey, state string) error {
+func (ed *EtcdDriver) SetPipelineRunState(ctx context.Context, pipelineRunKey, state string, repo *v1alpha1.Repository) error {
 	stateKey := fmt.Sprintf("%s/%s/state", concurrencyPrefix, pipelineRunKey)
 
 	_, err := ed.client.Put(ctx, stateKey, state)
 	if err != nil {
 		return fmt.Errorf("failed to set pipeline run state: %w", err)
+	}
+
+	// If the state is "queued", also store it in the queue
+	if state == "queued" && repo != nil {
+		repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+		queueKey := fmt.Sprintf("%s/%s/queue/%s", concurrencyPrefix, repoKey, pipelineRunKey)
+		_, err = ed.client.Put(ctx, queueKey, pipelineRunKey)
+		if err != nil {
+			ed.logger.Errorf("failed to add pipeline run to queue: %v", err)
+		}
 	}
 
 	ed.logger.Debugf("set pipeline run state for %s: %s", pipelineRunKey, state)

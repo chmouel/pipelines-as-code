@@ -30,19 +30,20 @@ func TestQueuePipelineRun(t *testing.T) {
 		runningQueue  []string
 	}{
 		{
-			name: "no existing order annotation",
+			name: "no repository annotation",
 			pipelineRun: &tektonv1.PipelineRun{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{},
 				},
 			},
+			wantErrString: fmt.Sprintf("no %s annotation found", keys.Repository),
 		},
 		{
 			name: "no repo name annotation",
 			pipelineRun: &tektonv1.PipelineRun{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						keys.ExecutionOrder: "repo/foo1",
+						// No repository annotation
 					},
 				},
 			},
@@ -53,8 +54,7 @@ func TestQueuePipelineRun(t *testing.T) {
 			pipelineRun: &tektonv1.PipelineRun{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						keys.ExecutionOrder: "repo/foo1",
-						keys.Repository:     "",
+						keys.Repository: "",
 					},
 				},
 			},
@@ -65,8 +65,7 @@ func TestQueuePipelineRun(t *testing.T) {
 			pipelineRun: &tektonv1.PipelineRun{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						keys.ExecutionOrder: "repo/foo1",
-						keys.Repository:     "foo",
+						keys.Repository: "foo",
 					},
 				},
 			},
@@ -90,8 +89,7 @@ func TestQueuePipelineRun(t *testing.T) {
 					Name:      "test",
 					Namespace: "test",
 					Annotations: map[string]string{
-						keys.ExecutionOrder: "repo/foo1",
-						keys.Repository:     "test",
+						keys.Repository: "test",
 					},
 				},
 			},
@@ -114,8 +112,7 @@ func TestQueuePipelineRun(t *testing.T) {
 					Name:      "test",
 					Namespace: "test",
 					Annotations: map[string]string{
-						keys.ExecutionOrder: "repo/foo1",
-						keys.Repository:     "test",
+						keys.Repository: "test",
 					},
 				},
 			},
@@ -138,8 +135,7 @@ func TestQueuePipelineRun(t *testing.T) {
 					Name:      "test",
 					Namespace: "test",
 					Annotations: map[string]string{
-						keys.ExecutionOrder: "repo/foo1",
-						keys.Repository:     "test",
+						keys.Repository: "test",
 					},
 				},
 			},

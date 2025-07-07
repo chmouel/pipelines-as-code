@@ -106,7 +106,33 @@ func (md *MemoryDriver) AcquireSlot(ctx context.Context, repo *v1alpha1.Reposito
 	if existingSlot, exists := md.slots[repoKey][pipelineRunKey]; exists {
 		if existingSlot.expiresAt.After(time.Now()) {
 			// Slot already exists and is still valid
-			return false, 0, nil
+			if existingSlot.state == "running" {
+				// Already running, return success
+				return true, existingSlot.id, nil
+			}
+			// Slot exists but is not running (e.g., queued), check if we can promote it
+			if existingSlot.state == "queued" {
+				// Count current running slots
+				currentCount := 0
+				for _, slot := range md.slots[repoKey] {
+					if slot.state == "running" && slot.expiresAt.After(time.Now()) {
+						currentCount++
+					}
+				}
+
+				if currentCount >= limit {
+					md.logger.Infof("concurrency limit reached for repository %s: %d/%d", repoKey, currentCount, limit)
+					return false, 0, nil
+				}
+
+				// Promote queued slot to running
+				existingSlot.state = "running"
+				existingSlot.acquiredAt = time.Now()
+				existingSlot.expiresAt = time.Now().Add(md.config.LeaseTTL)
+
+				md.logger.Infof("promoted queued slot to running for %s in repository %s (slot ID: %d)", pipelineRunKey, repoKey, existingSlot.id)
+				return true, existingSlot.id, nil
+			}
 		}
 		// Slot exists but is expired, remove it
 		delete(md.slots[repoKey], pipelineRunKey)
@@ -146,13 +172,28 @@ func (md *MemoryDriver) AcquireSlot(ctx context.Context, repo *v1alpha1.Reposito
 
 // ReleaseSlot releases a concurrency slot.
 func (md *MemoryDriver) ReleaseSlot(ctx context.Context, leaseID LeaseID, pipelineRunKey, repoKey string) error {
-	if leaseID == nil || leaseID == 0 {
-		// No lease to release
-		return nil
-	}
-
 	md.mu.Lock()
 	defer md.mu.Unlock()
+
+	// If leaseID is 0, find the slot by pipeline run key
+	if leaseID == nil || leaseID == 0 {
+		if repoSlots, exists := md.slots[repoKey]; exists {
+			if slot, exists := repoSlots[pipelineRunKey]; exists {
+				slotID := slot.id
+				delete(repoSlots, pipelineRunKey)
+
+				// Remove empty repository entries
+				if len(repoSlots) == 0 {
+					delete(md.slots, repoKey)
+				}
+
+				md.logger.Infof("released concurrency slot for %s in repository %s (slot ID: %d)", pipelineRunKey, repoKey, slotID)
+				return nil
+			}
+		}
+		md.logger.Warnf("slot not found for release by pipeline key: repo=%s, pipeline=%s", repoKey, pipelineRunKey)
+		return nil
+	}
 
 	// Convert LeaseID to int
 	var slotID int
@@ -226,6 +267,27 @@ func (md *MemoryDriver) GetRunningPipelineRuns(ctx context.Context, repo *v1alph
 	return []string{}, nil
 }
 
+// GetQueuedPipelineRuns returns the list of currently queued PipelineRuns for a repository.
+func (md *MemoryDriver) GetQueuedPipelineRuns(ctx context.Context, repo *v1alpha1.Repository) ([]string, error) {
+	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+
+	md.mu.RLock()
+	defer md.mu.RUnlock()
+
+	if repoSlots, exists := md.slots[repoKey]; exists {
+		var pipelineRuns []string
+		now := time.Now()
+		for _, slot := range repoSlots {
+			if slot.state == "queued" && slot.expiresAt.After(now) {
+				pipelineRuns = append(pipelineRuns, slot.prKey)
+			}
+		}
+		return pipelineRuns, nil
+	}
+
+	return []string{}, nil
+}
+
 // WatchSlotAvailability watches for slot availability changes in a repository.
 // For memory driver, this is a simplified polling implementation.
 func (md *MemoryDriver) WatchSlotAvailability(ctx context.Context, repo *v1alpha1.Repository, callback func()) {
@@ -286,11 +348,34 @@ func (md *MemoryDriver) GetRepositoryState(ctx context.Context, repo *v1alpha1.R
 }
 
 // SetPipelineRunState sets the state for a specific PipelineRun.
-func (md *MemoryDriver) SetPipelineRunState(ctx context.Context, pipelineRunKey, state string) error {
+func (md *MemoryDriver) SetPipelineRunState(ctx context.Context, pipelineRunKey, state string, repo *v1alpha1.Repository) error {
 	md.mu.Lock()
 	defer md.mu.Unlock()
 
 	md.pipelineStates[pipelineRunKey] = state
+
+	// If the state is "queued", create a slot entry for tracking
+	if state == "queued" && repo != nil {
+		repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+
+		// Initialize the repository slots map if it doesn't exist
+		if md.slots[repoKey] == nil {
+			md.slots[repoKey] = make(map[string]*slotInfo)
+		}
+
+		// Create a queued slot
+		md.nextSlotID++
+		slot := &slotInfo{
+			id:         md.nextSlotID,
+			repoKey:    repoKey,
+			prKey:      pipelineRunKey,
+			state:      "queued",
+			acquiredAt: time.Now(),
+			expiresAt:  time.Now().Add(md.config.LeaseTTL),
+		}
+		md.slots[repoKey][pipelineRunKey] = slot
+	}
+
 	md.logger.Debugf("set pipeline run state for %s: %s", pipelineRunKey, state)
 	return nil
 }

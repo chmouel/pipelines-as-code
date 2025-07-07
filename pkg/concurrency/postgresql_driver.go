@@ -285,6 +285,35 @@ func (pd *PostgreSQLDriver) GetRunningPipelineRuns(ctx context.Context, repo *v1
 	return pipelineRuns, nil
 }
 
+// GetQueuedPipelineRuns returns the list of currently queued PipelineRuns for a repository.
+func (pd *PostgreSQLDriver) GetQueuedPipelineRuns(ctx context.Context, repo *v1alpha1.Repository) ([]string, error) {
+	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+
+	query := `SELECT pipeline_run_key FROM concurrency_slots 
+		WHERE repository_key = $1 AND state = 'queued' AND expires_at > NOW()`
+
+	rows, err := pd.db.QueryContext(ctx, query, repoKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get queued pipeline runs: %w", err)
+	}
+	defer rows.Close()
+
+	var pipelineRuns []string
+	for rows.Next() {
+		var prKey string
+		if err := rows.Scan(&prKey); err != nil {
+			return nil, fmt.Errorf("failed to scan pipeline run key: %w", err)
+		}
+		pipelineRuns = append(pipelineRuns, prKey)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating over rows: %w", err)
+	}
+
+	return pipelineRuns, nil
+}
+
 // WatchSlotAvailability watches for slot availability changes in a repository.
 // Note: PostgreSQL doesn't have built-in change notifications like etcd,
 // so this is a simplified polling-based implementation.
@@ -357,7 +386,7 @@ func (pd *PostgreSQLDriver) GetRepositoryState(ctx context.Context, repo *v1alph
 }
 
 // SetPipelineRunState sets the state for a specific PipelineRun.
-func (pd *PostgreSQLDriver) SetPipelineRunState(ctx context.Context, pipelineRunKey, state string) error {
+func (pd *PostgreSQLDriver) SetPipelineRunState(ctx context.Context, pipelineRunKey, state string, repo *v1alpha1.Repository) error {
 	query := `INSERT INTO pipeline_run_states (pipeline_run_key, state) 
 		VALUES ($1, $2) 
 		ON CONFLICT (pipeline_run_key) 
@@ -366,6 +395,20 @@ func (pd *PostgreSQLDriver) SetPipelineRunState(ctx context.Context, pipelineRun
 	_, err := pd.db.ExecContext(ctx, query, pipelineRunKey, state)
 	if err != nil {
 		return fmt.Errorf("failed to set pipeline run state: %w", err)
+	}
+
+	// If the state is "queued", also store it in the queue
+	if state == "queued" && repo != nil {
+		repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+		queueQuery := `INSERT INTO concurrency_slots (repository_key, pipeline_run_key, state, expires_at) 
+			VALUES ($1, $2, 'queued', NOW() + INTERVAL '1 hour')
+			ON CONFLICT (repository_key, pipeline_run_key) 
+			DO UPDATE SET state = 'queued', expires_at = NOW() + INTERVAL '1 hour'`
+		
+		_, err = pd.db.ExecContext(ctx, queueQuery, repoKey, pipelineRunKey)
+		if err != nil {
+			pd.logger.Errorf("failed to add pipeline run to queue: %v", err)
+		}
 	}
 
 	pd.logger.Debugf("set pipeline run state for %s: %s", pipelineRunKey, state)

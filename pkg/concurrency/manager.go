@@ -3,11 +3,13 @@ package concurrency
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"go.uber.org/zap"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Manager provides a unified interface for concurrency control
@@ -77,11 +79,43 @@ type queueManager struct {
 
 // Manager methods delegate to the underlying driver and queue manager
 func (m *Manager) AcquireSlot(ctx context.Context, repo *v1alpha1.Repository, pipelineRunKey string) (bool, LeaseID, error) {
-	return m.driver.AcquireSlot(ctx, repo, pipelineRunKey)
+	success, leaseID, err := m.driver.AcquireSlot(ctx, repo, pipelineRunKey)
+	if err != nil {
+		return false, nil, err
+	}
+
+	if success {
+		// Update the pipeline run state to running
+		if err := m.driver.SetPipelineRunState(ctx, pipelineRunKey, "running", repo); err != nil {
+			m.logger.Errorf("failed to set pipeline run state to running for %s: %v", pipelineRunKey, err)
+		}
+	}
+
+	return success, leaseID, nil
 }
 
 func (m *Manager) ReleaseSlot(ctx context.Context, leaseID LeaseID, pipelineRunKey, repoKey string) error {
-	return m.driver.ReleaseSlot(ctx, leaseID, pipelineRunKey, repoKey)
+	err := m.driver.ReleaseSlot(ctx, leaseID, pipelineRunKey, repoKey)
+	if err != nil {
+		return err
+	}
+
+	// Clean up the pipeline run state
+	// Parse repoKey to get namespace and name
+	parts := strings.Split(repoKey, "/")
+	if len(parts) == 2 {
+		repo := &v1alpha1.Repository{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: parts[0],
+				Name:      parts[1],
+			},
+		}
+		if err := m.driver.SetPipelineRunState(ctx, pipelineRunKey, "released", repo); err != nil {
+			m.logger.Errorf("failed to set pipeline run state to released for %s: %v", pipelineRunKey, err)
+		}
+	}
+
+	return nil
 }
 
 func (m *Manager) GetCurrentSlots(ctx context.Context, repo *v1alpha1.Repository) (int, error) {
@@ -105,7 +139,9 @@ func (m *Manager) GetRepositoryState(ctx context.Context, repo *v1alpha1.Reposit
 }
 
 func (m *Manager) SetPipelineRunState(ctx context.Context, pipelineRunKey, state string) error {
-	return m.driver.SetPipelineRunState(ctx, pipelineRunKey, state)
+	// This method needs to be updated to include repository information
+	// For now, we'll return an error indicating this method needs to be updated
+	return fmt.Errorf("SetPipelineRunState method needs repository information, use SetPipelineRunStateWithRepo instead")
 }
 
 func (m *Manager) GetPipelineRunState(ctx context.Context, pipelineRunKey string) (string, error) {
@@ -132,8 +168,85 @@ func (m *Manager) GetQueueManager() QueueManager {
 
 // QueueManager interface implementation
 func (qm *queueManager) InitQueues(ctx context.Context, tektonClient, pacClient interface{}) error {
-	qm.logger.Info("initializing concurrency queues")
-	// Implementation depends on the specific driver
+	qm.logger.Info("initializing concurrency queues with state-based approach")
+
+	// Type assert the clients to get the proper interfaces
+	// Note: We don't need the Tekton client for state-based initialization
+	// as we load state directly from the concurrency driver
+
+	pac, ok := pacClient.(interface {
+		PipelinesascodeV1alpha1() interface {
+			Repositories(namespace string) interface {
+				List(ctx context.Context, opts interface{}) (interface{}, error)
+			}
+		}
+	})
+	if !ok {
+		return fmt.Errorf("invalid pac client type")
+	}
+
+	// Fetch all repositories
+	reposResp, err := pac.PipelinesascodeV1alpha1().Repositories("").List(ctx, map[string]interface{}{})
+	if err != nil {
+		return fmt.Errorf("failed to list repositories: %w", err)
+	}
+
+	// Type assert to get the repositories
+	repos, ok := reposResp.(interface{ Items() []interface{} })
+	if !ok {
+		return fmt.Errorf("invalid repositories response type")
+	}
+
+	// Process each repository
+	for _, repoItem := range repos.Items() {
+		repo, ok := repoItem.(*v1alpha1.Repository)
+		if !ok {
+			qm.logger.Warnf("invalid repository type, skipping")
+			continue
+		}
+
+		// Skip repositories without concurrency limits
+		if repo.Spec.ConcurrencyLimit == nil || *repo.Spec.ConcurrencyLimit == 0 {
+			continue
+		}
+
+		qm.logger.Infof("initializing queues for repository %s/%s", repo.Namespace, repo.Name)
+
+		// Load existing queued PipelineRuns from the concurrency driver
+		queuedPRs, err := qm.driver.GetQueuedPipelineRuns(ctx, repo)
+		if err != nil {
+			qm.logger.Errorf("failed to get queued pipeline runs for %s/%s: %v", repo.Namespace, repo.Name, err)
+			continue
+		}
+
+		// Load existing running PipelineRuns from the concurrency driver
+		runningPRs, err := qm.driver.GetRunningPipelineRuns(ctx, repo)
+		if err != nil {
+			qm.logger.Errorf("failed to get running pipeline runs for %s/%s: %v", repo.Namespace, repo.Name, err)
+			continue
+		}
+
+		// Initialize the priority queue for this repository
+		repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+		qm.mutex.Lock()
+		if qm.pendingQueues[repoKey] == nil {
+			qm.pendingQueues[repoKey] = NewPriorityQueue()
+		}
+		qm.mutex.Unlock()
+
+		// Add queued PipelineRuns to the priority queue
+		now := time.Now()
+		for _, prKey := range queuedPRs {
+			qm.pendingQueues[repoKey].Add(prKey, now)
+			qm.logger.Infof("restored queued pipeline run %s to queue for repository %s", prKey, repoKey)
+		}
+
+		// Log the restored state
+		qm.logger.Infof("restored state for repository %s: %d queued, %d running",
+			repoKey, len(queuedPRs), len(runningPRs))
+	}
+
+	qm.logger.Info("concurrency queues initialized successfully with state-based approach")
 	return nil
 }
 
@@ -245,6 +358,12 @@ func (qm *queueManager) AddToPendingQueue(repo *v1alpha1.Repository, list []stri
 	now := time.Now()
 	for _, prKey := range list {
 		qm.pendingQueues[repoKey].Add(prKey, now)
+
+		// Store the queued state in the driver for persistence
+		if err := qm.driver.SetPipelineRunState(context.Background(), prKey, "queued", repo); err != nil {
+			qm.logger.Errorf("failed to set pipeline run state for %s: %v", prKey, err)
+		}
+
 		qm.logger.Infof("added pipelineRun (%s) to pending queue for repository (%s)", prKey, repoKey)
 	}
 
@@ -262,8 +381,9 @@ func (qm *queueManager) RemoveFromQueue(repoKey, prKey string) bool {
 		queue.Remove(prKey)
 	}
 
-	// Release the slot (leaseID will be retrieved by the driver)
-	if err := qm.driver.ReleaseSlot(ctx, nil, prKey, repoKey); err != nil {
+	// For memory driver, we need to find the slot and release it properly
+	// Since we don't have the leaseID, we'll use a special method to release by pipeline run key
+	if err := qm.driver.ReleaseSlot(ctx, 0, prKey, repoKey); err != nil {
 		qm.logger.Errorf("failed to release slot for %s: %v", prKey, err)
 		return false
 	}
