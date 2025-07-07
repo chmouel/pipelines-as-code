@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQL driver
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"go.uber.org/zap"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // PostgreSQLDriver implements Driver using PostgreSQL.
@@ -314,6 +316,38 @@ func (pd *PostgreSQLDriver) GetQueuedPipelineRuns(ctx context.Context, repo *v1a
 	return pipelineRuns, nil
 }
 
+// GetQueuedPipelineRunsWithTimestamps returns queued PipelineRuns with their creation timestamps.
+// This is used for proper FIFO ordering during state recovery.
+func (pd *PostgreSQLDriver) GetQueuedPipelineRunsWithTimestamps(ctx context.Context, repo *v1alpha1.Repository) (map[string]time.Time, error) {
+	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+
+	query := `SELECT pipeline_run_key, created_at FROM concurrency_slots 
+		WHERE repository_key = $1 AND state = 'queued' AND expires_at > NOW()
+		ORDER BY created_at ASC`
+
+	rows, err := pd.db.QueryContext(ctx, query, repoKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get queued pipeline runs with timestamps: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]time.Time)
+	for rows.Next() {
+		var prKey string
+		var createdAt time.Time
+		if err := rows.Scan(&prKey, &createdAt); err != nil {
+			return nil, fmt.Errorf("failed to scan pipeline run key and timestamp: %w", err)
+		}
+		result[prKey] = createdAt
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating over rows: %w", err)
+	}
+
+	return result, nil
+}
+
 // WatchSlotAvailability watches for slot availability changes in a repository.
 // Note: PostgreSQL doesn't have built-in change notifications like etcd,
 // so this is a simplified polling-based implementation.
@@ -456,4 +490,43 @@ func (pd *PostgreSQLDriver) CleanupRepository(ctx context.Context, repo *v1alpha
 // Close closes the PostgreSQL connection.
 func (pd *PostgreSQLDriver) Close() error {
 	return pd.db.Close()
+}
+
+// GetAllRepositoriesWithState returns all repositories that have concurrency state.
+func (pd *PostgreSQLDriver) GetAllRepositoriesWithState(ctx context.Context) ([]*v1alpha1.Repository, error) {
+	// Get all unique repository keys from concurrency_slots table
+	query := `SELECT DISTINCT repository_key FROM concurrency_slots WHERE expires_at > NOW()`
+
+	rows, err := pd.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get repositories with state: %w", err)
+	}
+	defer rows.Close()
+
+	repos := make([]*v1alpha1.Repository, 0)
+	for rows.Next() {
+		var repoKey string
+		if err := rows.Scan(&repoKey); err != nil {
+			return nil, fmt.Errorf("failed to scan repository key: %w", err)
+		}
+
+		// Parse repository key (namespace/name)
+		parts := strings.Split(repoKey, "/")
+		if len(parts) == 2 {
+			repo := &v1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: parts[0],
+					Name:      parts[1],
+				},
+			}
+			repos = append(repos, repo)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating over repository rows: %w", err)
+	}
+
+	pd.logger.Debugf("found %d repositories with concurrency state", len(repos))
+	return repos, nil
 }

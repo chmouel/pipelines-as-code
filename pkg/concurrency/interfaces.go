@@ -10,7 +10,7 @@ import (
 // LeaseID represents a unique identifier for a concurrency slot lease.
 type LeaseID interface{}
 
-// ConcurrencyDriver defines the interface for concurrency control implementations.
+// Driver defines the interface for concurrency control implementations.
 type Driver interface {
 	// AcquireSlot tries to acquire a concurrency slot for a PipelineRun
 	// Returns (success, leaseID, error)
@@ -43,11 +43,15 @@ type Driver interface {
 	// GetPipelineRunState gets the state for a specific PipelineRun
 	GetPipelineRunState(ctx context.Context, pipelineRunKey string) (string, error)
 
-	// CleanupRepository cleans up all concurrency state for a repository
+	// CleanupRepository removes all data for a repository
 	CleanupRepository(ctx context.Context, repo *v1alpha1.Repository) error
 
 	// Close closes the driver and releases resources
 	Close() error
+
+	// GetAllRepositoriesWithState returns all repositories that have concurrency state
+	// This is used for state recovery on restart
+	GetAllRepositoriesWithState(ctx context.Context) ([]*v1alpha1.Repository, error)
 }
 
 // QueueManager defines the interface for queue management.
@@ -81,6 +85,9 @@ type QueueManager interface {
 
 	// SetupWatcher sets up a watcher for slot availability changes
 	SetupWatcher(ctx context.Context, repo *v1alpha1.Repository, callback func())
+
+	// SyncStateFromDriver synchronizes the in-memory queue state with the persistent driver state
+	SyncStateFromDriver(ctx context.Context, repo *v1alpha1.Repository) error
 }
 
 // DriverConfig holds configuration for concurrency drivers.

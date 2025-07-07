@@ -481,3 +481,10 @@ func (md *MemoryDriver) Close() error {
 	// Nothing to close for memory driver
 	return nil
 }
+
+// GetAllRepositoriesWithState returns all repositories that have concurrency state.
+// For memory driver, this returns an empty list since state is lost on restart.
+func (md *MemoryDriver) GetAllRepositoriesWithState(_ context.Context) ([]*v1alpha1.Repository, error) {
+	// Memory driver loses all state on restart, so return empty list
+	return []*v1alpha1.Repository{}, nil
+}

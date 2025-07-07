@@ -129,6 +129,12 @@ func (t *TestQueueManager) CleanupRepository(_ context.Context, _ *pacv1alpha1.R
 	return nil
 }
 
+// GetAllRepositoriesWithState returns all repositories that have concurrency state.
+func (t *TestQueueManager) GetAllRepositoriesWithState(_ context.Context) ([]*pacv1alpha1.Repository, error) {
+	// No-op for testing
+	return []*pacv1alpha1.Repository{}, nil
+}
+
 // InitQueues initializes the queue manager.
 func (t *TestQueueManager) InitQueues(_ context.Context, _, _ interface{}) error {
 	return nil
@@ -177,4 +183,10 @@ func (t *TestQueueManager) TryAcquireSlot(_ context.Context, _ *pacv1alpha1.Repo
 // SetupWatcher sets up a watcher for slot availability.
 func (t *TestQueueManager) SetupWatcher(_ context.Context, _ *pacv1alpha1.Repository, _ func()) {
 	// No-op for testing
+}
+
+// SyncStateFromDriver synchronizes the in-memory queue state with the persistent driver state.
+func (t *TestQueueManager) SyncStateFromDriver(_ context.Context, _ *pacv1alpha1.Repository) error {
+	// No-op for testing
+	return nil
 }

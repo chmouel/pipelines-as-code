@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -221,6 +223,29 @@ func (ed *EtcdDriver) GetQueuedPipelineRuns(ctx context.Context, repo *v1alpha1.
 	return pipelineRuns, nil
 }
 
+// GetQueuedPipelineRunsWithTimestamps returns queued PipelineRuns with their creation timestamps.
+// This is used for proper FIFO ordering during state recovery.
+func (ed *EtcdDriver) GetQueuedPipelineRunsWithTimestamps(ctx context.Context, repo *v1alpha1.Repository) (map[string]time.Time, error) {
+	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+	queueKeyPrefix := fmt.Sprintf("%s/%s/queue/", concurrencyPrefix, repoKey)
+
+	resp, err := ed.client.Get(ctx, queueKeyPrefix, clientv3.WithPrefix())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get queued pipeline runs: %w", err)
+	}
+
+	result := make(map[string]time.Time)
+	for _, kv := range resp.Kvs {
+		pipelineRunKey := string(kv.Value)
+		// Use etcd's CreateRevision as a proxy for creation time
+		// Note: This is not a perfect timestamp, but it preserves order
+		creationTime := time.Unix(kv.CreateRevision, 0)
+		result[pipelineRunKey] = creationTime
+	}
+
+	return result, nil
+}
+
 // WatchSlotAvailability watches for slot availability changes in a repository.
 func (ed *EtcdDriver) WatchSlotAvailability(ctx context.Context, repo *v1alpha1.Repository, callback func()) {
 	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
@@ -336,6 +361,47 @@ func (ed *EtcdDriver) CleanupRepository(ctx context.Context, repo *v1alpha1.Repo
 // Close closes the etcd client.
 func (ed *EtcdDriver) Close() error {
 	return ed.client.Close()
+}
+
+// GetAllRepositoriesWithState returns all repositories that have concurrency state.
+func (ed *EtcdDriver) GetAllRepositoriesWithState(ctx context.Context) ([]*v1alpha1.Repository, error) {
+	// Get all repository state keys
+	stateKeyPrefix := fmt.Sprintf("%s/", concurrencyPrefix)
+	resp, err := ed.client.Get(ctx, stateKeyPrefix, clientv3.WithPrefix())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get repository states: %w", err)
+	}
+
+	repos := make([]*v1alpha1.Repository, 0)
+	seenRepos := make(map[string]bool)
+
+	for _, kv := range resp.Kvs {
+		key := string(kv.Key)
+
+		// Extract repository key from state key format: /pac/concurrency/{repoKey}/state
+		// or queue key format: /pac/concurrency/{repoKey}/queue/{pipelineRunKey}
+		parts := strings.Split(key, "/")
+		if len(parts) >= 4 && parts[1] == "pac" && parts[2] == "concurrency" {
+			repoKey := parts[3]
+			if !seenRepos[repoKey] {
+				// Parse repository key (namespace/name)
+				repoParts := strings.Split(repoKey, "/")
+				if len(repoParts) == 2 {
+					repo := &v1alpha1.Repository{
+						ObjectMeta: metav1.ObjectMeta{
+							Namespace: repoParts[0],
+							Name:      repoParts[1],
+						},
+					}
+					repos = append(repos, repo)
+					seenRepos[repoKey] = true
+				}
+			}
+		}
+	}
+
+	ed.logger.Debugf("found %d repositories with concurrency state", len(repos))
+	return repos, nil
 }
 
 // Helper functions for pipeline run key management.

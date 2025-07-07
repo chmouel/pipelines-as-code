@@ -165,16 +165,115 @@ func (m *Manager) GetQueueManager() QueueManager {
 	return m.queueManager
 }
 
+// SyncStateFromDriver synchronizes the in-memory queue state with the persistent driver state.
+func (m *Manager) SyncStateFromDriver(ctx context.Context, repo *v1alpha1.Repository) error {
+	return m.queueManager.SyncStateFromDriver(ctx, repo)
+}
+
 // QueueManager interface implementation.
-func (qm *queueManager) InitQueues(_ context.Context, _, _ interface{}) error {
-	qm.logger.Info("initializing concurrency queues with state-based approach")
+func (qm *queueManager) InitQueues(ctx context.Context, _, pacClient interface{}) error {
+	qm.logger.Info("initializing concurrency queues with state-based approach.")
 
-	// In the new state-based approach, we don't need to initialize queues
-	// as we load state directly from the concurrency driver
+	// For persistent drivers (etcd, postgresql), reconstruct queues from persistent state.
+	// For memory driver, queues start empty (as expected).
+	// Get all repositories that have concurrency state.
+	repos, err := qm.getAllRepositoriesWithState(ctx)
+	if err != nil {
+		qm.logger.Warnf("failed to get repositories with state, starting with empty queues: %v", err)
+		return nil
+	}
 
-	// Note: The original code had type assertions here, but since we're not using
-	// the parameters, we'll skip the initialization logic for now
+	for _, repo := range repos {
+		if err := qm.reconstructQueueFromState(ctx, repo); err != nil {
+			qm.logger.Errorf("failed to reconstruct queue for repository %s/%s: %v", repo.Namespace, repo.Name, err)
+			continue
+		}
+	}
+
+	qm.logger.Infof("initialized queues for %d repositories", len(repos))
 	return nil
+}
+
+// getAllRepositoriesWithState retrieves all repositories that have concurrency state.
+func (qm *queueManager) getAllRepositoriesWithState(ctx context.Context) ([]*v1alpha1.Repository, error) {
+	// Use the driver to get all repositories with state.
+	return qm.driver.GetAllRepositoriesWithState(ctx)
+}
+
+// reconstructQueueFromState rebuilds the in-memory queue from persistent state.
+func (qm *queueManager) reconstructQueueFromState(ctx context.Context, repo *v1alpha1.Repository) error {
+	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+
+	// Try to get queued PipelineRuns with timestamps first (for better FIFO ordering).
+	var queuedPRsWithTimestamps map[string]time.Time
+	var err error
+
+	// Check if driver supports timestamp-aware retrieval.
+	if driver, ok := qm.driver.(interface {
+		GetQueuedPipelineRunsWithTimestamps(context.Context, *v1alpha1.Repository) (map[string]time.Time, error)
+	}); ok {
+		queuedPRsWithTimestamps, err = driver.GetQueuedPipelineRunsWithTimestamps(ctx, repo)
+		if err != nil {
+			qm.logger.Warnf("failed to get queued pipeline runs with timestamps, falling back to basic method: %v", err)
+		}
+	}
+
+	if len(queuedPRsWithTimestamps) > 0 {
+		// Use timestamp-aware reconstruction.
+		queue := NewPriorityQueue()
+		for prKey, creationTime := range queuedPRsWithTimestamps {
+			queue.Add(prKey, creationTime)
+			qm.logger.Debugf("reconstructed queued PipelineRun %s for repository %s with timestamp %v", prKey, repoKey, creationTime)
+		}
+
+		qm.mutex.Lock()
+		qm.pendingQueues[repoKey] = queue
+		qm.mutex.Unlock()
+
+		qm.logger.Infof("reconstructed queue for repository %s with %d PipelineRuns using timestamps", repoKey, len(queuedPRsWithTimestamps))
+		return nil
+	}
+
+	// Fallback to basic method without timestamps.
+	queuedPRs, err := qm.driver.GetQueuedPipelineRuns(ctx, repo)
+	if err != nil {
+		return fmt.Errorf("failed to get queued pipeline runs: %w", err)
+	}
+
+	if len(queuedPRs) == 0 {
+		// No queued PipelineRuns, create empty queue.
+		qm.mutex.Lock()
+		qm.pendingQueues[repoKey] = NewPriorityQueue()
+		qm.mutex.Unlock()
+		return nil
+	}
+
+	// Create new priority queue.
+	queue := NewPriorityQueue()
+
+	// Add queued PipelineRuns to the queue.
+	// Since we don't have creation timestamps in the persistent state,
+	// we'll use the order they were retrieved (which should be FIFO for most drivers).
+	now := time.Now()
+	for i, prKey := range queuedPRs {
+		// Use a slightly offset time to maintain order.
+		creationTime := now.Add(time.Duration(i) * time.Millisecond)
+		queue.Add(prKey, creationTime)
+		qm.logger.Debugf("reconstructed queued PipelineRun %s for repository %s", prKey, repoKey)
+	}
+
+	// Store the reconstructed queue.
+	qm.mutex.Lock()
+	qm.pendingQueues[repoKey] = queue
+	qm.mutex.Unlock()
+
+	qm.logger.Infof("reconstructed queue for repository %s with %d PipelineRuns", repoKey, len(queuedPRs))
+	return nil
+}
+
+// SyncStateFromDriver synchronizes the in-memory queue state with the persistent driver state.
+func (qm *queueManager) SyncStateFromDriver(ctx context.Context, repo *v1alpha1.Repository) error {
+	return qm.reconstructQueueFromState(ctx, repo)
 }
 
 func (qm *queueManager) RemoveRepository(repo *v1alpha1.Repository) {

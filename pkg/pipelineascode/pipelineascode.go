@@ -129,10 +129,6 @@ func (p *PacRun) Run(ctx context.Context) error {
 		}(match, i)
 	}
 	wg.Wait()
-
-	// Execution order is now handled by the concurrency system
-	// No need to patch PipelineRuns with execution order annotations
-	wg.Wait()
 	return nil
 }
 
@@ -278,5 +274,3 @@ func getMergePatch(annotations, labels map[string]string) map[string]any {
 		},
 	}
 }
-
-// getExecutionOrderPatch function removed - execution order is now handled by the concurrency system
