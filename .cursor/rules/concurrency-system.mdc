@@ -1,0 +1,170 @@
+# Pipelines-as-Code Concurrency System
+
+## Architecture Overview
+
+The concurrency system is built around a **state-based approach** that manages PipelineRun execution order without relying on ExecutionOrder annotations. Key components:
+
+- **ConcurrencyDriver Interface**: Abstraction supporting multiple backends (memory, etcd, PostgreSQL)
+- **QueueManager**: Manages pending and running queues with FIFO ordering
+- **Manager**: High-level API wrapping driver and queue manager
+- **PriorityQueue**: FIFO queue implementation for pending PipelineRuns
+
+## Key Files
+
+- [pkg/concurrency/interface.go](mdc:pkg/concurrency/interface.go) - Core interfaces
+- [pkg/concurrency/manager.go](mdc:pkg/concurrency/manager.go) - Main manager implementation
+- [pkg/concurrency/memory_driver.go](mdc:pkg/concurrency/memory_driver.go) - Memory backend
+- [pkg/concurrency/etcd_driver.go](mdc:pkg/concurrency/etcd_driver.go) - etcd backend
+- [pkg/concurrency/postgresql_driver.go](mdc:pkg/concurrency/postgresql_driver.go) - PostgreSQL backend
+- [pkg/concurrency/priority_queue.go](mdc:pkg/concurrency/priority_queue.go) - FIFO queue implementation
+
+## Critical Implementation Rules
+
+### 1. Thread Safety Requirements
+
+- **ALL driver methods MUST be thread-safe** - use proper locking
+- **Queue manager operations MUST be atomic** - acquire locks before multi-step operations
+- **Avoid deadlocks** - establish consistent lock ordering between queue manager and drivers
+
+### 2. State Management
+
+- **Slots have two states**: "queued" and "running"
+- **State transitions must be atomic**: queued → running via AcquireSlot
+- **Cleanup expired slots** regularly to prevent memory leaks
+- **Synchronize slot state with pipeline state** - don't create duplicate slots
+
+### 3. Lease ID Handling
+
+- **Consistent lease ID semantics**: 0 means "no lease" across all drivers
+- **Handle lease ID lookup by pipeline key** for cleanup operations
+- **Validate lease IDs** before performing operations
+
+### 4. Memory Management
+
+- **Clean up pipeline states** when repositories are removed
+- **Remove expired slots** from all tracking structures
+- **Avoid memory leaks** in long-running deployments
+
+## Known Bug Patterns to Avoid
+
+### Race Conditions
+
+```go
+// ❌ BAD: Multiple slot counts in same method
+func (md *MemoryDriver) AcquireSlot() {
+    // Count 1: for queued promotion
+    currentCount := countRunningSlots()
+    // ... other operations ...
+    // Count 2: for new slot creation (state may have changed!)
+    currentCount = countRunningSlots()
+}
+
+// ✅ GOOD: Single atomic operation
+func (md *MemoryDriver) AcquireSlot() {
+    // Perform all checks and updates in single critical section
+    md.mu.Lock()
+    defer md.mu.Unlock()
+    // ... all operations here ...
+}
+```
+
+### State Synchronization Issues
+
+```go
+// ❌ BAD: Creating duplicate slots
+func SetPipelineRunState(key, state string) {
+    if state == "queued" {
+        // Always creates new slot - duplicate if called multiple times
+        createNewSlot(key)
+    }
+}
+
+// ✅ GOOD: Check for existing slots
+func SetPipelineRunState(key, state string) {
+    if state == "queued" {
+        if !slotExists(key) {
+            createNewSlot(key)
+        }
+    }
+}
+```
+
+### Incomplete Cleanup
+
+```go
+// ❌ BAD: Partial cleanup
+func CleanupRepository(repo) {
+    delete(md.slots, repoKey)
+    // Missing: pipeline states cleanup
+}
+
+// ✅ GOOD: Complete cleanup
+func CleanupRepository(repo) {
+    // Remove all related data structures
+    delete(md.slots, repoKey)
+    delete(md.repositoryStates, repoKey)
+    // Clean up pipeline states for this repo
+    for key := range md.pipelineStates {
+        if belongsToRepo(key, repo) {
+            delete(md.pipelineStates, key)
+        }
+    }
+}
+```
+
+## Testing Requirements
+
+### Unit Tests Must Cover
+
+- **Concurrent access patterns** - multiple goroutines accessing same resources
+- **State transitions** - queued → running → released
+- **Edge cases** - expired slots, duplicate operations, cleanup scenarios
+- **Error conditions** - invalid lease IDs, missing slots, backend failures
+
+### Integration Tests Must Cover
+
+- **Queue initialization from persistent state** - restore queued/running PipelineRuns
+- **Cross-component interactions** - reconciler ↔ concurrency manager
+- **Backend switching** - memory ↔ etcd ↔ PostgreSQL
+- **Failure recovery** - system restart scenarios
+
+## Configuration Guidelines
+
+### Driver Selection
+
+- **Memory**: Development and testing only
+- **etcd**: Production with existing etcd infrastructure
+- **PostgreSQL**: Production with database preference
+
+### Concurrency Limits
+
+- **Repository-level limits**: Set via Repository.Spec.ConcurrencyLimit
+- **Global limits**: Configured via driver-specific settings
+- **Zero/nil limits**: Means unlimited concurrency
+
+## Migration Notes
+
+### From Annotation-Based System
+
+- **Remove ExecutionOrder dependencies** in reconciler logic
+- **Initialize queues from persistent state** on startup
+- **Maintain backward compatibility** during transition period
+
+### State Recovery
+
+- **Restore running PipelineRuns** from driver state
+- **Rebuild pending queues** from queued PipelineRuns
+- **Handle orphaned states** gracefully
+
+## Performance Considerations
+
+- **Batch operations** where possible to reduce lock contention
+- **Use read locks** for read-only operations
+- **Implement background cleanup** for expired resources
+- **Monitor queue depths** and slot utilization
+- **Consider driver-specific optimizations** (e.g., etcd watches, PostgreSQL transactions)
+description:
+globs:
+alwaysApply: false
+
+---

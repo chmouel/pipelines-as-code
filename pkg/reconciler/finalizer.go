@@ -28,12 +28,8 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 			return nil
 		}
 		repo, err := r.repoLister.Repositories(pr.Namespace).Get(repoName)
-		// if repository is not found then remove the queue for that repository if exist
+		// if repository is not found then cleanup concurrency state
 		if errors.IsNotFound(err) {
-			r.qm.RemoveRepository(&v1alpha1.Repository{
-				ObjectMeta: metav1.ObjectMeta{Name: repoName, Namespace: pr.Namespace},
-			})
-			// Also cleanup concurrency state if using new system
 			if r.concurrencyManager != nil {
 				if err := r.concurrencyManager.CleanupRepository(ctx, &v1alpha1.Repository{
 					ObjectMeta: metav1.ObjectMeta{Name: repoName, Namespace: pr.Namespace},
@@ -66,19 +62,45 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, pr *tektonv1.PipelineRun)
 			}
 		}
 
-		next := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
-		if next != "" {
-			key := strings.Split(next, "/")
-			pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
-			if err != nil {
-				return err
+		// Check if there are queued PipelineRuns that can now start
+		if r.concurrencyManager != nil {
+			queuedPRs := r.concurrencyManager.GetQueueManager().QueuedPipelineRuns(repo)
+			if len(queuedPRs) > 0 {
+				// Try to start the next queued PipelineRun
+				for _, nextPRKey := range queuedPRs {
+					parts := strings.Split(nextPRKey, "/")
+					if len(parts) != 2 {
+						continue
+					}
+
+					nextPR, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(parts[0]).Get(ctx, parts[1], metav1.GetOptions{})
+					if err != nil {
+						logger.Errorf("cannot get pipeline for next in queue: %w", err)
+						continue
+					}
+
+					// Try to acquire a slot for this PipelineRun
+					success, _, err := r.concurrencyManager.AcquireSlot(ctx, repo, nextPRKey)
+					if err != nil {
+						logger.Errorf("failed to acquire slot for %s: %v", nextPRKey, err)
+						continue
+					}
+
+					if success {
+						if err := r.updatePipelineRunToInProgress(ctx, logger, repo, nextPR); err != nil {
+							logger.Errorf("failed to update status: %w", err)
+							// Release the slot if we can't update the PipelineRun
+							repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+							if releaseErr := r.concurrencyManager.ReleaseSlot(ctx, nil, nextPRKey, repoKey); releaseErr != nil {
+								logger.Errorf("failed to release slot after update failure: %v", releaseErr)
+							}
+							return err
+						}
+						logger.Infof("started next queued PipelineRun: %s", nextPRKey)
+						return nil
+					}
+				}
 			}
-			if err := r.
-				updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-				logger.Errorf("failed to update status: %w", err)
-				return err
-			}
-			return nil
 		}
 	}
 	return nil

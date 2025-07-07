@@ -31,16 +31,15 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	pac "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/sync"
 )
 
 // Reconciler implements controller.Reconciler for PipelineRun resources.
 type Reconciler struct {
-	run                *params.Run
-	repoLister         pacapi.RepositoryLister
-	pipelineRunLister  tektonv1lister.PipelineRunLister
-	kinteract          kubeinteraction.Interface
-	qm                 sync.QueueManagerInterface
+	run               *params.Run
+	repoLister        pacapi.RepositoryLister
+	pipelineRunLister tektonv1lister.PipelineRunLister
+	kinteract         kubeinteraction.Interface
+
 	metrics            *metrics.Recorder
 	eventEmitter       *events.EventEmitter
 	globalRepo         *v1alpha1.Repository
@@ -222,25 +221,53 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		logger.Error("failed to emit metrics: ", err)
 	}
 
-	// remove pipelineRun from Queue and start the next one
-	for {
-		next := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
-		if next == "" {
-			break
-		}
-		key := strings.Split(next, "/")
-		pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
-		if err != nil {
-			logger.Errorf("cannot get pipeline for next in queue: %w", err)
-			continue
+	// Release concurrency slot and process next queued PipelineRun
+	if r.concurrencyManager != nil {
+		prKey := fmt.Sprintf("%s/%s", pr.Namespace, pr.Name)
+		repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+
+		// Release the slot for the completed PipelineRun
+		if err := r.concurrencyManager.ReleaseSlot(ctx, nil, prKey, repoKey); err != nil {
+			logger.Errorf("failed to release concurrency slot for %s: %v", prKey, err)
 		}
 
-		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-			logger.Errorf("failed to update status: %w", err)
-			_ = r.qm.RemoveFromQueue(sync.RepoKey(repo), sync.PrKey(pr))
-			continue
+		// Check if there are queued PipelineRuns that can now start
+		queuedPRs := r.concurrencyManager.GetQueueManager().QueuedPipelineRuns(repo)
+		if len(queuedPRs) > 0 {
+			// Try to start the next queued PipelineRun
+			for _, nextPRKey := range queuedPRs {
+				parts := strings.Split(nextPRKey, "/")
+				if len(parts) != 2 {
+					continue
+				}
+
+				nextPR, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(parts[0]).Get(ctx, parts[1], metav1.GetOptions{})
+				if err != nil {
+					logger.Errorf("cannot get pipeline for next in queue: %w", err)
+					continue
+				}
+
+				// Try to acquire a slot for this PipelineRun
+				success, _, err := r.concurrencyManager.AcquireSlot(ctx, repo, nextPRKey)
+				if err != nil {
+					logger.Errorf("failed to acquire slot for %s: %v", nextPRKey, err)
+					continue
+				}
+
+				if success {
+					if err := r.updatePipelineRunToInProgress(ctx, logger, repo, nextPR); err != nil {
+						logger.Errorf("failed to update status: %w", err)
+						// Release the slot if we can't update the PipelineRun
+						if releaseErr := r.concurrencyManager.ReleaseSlot(ctx, nil, nextPRKey, repoKey); releaseErr != nil {
+							logger.Errorf("failed to release slot after update failure: %v", releaseErr)
+						}
+						continue
+					}
+					logger.Infof("started next queued PipelineRun: %s", nextPRKey)
+					break
+				}
+			}
 		}
-		break
 	}
 
 	if err := r.cleanupPipelineRuns(ctx, logger, pacInfo, repo, pr); err != nil {
@@ -356,4 +383,45 @@ func (r *Reconciler) updatePipelineRunState(ctx context.Context, logger *zap.Sug
 		return pr, fmt.Errorf("error patching the pipelinerun: %w", err)
 	}
 	return patchedPR, nil
+}
+
+// queuePipelineRun handles a PipelineRun in the queued state using the new concurrency system.
+func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun) error {
+	repoName := pr.GetAnnotations()[keys.Repository]
+	repo, err := r.repoLister.Repositories(pr.Namespace).Get(repoName)
+	if err != nil {
+		return fmt.Errorf("failed to get repository CR: %w", err)
+	}
+
+	prKey := concurrency.PrKey(pr)
+
+	// Add to pending queue (idempotent)
+	if err := r.concurrencyManager.GetQueueManager().AddToPendingQueue(repo, []string{prKey}); err != nil {
+		logger.Errorf("failed to add PipelineRun to pending queue: %v", err)
+		return err
+	}
+
+	// Try to acquire a slot
+	success, _, err := r.concurrencyManager.AcquireSlot(ctx, repo, prKey)
+	if err != nil {
+		logger.Errorf("failed to acquire concurrency slot: %v", err)
+		return err
+	}
+
+	if success {
+		// Promote to running: update state and status
+		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+			logger.Errorf("failed to update PipelineRun to in-progress: %v", err)
+			return err
+		}
+		logger.Infof("PipelineRun %s promoted to running", prKey)
+	} else {
+		// Remain queued: ensure state and status are correct
+		if _, err := r.updatePipelineRunState(ctx, logger, pr, kubeinteraction.StateQueued); err != nil {
+			logger.Errorf("failed to update PipelineRun state to queued: %v", err)
+			return err
+		}
+		logger.Infof("PipelineRun %s remains queued", prKey)
+	}
+	return nil
 }

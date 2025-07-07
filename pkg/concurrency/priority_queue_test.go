@@ -36,31 +36,6 @@ func TestPriorityQueue_FIFOOrdering(t *testing.T) {
 	}
 }
 
-func TestPriorityQueue_IsPending(t *testing.T) {
-	pq := NewPriorityQueue()
-
-	// Initially not pending
-	if pq.IsPending("pr-1") {
-		t.Error("expected pr-1 to not be pending initially")
-	}
-
-	// Add item
-	pq.Add("pr-1", time.Now())
-
-	// Should be pending now
-	if !pq.IsPending("pr-1") {
-		t.Error("expected pr-1 to be pending after adding")
-	}
-
-	// Remove item
-	pq.Remove("pr-1")
-
-	// Should not be pending after removal
-	if pq.IsPending("pr-1") {
-		t.Error("expected pr-1 to not be pending after removal")
-	}
-}
-
 func TestPriorityQueue_GetPendingItems(t *testing.T) {
 	pq := NewPriorityQueue()
 
@@ -95,10 +70,5 @@ func TestPriorityQueue_DuplicateAdd(t *testing.T) {
 	// Should only have one item
 	if pq.Len() != 1 {
 		t.Errorf("expected 1 item after duplicate add, got %d", pq.Len())
-	}
-
-	// Should still be pending
-	if !pq.IsPending("pr-1") {
-		t.Error("expected pr-1 to still be pending after duplicate add")
 	}
 }

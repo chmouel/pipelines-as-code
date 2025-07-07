@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-github/v71/github"
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/concurrency"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/metrics"
@@ -21,7 +23,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	ghprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/secrets"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/sync"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	ghtesthelper "github.com/openshift-pipelines/pipelines-as-code/pkg/test/github"
 	tektontest "github.com/openshift-pipelines/pipelines-as-code/pkg/test/tekton"
@@ -186,9 +187,19 @@ func TestReconciler_ReconcileKind(t *testing.T) {
 			metrics, err := metrics.NewRecorder()
 			assert.NilError(t, err)
 
+			// Create a mock concurrency manager for testing
+			mockConfig := &concurrency.DriverConfig{
+				Driver: "memory",
+				MemoryConfig: &concurrency.MemoryConfig{
+					LeaseTTL: 30 * time.Minute,
+				},
+			}
+			mockManager, err := concurrency.NewManager(mockConfig, fakelogger)
+			assert.NilError(t, err)
+
 			r := Reconciler{
-				repoLister: informers.Repository.Lister(),
-				qm:         sync.NewQueueManager(fakelogger),
+				repoLister:         informers.Repository.Lister(),
+				concurrencyManager: mockManager,
 				run: &params.Run{
 					Clients: clients.Clients{
 						PipelineAsCode: stdata.PipelineAsCode,

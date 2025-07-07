@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/generated/clientset/versioned"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/sync"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	tektonVersionedClient "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -159,11 +159,20 @@ func (qm *QueueManager) RemoveFromQueue(repoKey, prKey string) bool {
 	return true
 }
 
+// Utility functions to generate keys (replacing concurrency.PrKey and concurrency.RepoKey)
+func prKey(run *tektonv1.PipelineRun) string {
+	return run.GetNamespace() + "/" + run.GetName()
+}
+
+func repoKey(repo *v1alpha1.Repository) string {
+	return repo.GetNamespace() + "/" + repo.GetName()
+}
+
 // RemoveAndTakeItemFromQueue releases a slot and returns the next item to process.
 // In etcd-based approach, this is simplified since there's no explicit queue.
 func (qm *QueueManager) RemoveAndTakeItemFromQueue(repo *v1alpha1.Repository, run *tektonv1.PipelineRun) string {
-	prKey := sync.PrKey(run)
-	repoKey := sync.RepoKey(repo)
+	prKey := prKey(run)
+	repoKey := repoKey(repo)
 
 	// Release the current slot
 	qm.RemoveFromQueue(repoKey, prKey)

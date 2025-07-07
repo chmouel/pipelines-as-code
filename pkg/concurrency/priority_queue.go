@@ -9,11 +9,11 @@ import (
 type PriorityQueueItem struct {
 	Key          string
 	CreationTime time.Time
-	Priority     int64 // Unix timestamp for FIFO ordering
-	Index        int
+	priority     int64
+	index        int
 }
 
-// PriorityQueue implements a min-heap based priority queue
+// PriorityQueue implements a priority queue for pipeline run keys
 type PriorityQueue struct {
 	items     []*PriorityQueueItem
 	itemByKey map[string]*PriorityQueueItem
@@ -22,58 +22,67 @@ type PriorityQueue struct {
 // NewPriorityQueue creates a new priority queue
 func NewPriorityQueue() *PriorityQueue {
 	return &PriorityQueue{
-		items:     []*PriorityQueueItem{},
+		items:     make([]*PriorityQueueItem, 0),
 		itemByKey: make(map[string]*PriorityQueueItem),
 	}
 }
 
-// IsPending checks if a key is already in the pending queue
-func (pq *PriorityQueue) IsPending(key string) bool {
-	_, exists := pq.itemByKey[key]
-	return exists
-}
-
-// Add adds a new item to the priority queue
+// Add adds an item to the priority queue with the given creation time as priority
 func (pq *PriorityQueue) Add(key string, creationTime time.Time) {
-	if pq.IsPending(key) {
-		return // Already in queue
+	if _, exists := pq.itemByKey[key]; exists {
+		return // Item already exists
 	}
 
 	item := &PriorityQueueItem{
 		Key:          key,
 		CreationTime: creationTime,
-		Priority:     creationTime.UnixNano(),
+		priority:     creationTime.UnixNano(),
 	}
-
 	heap.Push(pq, item)
 }
 
 // Remove removes an item from the priority queue
 func (pq *PriorityQueue) Remove(key string) {
 	if item, exists := pq.itemByKey[key]; exists {
-		heap.Remove(pq, item.Index)
+		heap.Remove(pq, item.index)
+		delete(pq.itemByKey, key)
 	}
 }
 
 // PopItem removes and returns the highest priority item
 func (pq *PriorityQueue) PopItem() *PriorityQueueItem {
-	if pq.Len() == 0 {
+	if len(pq.items) == 0 {
 		return nil
 	}
 	popped := heap.Pop(pq)
 	item, ok := popped.(*PriorityQueueItem)
 	if !ok {
-		panic("failed to type assert popped item to *PriorityQueueItem")
+		return nil
 	}
 	return item
 }
 
 // Peek returns the highest priority item without removing it
 func (pq *PriorityQueue) Peek() *PriorityQueueItem {
-	if pq.Len() == 0 {
+	if len(pq.items) == 0 {
 		return nil
 	}
 	return pq.items[0]
+}
+
+// Contains checks if an item exists in the queue
+func (pq *PriorityQueue) Contains(key string) bool {
+	_, exists := pq.itemByKey[key]
+	return exists
+}
+
+// GetPendingItems returns all pending items as a slice of keys
+func (pq *PriorityQueue) GetPendingItems() []string {
+	keys := make([]string, 0, len(pq.items))
+	for _, item := range pq.items {
+		keys = append(keys, item.Key)
+	}
+	return keys
 }
 
 // Len returns the number of items in the queue
@@ -81,46 +90,34 @@ func (pq *PriorityQueue) Len() int {
 	return len(pq.items)
 }
 
-// Less implements heap.Interface
-func (pq PriorityQueue) Less(i, j int) bool {
-	return pq.items[i].Priority < pq.items[j].Priority
+// heap.Interface implementation
+func (pq *PriorityQueue) Less(i, j int) bool {
+	return pq.items[i].priority < pq.items[j].priority
 }
 
-// Swap implements heap.Interface
-func (pq PriorityQueue) Swap(i, j int) {
+func (pq *PriorityQueue) Swap(i, j int) {
 	pq.items[i], pq.items[j] = pq.items[j], pq.items[i]
-	pq.items[i].Index = i
-	pq.items[j].Index = j
+	pq.items[i].index = i
+	pq.items[j].index = j
 }
 
-// Push implements heap.Interface
 func (pq *PriorityQueue) Push(x interface{}) {
 	n := len(pq.items)
 	item, ok := x.(*PriorityQueueItem)
 	if !ok {
-		panic("failed to type assert pushed item to *PriorityQueueItem")
+		return
 	}
-	item.Index = n
+	item.index = n
 	pq.items = append(pq.items, item)
 	pq.itemByKey[item.Key] = item
 }
 
-// Pop implements heap.Interface
 func (pq *PriorityQueue) Pop() interface{} {
 	old := pq.items
 	n := len(old)
 	item := old[n-1]
-	item.Index = -1
+	item.index = -1
 	pq.items = old[0 : n-1]
 	delete(pq.itemByKey, item.Key)
 	return item
-}
-
-// GetPendingItems returns all pending items in priority order
-func (pq *PriorityQueue) GetPendingItems() []string {
-	items := make([]string, 0, pq.Len())
-	for _, item := range pq.items {
-		items = append(items, item.Key)
-	}
-	return items
 }

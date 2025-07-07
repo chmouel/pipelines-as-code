@@ -404,7 +404,7 @@ func (pd *PostgreSQLDriver) SetPipelineRunState(ctx context.Context, pipelineRun
 			VALUES ($1, $2, 'queued', NOW() + INTERVAL '1 hour')
 			ON CONFLICT (repository_key, pipeline_run_key) 
 			DO UPDATE SET state = 'queued', expires_at = NOW() + INTERVAL '1 hour'`
-		
+
 		_, err = pd.db.ExecContext(ctx, queueQuery, repoKey, pipelineRunKey)
 		if err != nil {
 			pd.logger.Errorf("failed to add pipeline run to queue: %v", err)

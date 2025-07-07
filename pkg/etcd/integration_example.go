@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/sync"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 )
@@ -24,19 +24,16 @@ func NewIntegrationFactory(logger *zap.SugaredLogger) *IntegrationFactory {
 	}
 }
 
-// CreateQueueManager creates an appropriate queue manager based on configuration.
-func (f *IntegrationFactory) CreateQueueManager(settings map[string]string) (sync.QueueManagerInterface, error) {
+// CreateConcurrencyManager creates an appropriate concurrency manager based on configuration.
+func (f *IntegrationFactory) CreateConcurrencyManager(settings map[string]string) (interface{}, error) {
 	if IsEtcdEnabled(settings) {
-		f.logger.Info("creating etcd-based queue manager")
-		etcdClient, err := NewClientByMode(settings, f.logger)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create etcd client: %w", err)
-		}
-		return NewQueueManager(etcdClient, f.logger), nil
+		f.logger.Info("creating etcd-based concurrency manager")
+		// Example: return concurrency.NewManager(etcdConfig, f.logger)
+		return nil, nil
 	}
 
-	f.logger.Info("etcd disabled, using traditional queue manager")
-	// Return nil to indicate traditional system should be used
+	f.logger.Info("etcd disabled, using memory-based concurrency manager")
+	// Example: return concurrency.NewManager(memoryConfig, f.logger)
 	return nil, nil
 }
 
@@ -126,13 +123,11 @@ func (r *IntegratedReconciler) Close() error {
 // func NewReconciler(...) *Reconciler {
 //     integrationFactory := etcd.NewIntegrationFactory(logger)
 //
-//     // Try to create etcd-based queue manager
-//     queueManager, err := integrationFactory.CreateQueueManager()
+//     // Try to create etcd-based concurrency manager
+//     concurrencyManager, err := integrationFactory.CreateConcurrencyManager()
 //     if err != nil {
-//         logger.Errorf("failed to create etcd queue manager, falling back: %v", err)
-//         queueManager = sync.NewQueueManager(logger) // traditional
-//     } else if queueManager == nil {
-//         queueManager = sync.NewQueueManager(logger) // traditional
+//         logger.Errorf("failed to create etcd concurrency manager, falling back: %v", err)
+//         // Fall back to memory-based concurrency manager
 //     }
 //
 //     // Create reconciler integration
@@ -143,7 +138,7 @@ func (r *IntegratedReconciler) Close() error {
 //
 //     return &Reconciler{
 //         // ... other fields
-//         qm: queueManager,
+//         concurrencyManager: concurrencyManager,
 //         etcdIntegration: reconcilerIntegration,
 //     }
 // }

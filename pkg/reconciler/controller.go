@@ -59,7 +59,6 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 			log.Fatalf("Failed to initialize concurrency system: %v", err)
 		}
 		log.Infof("Initialized concurrency system with driver: %s", concurrencyManager.GetDriverType())
-		qm := concurrency.NewQueueManagerAdapter(concurrencyManager.GetQueueManager(), run.Clients.Log)
 
 		var etcdStateManager *etcd.StateManager
 		if concurrencyManager.GetDriverType() == "etcd" {
@@ -77,7 +76,6 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 			kinteract:          kinteract,
 			pipelineRunLister:  pipelineRunInformer.Lister(),
 			repoLister:         repository.Get(ctx).Lister(),
-			qm:                 qm,
 			metrics:            metrics,
 			eventEmitter:       events.NewEventEmitter(run.Clients.Kube, run.Clients.Log),
 			etcdStateManager:   etcdStateManager,
@@ -85,7 +83,7 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 		}
 		impl := tektonPipelineRunReconcilerv1.NewImpl(ctx, r, ctrlOpts())
 
-		if err := r.qm.InitQueues(ctx, run.Clients.Tekton, run.Clients.PipelineAsCode); err != nil {
+		if err := concurrencyManager.GetQueueManager().InitQueues(ctx, run.Clients.Tekton, run.Clients.PipelineAsCode); err != nil {
 			log.Fatal("failed to init queues", err)
 		}
 

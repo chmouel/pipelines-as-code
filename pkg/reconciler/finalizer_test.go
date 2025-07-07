@@ -2,14 +2,15 @@ package reconciler
 
 import (
 	"testing"
+	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/concurrency"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/sync"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
@@ -100,45 +101,66 @@ func TestReconciler_FinalizeKind(t *testing.T) {
 			testData := testclient.Data{
 				Repositories: []*v1alpha1.Repository{finalizeTestRepo},
 			}
+			if len(tt.addToQueue) != 0 {
+				testData.PipelineRuns = tt.addToQueue
+			}
 			if tt.skipAddingRepo {
 				testData.Repositories = []*v1alpha1.Repository{}
 			}
 			stdata, informers := testclient.SeedTestData(t, ctx, testData)
+			// Create a mock concurrency manager for testing
+			mockConfig := &concurrency.DriverConfig{
+				Driver: "memory",
+				MemoryConfig: &concurrency.MemoryConfig{
+					LeaseTTL: 30 * time.Minute,
+				},
+			}
+			mockManager, err := concurrency.NewManager(mockConfig, fakelogger)
+			assert.NilError(t, err)
+
 			r := Reconciler{
-				repoLister: informers.Repository.Lister(),
-				qm:         sync.NewQueueManager(fakelogger),
+				repoLister:         informers.Repository.Lister(),
+				concurrencyManager: mockManager,
 				run: &params.Run{
 					Clients: clients.Clients{
 						PipelineAsCode: stdata.PipelineAsCode,
+						Tekton:         stdata.Pipeline,
 					},
 					Info: info.Info{
-						Kube:       &info.KubeOpts{Namespace: "pac"},
-						Controller: &info.ControllerInfo{GlobalRepository: "pac"},
+						Kube:       &info.KubeOpts{Namespace: "pac-app-pipelines"},
+						Controller: &info.ControllerInfo{GlobalRepository: "pac-app"},
+						Pac:        info.NewPacOpts(),
 					},
 				},
 			}
 
-			if len(tt.addToQueue) != 0 {
+			if len(tt.addToQueue) != 0 && !tt.skipAddingRepo {
 				for _, pr := range tt.addToQueue {
-					_, err := r.qm.AddListToRunningQueue(finalizeTestRepo, []string{pr.GetNamespace() + "/" + pr.GetName()})
-					assert.NilError(t, err)
+					// Don't add the PipelineRun that's being finalized to the queue
+					if pr.GetName() == tt.pipelinerun.GetName() {
+						continue
+					}
+					prKey := pr.GetNamespace() + "/" + pr.GetName()
+					// Add to pending queue using the new concurrency system
+					addErr := r.concurrencyManager.GetQueueManager().AddToPendingQueue(finalizeTestRepo, []string{prKey})
+					assert.NilError(t, addErr)
 				}
 			}
-			err := r.FinalizeKind(ctx, tt.pipelinerun)
-			assert.NilError(t, err)
+			finalizeErr := r.FinalizeKind(ctx, tt.pipelinerun)
+			assert.NilError(t, finalizeErr)
 
 			// if repo was deleted then no queue will be there
 			if tt.skipAddingRepo {
-				assert.Equal(t, len(r.qm.RunningPipelineRuns(finalizeTestRepo)), 0)
-				assert.Equal(t, len(r.qm.QueuedPipelineRuns(finalizeTestRepo)), 0)
+				assert.Equal(t, len(r.concurrencyManager.GetQueueManager().RunningPipelineRuns(finalizeTestRepo)), 0)
+				assert.Equal(t, len(r.concurrencyManager.GetQueueManager().QueuedPipelineRuns(finalizeTestRepo)), 0)
 				return
 			}
 
 			// if queue was populated then number of elements in it should
-			// be one less than total added
+			// be the same as total added (since one was finalized and another promoted)
 			if len(tt.addToQueue) != 0 {
-				totalInQueue := len(r.qm.QueuedPipelineRuns(finalizeTestRepo)) + len(r.qm.RunningPipelineRuns(finalizeTestRepo))
-				assert.Equal(t, totalInQueue, len(tt.addToQueue)-1)
+				totalInQueue := len(r.concurrencyManager.GetQueueManager().QueuedPipelineRuns(finalizeTestRepo)) + len(r.concurrencyManager.GetQueueManager().RunningPipelineRuns(finalizeTestRepo))
+				assert.Equal(t, totalInQueue, len(tt.addToQueue))
 			}
 		})
 	}

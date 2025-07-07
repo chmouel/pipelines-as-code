@@ -6,7 +6,6 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
-	"github.com/openshift-pipelines/pipelines-as-code/pkg/sync"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -56,7 +55,7 @@ func (r *ReconcilerIntegration) IsEnabled() bool {
 }
 
 // GetQueueManager returns the etcd-based queue manager.
-func (r *ReconcilerIntegration) GetQueueManager() sync.QueueManagerInterface {
+func (r *ReconcilerIntegration) GetQueueManager() interface{} {
 	if !r.etcdEnabled {
 		return nil
 	}
