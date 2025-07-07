@@ -314,15 +314,22 @@ func (md *MemoryDriver) GetQueuedPipelineRuns(_ context.Context, repo *v1alpha1.
 }
 
 // WatchSlotAvailability watches for slot availability changes in a repository.
-// For memory driver, this is a simplified polling implementation.
+// For memory driver, uses optimized polling with exponential backoff.
 func (md *MemoryDriver) WatchSlotAvailability(ctx context.Context, repo *v1alpha1.Repository, callback func()) {
 	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
 
 	go func() {
-		ticker := time.NewTicker(5 * time.Second)
+		// Memory driver can afford faster polling since it's in-memory
+		initialInterval := 1 * time.Second
+		maxInterval := 15 * time.Second
+		currentInterval := initialInterval
+
+		ticker := time.NewTicker(currentInterval)
 		defer ticker.Stop()
 
 		lastCount := -1
+		consecutiveNoChanges := 0
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -335,10 +342,31 @@ func (md *MemoryDriver) WatchSlotAvailability(ctx context.Context, repo *v1alpha
 				}
 
 				if lastCount != -1 && count < lastCount {
-					// A slot was released
-					md.logger.Debugf("slot released in repository %s, triggering callback", repoKey)
+					// A slot was released - trigger callback and reset to fast polling
+					md.logger.Debugf("slot released in repository %s (count: %d -> %d), triggering callback", repoKey, lastCount, count)
 					callback()
+
+					// Reset to fast polling after detecting change
+					currentInterval = initialInterval
+					consecutiveNoChanges = 0
+					ticker.Reset(currentInterval)
+				} else if lastCount == count {
+					// No change detected - gradually increase polling interval
+					consecutiveNoChanges++
+					if consecutiveNoChanges >= 5 && currentInterval < maxInterval {
+						// Slower backoff for memory driver since it's faster
+						currentInterval = time.Duration(float64(currentInterval) * 1.3)
+						if currentInterval > maxInterval {
+							currentInterval = maxInterval
+						}
+						ticker.Reset(currentInterval)
+						md.logger.Debugf("no changes detected for repository %s, increased polling interval to %v", repoKey, currentInterval)
+					}
+				} else {
+					// Count changed (but not decreased) - reset backoff
+					consecutiveNoChanges = 0
 				}
+
 				lastCount = count
 			}
 		}

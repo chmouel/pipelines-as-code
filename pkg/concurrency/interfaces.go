@@ -88,6 +88,9 @@ type QueueManager interface {
 
 	// SyncStateFromDriver synchronizes the in-memory queue state with the persistent driver state
 	SyncStateFromDriver(ctx context.Context, repo *v1alpha1.Repository) error
+
+	// ValidateStateConsistency checks for state inconsistencies and cleans them up
+	ValidateStateConsistency(ctx context.Context, repo *v1alpha1.Repository, tektonClient interface{}) error
 }
 
 // DriverConfig holds configuration for concurrency drivers.

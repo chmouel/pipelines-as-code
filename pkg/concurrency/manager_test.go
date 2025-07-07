@@ -113,9 +113,10 @@ func TestQueueManager_InitQueues_StateBased(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, len(acquired), 0, "Should not acquire more slots when at limit")
 
-	// Release a slot and try again
-	success := queueManager.RemoveFromQueue("test-namespace/test-repo-1", "test-namespace/pr1-running-1")
-	assert.Assert(t, success, "Should successfully remove from queue")
+	// Release a slot by releasing it from the driver directly
+	// (since pr1-running-1 is in running state, not queued)
+	err = driver.ReleaseSlot(ctx, nil, "test-namespace/pr1-running-1", "test-namespace/test-repo-1")
+	assert.NilError(t, err, "Should successfully release slot")
 
 	// Now we should be able to acquire a slot
 	acquired, err = queueManager.AddListToRunningQueue(repo1, []string{"test-namespace/pr1-queued-1"})

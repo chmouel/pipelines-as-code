@@ -14,12 +14,17 @@ type PriorityQueueItem struct {
 }
 
 // PriorityQueue implements a priority queue for pipeline run keys.
+//
+// IMPORTANT: This implementation is NOT thread-safe. All operations must be
+// protected by external synchronization (e.g., mutex) when used concurrently.
+// The queueManager handles this synchronization automatically.
 type PriorityQueue struct {
 	items     []*PriorityQueueItem
 	itemByKey map[string]*PriorityQueueItem
 }
 
 // NewPriorityQueue creates a new priority queue.
+// The returned queue is not thread-safe and requires external synchronization.
 func NewPriorityQueue() *PriorityQueue {
 	return &PriorityQueue{
 		items:     make([]*PriorityQueueItem, 0),

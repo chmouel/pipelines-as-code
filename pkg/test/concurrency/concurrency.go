@@ -190,3 +190,9 @@ func (t *TestQueueManager) SyncStateFromDriver(_ context.Context, _ *pacv1alpha1
 	// No-op for testing
 	return nil
 }
+
+// ValidateStateConsistency checks for state inconsistencies and cleans them up.
+func (t *TestQueueManager) ValidateStateConsistency(_ context.Context, _ *pacv1alpha1.Repository, _ interface{}) error {
+	// No-op for testing
+	return nil
+}

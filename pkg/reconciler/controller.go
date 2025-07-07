@@ -67,12 +67,34 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 			metrics:            metrics,
 			eventEmitter:       events.NewEventEmitter(run.Clients.Kube, run.Clients.Log),
 			concurrencyManager: concurrencyManager,
+			activeLeases:       make(map[string]concurrency.LeaseID),
 		}
 		impl := tektonPipelineRunReconcilerv1.NewImpl(ctx, r, ctrlOpts())
 
 		if err := concurrencyManager.GetQueueManager().InitQueues(ctx, run.Clients.Tekton, run.Clients.PipelineAsCode); err != nil {
 			log.Fatal("failed to init queues", err)
 		}
+
+		// Set up watchers for all repositories to enable event-driven processing
+		go func() {
+			// Get all repositories with concurrency state from the driver
+			driver := concurrencyManager.GetDriver()
+			repos, err := driver.GetAllRepositoriesWithState(ctx)
+			if err != nil {
+				log.Errorf("Failed to get repositories for watchers: %v", err)
+				return
+			}
+
+			for _, repo := range repos {
+				// Set up watcher for each repository
+				concurrencyManager.GetQueueManager().SetupWatcher(ctx, repo, func() {
+					// Trigger processing of queued PipelineRuns when slots become available
+					r.processQueuedPipelineRuns(ctx, repo)
+				})
+				log.Infof("Set up watcher for repository %s/%s", repo.Namespace, repo.Name)
+			}
+			log.Infof("Set up watchers for %d repositories", len(repos))
+		}()
 
 		if _, err := pipelineRunInformer.Informer().AddEventHandler(controller.HandleAll(checkStateAndEnqueue(impl))); err != nil {
 			logging.FromContext(ctx).Panicf("Couldn't register PipelineRun informer event handler: %w", err)

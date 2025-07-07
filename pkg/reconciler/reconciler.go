@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	pipelinerunreconciler "github.com/tektoncd/pipeline/pkg/client/injection/reconciler/pipeline/v1/pipelinerun"
@@ -30,6 +31,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	pac "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	"knative.dev/pkg/logging"
 )
 
 // Reconciler implements controller.Reconciler for PipelineRun resources.
@@ -44,6 +46,10 @@ type Reconciler struct {
 	globalRepo         *v1alpha1.Repository
 	secretNS           string
 	concurrencyManager *concurrency.Manager // new abstracted concurrency manager
+
+	// Lease tracking for proper slot management
+	activeLeases map[string]concurrency.LeaseID // prKey -> leaseID
+	leaseMutex   sync.RWMutex
 }
 
 var (
@@ -224,48 +230,25 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		prKey := fmt.Sprintf("%s/%s", pr.Namespace, pr.Name)
 		repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
 
+		// Get the lease ID for proper release
+		r.leaseMutex.RLock()
+		leaseID, hasLease := r.activeLeases[prKey]
+		r.leaseMutex.RUnlock()
+
 		// Release the slot for the completed PipelineRun
-		if err := r.concurrencyManager.ReleaseSlot(ctx, nil, prKey, repoKey); err != nil {
+		if err := r.concurrencyManager.ReleaseSlot(ctx, leaseID, prKey, repoKey); err != nil {
 			logger.Errorf("failed to release concurrency slot for %s: %v", prKey, err)
 		}
 
-		// Check if there are queued PipelineRuns that can now start
-		queuedPRs := r.concurrencyManager.GetQueueManager().QueuedPipelineRuns(repo)
-		if len(queuedPRs) > 0 {
-			// Try to start the next queued PipelineRun
-			for _, nextPRKey := range queuedPRs {
-				parts := strings.Split(nextPRKey, "/")
-				if len(parts) != 2 {
-					continue
-				}
-
-				nextPR, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(parts[0]).Get(ctx, parts[1], metav1.GetOptions{})
-				if err != nil {
-					logger.Errorf("cannot get pipeline for next in queue: %w", err)
-					continue
-				}
-
-				// Try to acquire a slot for this PipelineRun
-				success, _, err := r.concurrencyManager.AcquireSlot(ctx, repo, nextPRKey)
-				if err != nil {
-					logger.Errorf("failed to acquire slot for %s: %v", nextPRKey, err)
-					continue
-				}
-
-				if success {
-					if err := r.updatePipelineRunToInProgress(ctx, logger, repo, nextPR); err != nil {
-						logger.Errorf("failed to update status: %w", err)
-						// Release the slot if we can't update the PipelineRun
-						if releaseErr := r.concurrencyManager.ReleaseSlot(ctx, nil, nextPRKey, repoKey); releaseErr != nil {
-							logger.Errorf("failed to release slot after update failure: %v", releaseErr)
-						}
-						continue
-					}
-					logger.Infof("started next queued PipelineRun: %s", nextPRKey)
-					break
-				}
-			}
+		// Remove from lease tracking
+		if hasLease {
+			r.leaseMutex.Lock()
+			delete(r.activeLeases, prKey)
+			r.leaseMutex.Unlock()
 		}
+
+		// Note: We don't manually process queued PipelineRuns here anymore
+		// The watcher will automatically trigger processQueuedPipelineRuns when the slot is released
 	}
 
 	if err := r.cleanupPipelineRuns(ctx, logger, pacInfo, repo, pr); err != nil {
@@ -393,16 +376,33 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 	}
 
 	// Try to acquire a slot
-	success, _, err := r.concurrencyManager.AcquireSlot(ctx, repo, prKey)
+	success, leaseID, err := r.concurrencyManager.AcquireSlot(ctx, repo, prKey)
 	if err != nil {
 		logger.Errorf("failed to acquire concurrency slot: %v", err)
 		return err
 	}
 
 	if success {
+		// Store the lease ID for proper tracking
+		r.leaseMutex.Lock()
+		if r.activeLeases == nil {
+			r.activeLeases = make(map[string]concurrency.LeaseID)
+		}
+		r.activeLeases[prKey] = leaseID
+		r.leaseMutex.Unlock()
+
 		// Promote to running: update state and status
 		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
 			logger.Errorf("failed to update PipelineRun to in-progress: %v", err)
+			// Release the slot if we can't update the PipelineRun
+			repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+			if releaseErr := r.concurrencyManager.ReleaseSlot(ctx, leaseID, prKey, repoKey); releaseErr != nil {
+				logger.Errorf("failed to release slot after update failure: %v", releaseErr)
+			}
+			// Remove from lease tracking
+			r.leaseMutex.Lock()
+			delete(r.activeLeases, prKey)
+			r.leaseMutex.Unlock()
 			return err
 		}
 		logger.Infof("PipelineRun %s promoted to running", prKey)
@@ -415,4 +415,68 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 		logger.Infof("PipelineRun %s remains queued", prKey)
 	}
 	return nil
+}
+
+// processQueuedPipelineRuns processes queued PipelineRuns when slots become available.
+// This is called by the watcher when a slot is released.
+func (r *Reconciler) processQueuedPipelineRuns(ctx context.Context, repo *v1alpha1.Repository) {
+	logger := logging.FromContext(ctx).With("namespace", repo.GetNamespace(), "repository", repo.GetName())
+
+	// Get queued PipelineRuns
+	queuedPRs := r.concurrencyManager.GetQueueManager().QueuedPipelineRuns(repo)
+	if len(queuedPRs) == 0 {
+		return
+	}
+
+	logger.Infof("processing %d queued PipelineRuns after slot became available", len(queuedPRs))
+
+	// Try to start the next queued PipelineRun
+	for _, nextPRKey := range queuedPRs {
+		parts := strings.Split(nextPRKey, "/")
+		if len(parts) != 2 {
+			logger.Errorf("invalid PipelineRun key format: %s", nextPRKey)
+			continue
+		}
+
+		nextPR, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(parts[0]).Get(ctx, parts[1], metav1.GetOptions{})
+		if err != nil {
+			logger.Errorf("cannot get PipelineRun %s: %v", nextPRKey, err)
+			// Remove from queue if PipelineRun doesn't exist
+			r.concurrencyManager.GetQueueManager().RemoveFromQueue(fmt.Sprintf("%s/%s", repo.Namespace, repo.Name), nextPRKey)
+			continue
+		}
+
+		// Try to acquire a slot for this PipelineRun
+		success, leaseID, err := r.concurrencyManager.AcquireSlot(ctx, repo, nextPRKey)
+		if err != nil {
+			logger.Errorf("failed to acquire slot for %s: %v", nextPRKey, err)
+			continue
+		}
+
+		if success {
+			// Store the lease ID for proper tracking
+			r.leaseMutex.Lock()
+			if r.activeLeases == nil {
+				r.activeLeases = make(map[string]concurrency.LeaseID)
+			}
+			r.activeLeases[nextPRKey] = leaseID
+			r.leaseMutex.Unlock()
+
+			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, nextPR); err != nil {
+				logger.Errorf("failed to update PipelineRun %s to in-progress: %v", nextPRKey, err)
+				// Release the slot if we can't update the PipelineRun
+				repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+				if releaseErr := r.concurrencyManager.ReleaseSlot(ctx, leaseID, nextPRKey, repoKey); releaseErr != nil {
+					logger.Errorf("failed to release slot after update failure: %v", releaseErr)
+				}
+				// Remove from lease tracking
+				r.leaseMutex.Lock()
+				delete(r.activeLeases, nextPRKey)
+				r.leaseMutex.Unlock()
+				continue
+			}
+			logger.Infof("started queued PipelineRun: %s", nextPRKey)
+			break // Only start one PipelineRun per slot availability notification
+		}
+	}
 }
