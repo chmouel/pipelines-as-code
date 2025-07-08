@@ -88,7 +88,7 @@ type SlotCounter interface {
 func AdaptiveWatcher(ctx context.Context, repo *v1alpha1.Repository, callback func(),
 	counter SlotCounter, config WatcherConfig, logger *zap.SugaredLogger,
 ) {
-	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
+	repoKey := RepoKey(repo)
 
 	go func() {
 		currentInterval := config.InitialInterval
@@ -126,9 +126,7 @@ func AdaptiveWatcher(ctx context.Context, repo *v1alpha1.Repository, callback fu
 					if consecutiveNoChanges >= config.BackoffThreshold && currentInterval < config.MaxInterval {
 						// Exponential backoff up to max interval
 						currentInterval = time.Duration(float64(currentInterval) * config.BackoffMultiplier)
-						if currentInterval > config.MaxInterval {
-							currentInterval = config.MaxInterval
-						}
+						currentInterval = min(currentInterval, config.MaxInterval)
 						ticker.Reset(currentInterval)
 						logger.Debugf("no changes detected for repository %s, increased polling interval to %v", repoKey, currentInterval)
 					}

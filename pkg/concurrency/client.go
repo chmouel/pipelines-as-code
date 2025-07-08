@@ -84,46 +84,37 @@ func NewClient(cfg *Config, logger *zap.SugaredLogger) (Client, error) {
 }
 
 func (c *etcdClient) Put(ctx context.Context, key, value string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error) {
-	c.logger.Debugf("etcd PUT: %s = %s", key, value)
 	return c.client.Put(ctx, key, value, opts...)
 }
 
 func (c *etcdClient) Get(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-	c.logger.Debugf("etcd GET: %s", key)
 	return c.client.Get(ctx, key, opts...)
 }
 
 func (c *etcdClient) Delete(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.DeleteResponse, error) {
-	c.logger.Debugf("etcd DELETE: %s", key)
 	return c.client.Delete(ctx, key, opts...)
 }
 
 func (c *etcdClient) Grant(ctx context.Context, ttl int64) (*clientv3.LeaseGrantResponse, error) {
-	c.logger.Debugf("etcd GRANT lease: %d seconds", ttl)
 	return c.client.Grant(ctx, ttl)
 }
 
 func (c *etcdClient) Revoke(ctx context.Context, id clientv3.LeaseID) (*clientv3.LeaseRevokeResponse, error) {
-	c.logger.Debugf("etcd REVOKE lease: %x", id)
 	return c.client.Revoke(ctx, id)
 }
 
 func (c *etcdClient) KeepAlive(ctx context.Context, id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	c.logger.Debugf("etcd KEEPALIVE lease: %x", id)
 	return c.client.KeepAlive(ctx, id)
 }
 
 func (c *etcdClient) Txn(ctx context.Context) clientv3.Txn {
-	c.logger.Debug("etcd TXN")
 	return c.client.Txn(ctx)
 }
 
 func (c *etcdClient) Watch(ctx context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
-	c.logger.Debugf("etcd WATCH: %s", key)
 	return c.client.Watch(ctx, key, opts...)
 }
 
 func (c *etcdClient) Close() error {
-	c.logger.Debug("closing etcd client")
 	return c.client.Close()
 }

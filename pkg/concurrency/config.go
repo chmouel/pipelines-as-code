@@ -190,13 +190,109 @@ func LoadConfigFromSettings(settings map[string]string) (*Config, error) {
 	return cfg, nil
 }
 
+// LoadPostgreSQLConfigFromSettings loads PostgreSQL configuration from PipelinesAsCode settings.
+func LoadPostgreSQLConfigFromSettings(settings map[string]string) (*PostgreSQLConfig, error) {
+	config := &PostgreSQLConfig{
+		Host:              "localhost",
+		Port:              5432,
+		Database:          "pac_concurrency",
+		Username:          "pac_user",
+		SSLMode:           "disable",
+		MaxConnections:    10,
+		ConnectionTimeout: 30 * time.Second,
+		LeaseTTL:          1 * time.Hour,
+	}
+
+	// PostgreSQL host
+	if host := settings["postgresql-host"]; host != "" {
+		config.Host = host
+	}
+
+	// PostgreSQL port
+	if portStr := settings["postgresql-port"]; portStr != "" {
+		if port, err := strconv.Atoi(portStr); err == nil {
+			config.Port = port
+		}
+	}
+
+	// PostgreSQL database
+	if database := settings["postgresql-database"]; database != "" {
+		config.Database = database
+	}
+
+	// PostgreSQL username
+	if username := settings["postgresql-username"]; username != "" {
+		config.Username = username
+	}
+
+	// PostgreSQL password
+	if password := settings["postgresql-password"]; password != "" {
+		config.Password = password
+	}
+
+	// PostgreSQL SSL mode
+	if sslMode := settings["postgresql-ssl-mode"]; sslMode != "" {
+		config.SSLMode = sslMode
+	}
+
+	// PostgreSQL max connections
+	if maxConnStr := settings["postgresql-max-connections"]; maxConnStr != "" {
+		if maxConn, err := strconv.Atoi(maxConnStr); err == nil {
+			config.MaxConnections = maxConn
+		}
+	}
+
+	// PostgreSQL connection timeout
+	if timeoutStr := settings["postgresql-connection-timeout"]; timeoutStr != "" {
+		if timeout, err := time.ParseDuration(timeoutStr); err == nil {
+			config.ConnectionTimeout = timeout
+		}
+	}
+
+	// PostgreSQL lease TTL
+	if ttlStr := settings["postgresql-lease-ttl"]; ttlStr != "" {
+		if ttl, err := time.ParseDuration(ttlStr); err == nil {
+			config.LeaseTTL = ttl
+		}
+	}
+
+	return config, nil
+}
+
+// LoadMemoryConfigFromSettings loads memory configuration from PipelinesAsCode settings.
+func LoadMemoryConfigFromSettings(settings map[string]string) (*MemoryConfig, error) {
+	config := &MemoryConfig{
+		LeaseTTL: 30 * time.Minute,
+	}
+
+	// Memory lease TTL
+	if ttlStr := settings["memory-lease-ttl"]; ttlStr != "" {
+		if ttl, err := time.ParseDuration(ttlStr); err == nil {
+			config.LeaseTTL = ttl
+		}
+	}
+
+	return config, nil
+}
+
 // CreateManagerFromSettings creates a concurrency manager from PipelinesAsCode settings.
 func CreateManagerFromSettings(settings map[string]string, logger *zap.SugaredLogger) (*Manager, error) {
 	// Load configuration from settings
 	config := &DriverConfig{}
 
-	// Check if etcd is enabled
-	if IsEtcdEnabled(settings) {
+	// Determine which driver to use
+	driver := settings["concurrency-driver"]
+	if driver == "" {
+		// Fallback to etcd-enabled check for backward compatibility
+		if IsEtcdEnabled(settings) {
+			driver = "etcd"
+		} else {
+			driver = "memory"
+		}
+	}
+
+	switch driver {
+	case "etcd":
 		config.Driver = "etcd"
 		etcdConfig, err := LoadConfigFromSettings(settings)
 		if err != nil {
@@ -210,12 +306,22 @@ func CreateManagerFromSettings(settings map[string]string, logger *zap.SugaredLo
 			TLSConfig:   etcdConfig.TLSConfig,
 			Mode:        etcdConfig.Mode,
 		}
-	} else {
-		// Default to memory driver
-		config.Driver = "memory"
-		config.MemoryConfig = &MemoryConfig{
-			LeaseTTL: 30 * time.Minute,
+	case "postgresql":
+		config.Driver = "postgresql"
+		postgresqlConfig, err := LoadPostgreSQLConfigFromSettings(settings)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load postgresql config: %w", err)
 		}
+		config.PostgreSQLConfig = postgresqlConfig
+	case "memory":
+		config.Driver = "memory"
+		memoryConfig, err := LoadMemoryConfigFromSettings(settings)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load memory config: %w", err)
+		}
+		config.MemoryConfig = memoryConfig
+	default:
+		return nil, fmt.Errorf("unsupported concurrency driver: %s", driver)
 	}
 
 	return NewManager(config, logger)
@@ -224,9 +330,19 @@ func CreateManagerFromSettings(settings map[string]string, logger *zap.SugaredLo
 // GetDefaultSettings returns the default concurrency settings.
 func GetDefaultSettings() map[string]string {
 	return map[string]string{
-		"etcd-enabled":      "false",
-		"etcd-mode":         "memory",
-		"etcd-endpoints":    "localhost:2379",
-		"etcd-dial-timeout": "5",
+		"concurrency-driver":            "memory",
+		"etcd-enabled":                  "false",
+		"etcd-mode":                     "memory",
+		"etcd-endpoints":                "localhost:2379",
+		"etcd-dial-timeout":             "5",
+		"postgresql-host":               "localhost",
+		"postgresql-port":               "5432",
+		"postgresql-database":           "pac_concurrency",
+		"postgresql-username":           "pac_user",
+		"postgresql-ssl-mode":           "disable",
+		"postgresql-max-connections":    "10",
+		"postgresql-connection-timeout": "30s",
+		"postgresql-lease-ttl":          "1h",
+		"memory-lease-ttl":              "30m",
 	}
 }

@@ -87,6 +87,23 @@ type Settings struct {
 	EtcdKeyFile     string `json:"etcd-key-file"`
 	EtcdCAFile      string `json:"etcd-ca-file"`
 	EtcdServerName  string `json:"etcd-server-name"`
+
+	// Concurrency Driver Configuration
+	ConcurrencyDriver string `json:"concurrency-driver"`
+
+	// PostgreSQL Configuration
+	PostgreSQLHost              string `json:"postgresql-host"`
+	PostgreSQLPort              int    `json:"postgresql-port"`
+	PostgreSQLDatabase          string `json:"postgresql-database"`
+	PostgreSQLUsername          string `json:"postgresql-username"`
+	PostgreSQLPassword          string `json:"postgresql-password"`
+	PostgreSQLSSLMode           string `json:"postgresql-ssl-mode"`
+	PostgreSQLMaxConnections    int    `json:"postgresql-max-connections"`
+	PostgreSQLConnectionTimeout string `json:"postgresql-connection-timeout"`
+	PostgreSQLLeaseTTL          string `json:"postgresql-lease-ttl"`
+
+	// Memory Configuration
+	MemoryLeaseTTL string `json:"memory-lease-ttl"`
 }
 
 func (s *Settings) DeepCopy(out *Settings) {

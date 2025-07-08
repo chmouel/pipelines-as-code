@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipelines-as-code
+  namespace: pipelines-as-code
+data:
+  # Enable the new abstracted concurrency system
+  concurrency-enabled: "true"
+
+  # Choose the driver: "postgresql", "etcd", or "memory"
+  concurrency-driver: "postgresql"
+
+  # PostgreSQL configuration (when using postgresql driver)
+  postgresql-host: "localhost"
+  postgresql-port: "5432"
+  postgresql-database: "pac_concurrency"
+  postgresql-username: "pac_user"
+  postgresql-password: "your-secure-password" # WARNING: This is not secure for production
+  postgresql-ssl-mode: "disable"
+  postgresql-max-connections: "10"
+  postgresql-connection-timeout: "30s"
+  postgresql-lease-ttl: "1h"
+
+  # etcd configuration (when using etcd driver)
+  # concurrency-driver: "etcd"
+  # etcd-endpoints: "localhost:2379"
+  # etcd-dial-timeout: "5s"
+  # etcd-mode: "etcd" # "etcd", "mock", or "memory"
+  # etcd-username: "etcd_user"
+  # etcd-password: "etcd_password"
+  # etcd-cert-file: "/path/to/cert.pem"
+  # etcd-key-file: "/path/to/key.pem"
+  # etcd-ca-file: "/path/to/ca.pem"
+  # etcd-server-name: "etcd.example.com"
+
+  # Memory configuration (when using memory driver - for testing only)
+  # concurrency-driver: "memory"
+  # memory-lease-ttl: "30m"
+# NOTE: Only one driver should be enabled at a time. Comment/uncomment the relevant section above.
+# WARNING: Storing passwords in ConfigMaps is not secure for production environments.

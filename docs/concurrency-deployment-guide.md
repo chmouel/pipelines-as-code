@@ -1,44 +1,26 @@
 # Concurrency System Deployment Guide
 
-This guide explains how to deploy and configure the Pipelines-as-Code concurrency system using ConfigMaps and Secrets.
+This guide explains how to deploy and configure the Pipelines-as-Code concurrency system using ConfigMaps.
 
 ## Overview
 
-The concurrency system can be configured using:
+The concurrency system supports three drivers:
 
-- **ConfigMap**: Contains all configuration settings
-- **Secret**: Contains sensitive data like passwords
+- **etcd**: For distributed, production-grade deployments
+- **postgresql**: For distributed deployments using PostgreSQL
+- **memory**: For testing and development only
+
+The driver is selected using the `concurrency-driver` field in the ConfigMap. All configuration is managed via ConfigMap.
+
+> **Warning:** The PostgreSQL password must be set directly in the ConfigMap using the `postgresql-password` field. This is not secure for production environments. Consider using a more secure secret management solution if possible.
 
 ## Quick Start
 
-### 1. Create the Secret
+### 1. Update the ConfigMap
 
-First, create a secret with your database password:
+The main PAC ConfigMap (`config/302-pac-configmap.yaml`) includes concurrency settings. Set the driver and provide configuration for your backend:
 
-```bash
-# Create the secret with your actual password
-kubectl create secret generic pac-concurrency-secret \
-  --namespace=pipelines-as-code \
-  --from-literal=postgresql-password="your-secure-password"
-```
-
-Or use the provided YAML file:
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: pac-concurrency-secret
-  namespace: pipelines-as-code
-type: Opaque
-data:
-  # Base64 encoded password: echo -n "your-secure-password" | base64
-  postgresql-password: eW91ci1zZWN1cmUtcGFzc3dvcmQ=
-```
-
-### 2. Update the ConfigMap
-
-The main PAC ConfigMap (`config/302-pac-configmap.yaml`) already includes concurrency settings. Update it with your specific configuration:
+#### Example: PostgreSQL Driver
 
 ```yaml
 apiVersion: v1
@@ -47,32 +29,58 @@ metadata:
   name: pipelines-as-code
   namespace: pipelines-as-code
 data:
-  # Enable the concurrency system
   concurrency-enabled: "true"
-
-  # Choose your driver
-  concurrency-driver: "postgresql"  # or "etcd" or "memory"
-
-  # PostgreSQL Configuration
+  concurrency-driver: "postgresql"
   postgresql-host: "your-postgresql-host"
   postgresql-port: "5432"
   postgresql-database: "pac_concurrency"
   postgresql-username: "pac_user"
-  postgresql-ssl-mode: "require"
+  postgresql-password: "your-secure-password"  # Set password directly here
+  postgresql-ssl-mode: "require"  # disable, require, verify-ca, verify-full
   postgresql-max-connections: "10"
   postgresql-connection-timeout: "30s"
   postgresql-lease-ttl: "1h"
-
-  # The password will be read from the secret
-  postgresql-password: ""  # Leave empty to use secret
 ```
 
-### 3. Deploy the Configuration
+#### Example: etcd Driver
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipelines-as-code
+  namespace: pipelines-as-code
+data:
+  concurrency-enabled: "true"
+  concurrency-driver: "etcd"
+  etcd-endpoints: "etcd.example.com:2379"
+  etcd-dial-timeout: "5s"
+  etcd-mode: "etcd"  # etcd, mock, memory
+  etcd-username: "etcd_user"         # optional
+  etcd-password: "etcd_password"     # optional
+  etcd-cert-file: "/path/to/cert.pem" # optional
+  etcd-key-file: "/path/to/key.pem"   # optional
+  etcd-ca-file: "/path/to/ca.pem"     # optional
+  etcd-server-name: "etcd.example.com" # optional
+```
+
+#### Example: Memory Driver (Testing Only)
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipelines-as-code
+  namespace: pipelines-as-code
+data:
+  concurrency-enabled: "true"
+  concurrency-driver: "memory"
+  memory-lease-ttl: "30m"
+```
+
+### 2. Deploy the Configuration
 
 ```bash
-# Apply the secret
-kubectl apply -f config/concurrency-secret.yaml
-
 # Apply the updated ConfigMap
 kubectl apply -f config/302-pac-configmap.yaml
 
@@ -81,101 +89,105 @@ kubectl rollout restart deployment/pipelines-as-code-controller -n pipelines-as-
 kubectl rollout restart deployment/pipelines-as-code-watcher -n pipelines-as-code
 ```
 
-## Configuration Options
+## Updating Configuration with kubectl patch
 
-### PostgreSQL Driver
+You can update the concurrency configuration using `kubectl patch` commands without editing the full ConfigMap:
 
-```yaml
-# Enable PostgreSQL driver
-concurrency-driver: "postgresql"
+### Enable PostgreSQL Driver
 
-# Database connection
-postgresql-host: "postgresql.example.com"
-postgresql-port: "5432"
-postgresql-database: "pac_concurrency"
-postgresql-username: "pac_user"
-postgresql-ssl-mode: "require"  # disable, require, verify-ca, verify-full
-
-# Connection pool settings
-postgresql-max-connections: "10"
-postgresql-connection-timeout: "30s"
-
-# Lease settings
-postgresql-lease-ttl: "1h"
+```bash
+# Enable concurrency and set PostgreSQL driver
+kubectl patch configmap pipelines-as-code -n pipelines-as-code --type='merge' -p='
+{
+  "data": {
+    "concurrency-enabled": "true",
+    "concurrency-driver": "postgresql",
+    "postgresql-host": "your-postgresql-host",
+    "postgresql-port": "5432",
+    "postgresql-database": "pac_concurrency",
+    "postgresql-username": "pac_user",
+    "postgresql-password": "your-secure-password",
+    "postgresql-ssl-mode": "require",
+    "postgresql-max-connections": "10",
+    "postgresql-connection-timeout": "30s",
+    "postgresql-lease-ttl": "1h"
+  }
+}'
 ```
 
-### etcd Driver
+### Enable etcd Driver
 
-```yaml
-# Enable etcd driver
-concurrency-driver: "etcd"
-
-# etcd connection
-etcd-endpoints: "etcd.example.com:2379"
-etcd-dial-timeout: "5s"
-etcd-mode: "etcd"  # etcd, mock, memory
-
-# Authentication (optional)
-etcd-username: "etcd_user"
-etcd-password: "etcd_password"
-
-# TLS (optional)
-etcd-cert-file: "/path/to/cert.pem"
-etcd-key-file: "/path/to/key.pem"
-etcd-ca-file: "/path/to/ca.pem"
-etcd-server-name: "etcd.example.com"
+```bash
+# Enable concurrency and set etcd driver
+kubectl patch configmap pipelines-as-code -n pipelines-as-code --type='merge' -p='
+{
+  "data": {
+    "concurrency-enabled": "true",
+    "concurrency-driver": "etcd",
+    "etcd-endpoints": "etcd.example.com:2379",
+    "etcd-dial-timeout": "5",
+    "etcd-mode": "etcd",
+    "etcd-username": "etcd_user",
+    "etcd-password": "etcd_password"
+  }
+}'
 ```
 
-### Memory Driver (Testing Only)
+### Enable Memory Driver
 
-```yaml
-# Enable memory driver
-concurrency-driver: "memory"
+```bash
+# Enable concurrency and set memory driver
+kubectl patch configmap pipelines-as-code -n pipelines-as-code --type='merge' -p='
+{
+  "data": {
+    "concurrency-enabled": "true",
+    "concurrency-driver": "memory",
+    "memory-lease-ttl": "30m"
+  }
+}'
+```
 
-# Lease settings
-memory-lease-ttl: "30m"
+### Update Individual Settings
+
+You can also update individual settings:
+
+```bash
+# Update just the PostgreSQL host
+kubectl patch configmap pipelines-as-code -n pipelines-as-code --type='merge' -p='
+{
+  "data": {
+    "postgresql-host": "new-postgresql-host"
+  }
+}'
+
+# Update just the concurrency driver
+kubectl patch configmap pipelines-as-code -n pipelines-as-code --type='merge' -p='
+{
+  "data": {
+    "concurrency-driver": "postgresql"
+  }
+}'
+
+# Update PostgreSQL password
+kubectl patch configmap pipelines-as-code -n pipelines-as-code --type='merge' -p='
+{
+  "data": {
+    "postgresql-password": "new-secure-password"
+  }
+}'
+```
+
+After patching, restart the PAC pods to pick up the changes:
+
+```bash
+kubectl rollout restart deployment/pipelines-as-code-controller -n pipelines-as-code
+kubectl rollout restart deployment/pipelines-as-code-watcher -n pipelines-as-code
 ```
 
 ## Secret Management
 
-### Option 1: Direct Password in ConfigMap (Not Recommended)
-
-```yaml
-# In ConfigMap
-postgresql-password: "your-password-here"
-```
-
-### Option 2: Using Kubernetes Secret (Recommended)
-
-- Create the secret:
-
-    ```bash
-    kubectl create secret generic pac-concurrency-secret \
-      --namespace=pipelines-as-code \
-      --from-literal=postgresql-password="your-secure-password"
-    ```
-
-- Reference it in the ConfigMap:
-
-    ```yaml
-    # In ConfigMap
-    postgresql-password: ""  # Leave empty
-    # The system will automatically read from the secret
-    ```
-
-### Option 3: External Secret Management
-
-If you're using external secret management tools like:
-
-- HashiCorp Vault
-- AWS Secrets Manager
-- Azure Key Vault
-
-You can integrate them by:
-
-1. Creating a secret with the external tool
-1. Using a sidecar or init container to fetch the secret
-1. Mounting it as a file or environment variable
+- **Note:** The current implementation does not support reading the PostgreSQL password from a Kubernetes Secret. The password must be set directly in the ConfigMap.
+- **Warning:** Storing passwords in ConfigMaps is not secure for production. Consider using a more secure solution if possible.
 
 ## Database Setup
 
@@ -198,90 +210,18 @@ You can integrate them by:
 
 ### etcd setup
 
-- Install etcd (if not already installed):
+- Deploy etcd as per your environment's best practices.
+- Provide endpoints and authentication as needed in the ConfigMap.
 
-    ```bash
-    # Using Helm
-    helm repo add bitnami https://charts.bitnami.com/bitnami
-    helm install etcd bitnami/etcd \
-      --namespace pipelines-as-code \
-      --set auth.enabled=true \
-      --set auth.rbac.create=true
-    ```
+## Driver Selection Logic
 
-- Get the credentials:
+- The system uses the `concurrency-driver` field to select the backend.
+- Supported values: `postgresql`, `etcd`, `memory`.
+- If not set, falls back to `etcd-enabled` for backward compatibility.
 
-    ```bash
-    export ETCD_ROOT_PASSWORD=$(kubectl get secret --namespace pipelines-as-code etcd -o jsonpath="{.data.etcd-root-password}" | base64 -d)
-    export ETCD_USERNAME=$(kubectl get secret --namespace pipelines-as-code etcd -o jsonpath="{.data.etcd-username}" | base64 -d)
-    ```
+## Troubleshooting
 
-1. Update the ConfigMap with the credentials.
-
-## Monitoring and Troubleshooting
-
-### Check Configuration
-
-```bash
-# Check if the ConfigMap is applied
-kubectl get configmap pipelines-as-code -n pipelines-as-code -o yaml
-
-# Check if the secret exists
-kubectl get secret pac-concurrency-secret -n pipelines-as-code
-
-# Check PAC logs
-kubectl logs -f deployment/pipelines-as-code-watcher -n pipelines-as-code
-```
-
-### Common Issues
-
-- **Connection refused**: Check if the database/etcd is accessible
-- **Authentication failed**: Verify credentials in the secret
-- **Permission denied**: Check database user permissions
-- **Driver not found**: Ensure the driver is correctly specified
-
-### Logs to Monitor
-
-Look for these log messages:
-
-- `"Initialized concurrency system with driver: postgresql"`
-- `"acquired concurrency slot for namespace/pipeline-run-1"`
-- `"concurrency limit reached for repository namespace/repo"`
-
-## Migration from Existing etcd
-
-If you're migrating from the existing etcd implementation:
-
-- Update the ConfigMap to use the new concurrency system
-- Set `concurrency-enabled: "true"`
-- Choose your preferred driver
-- Restart the PAC pods
-- The system will automatically migrate existing state
-
-## Security Considerations
-
-- **Use Secrets**: Never store passwords in ConfigMaps
-- **Network Policies**: Restrict access to your database/etcd
-- **TLS**: Enable TLS for database connections
-- **RBAC**: Use appropriate RBAC for secret access
-- **Audit Logs**: Monitor access to secrets and databases
-
-## Performance Tuning
-
-### PostgreSQL (Performance Tuning)
-
-- Adjust `postgresql-max-connections` based on your workload
-- Monitor connection pool usage
-- Consider read replicas for high availability
-
-### etcd (Performance Tuning)
-
-- Use multiple etcd nodes for high availability
-- Monitor etcd performance metrics
-- Consider dedicated etcd cluster for large deployments
-
-### Memory (Performance Tuning)
-
-- Only use for testing/development
-- Monitor memory usage
-- Set appropriate TTL values
+- Check pod logs for driver initialization errors.
+- Ensure configmaps are mounted and available.
+- For PostgreSQL, ensure network access and credentials are correct.
+- For etcd, ensure endpoints are reachable and authentication is correct.
