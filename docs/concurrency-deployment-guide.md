@@ -107,7 +107,7 @@ kubectl patch configmap pipelines-as-code -n pipelines-as-code --type='merge' -p
     "postgresql-database": "pac_concurrency",
     "postgresql-username": "pac_user",
     "postgresql-password": "your-secure-password",
-    "postgresql-ssl-mode": "require",
+    "postgresql-ssl-mode": "disable",
     "postgresql-max-connections": "10",
     "postgresql-connection-timeout": "30s",
     "postgresql-lease-ttl": "1h"
@@ -124,6 +124,7 @@ kubectl patch configmap pipelines-as-code -n pipelines-as-code --type='merge' -p
   "data": {
     "concurrency-enabled": "true",
     "concurrency-driver": "etcd",
+    "etcd-enabled": "true",
     "etcd-endpoints": "etcd.example.com:2379",
     "etcd-dial-timeout": "5",
     "etcd-mode": "etcd",

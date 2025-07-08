@@ -162,15 +162,21 @@ func (pd *PostgreSQLDriver) AcquireSlot(ctx context.Context, repo *v1alpha1.Repo
 		return false, 0, nil
 	}
 
-	// Try to insert the new slot
+	// Try to insert the new slot or update existing one to 'running' state
+	// This handles the case where a slot already exists (e.g., from queued state)
 	insertQuery := `INSERT INTO concurrency_slots 
 		(repository_key, pipeline_run_key, state, expires_at) 
 		VALUES ($1, $2, 'running', $3) 
-		ON CONFLICT (repository_key, pipeline_run_key) DO NOTHING`
+		ON CONFLICT (repository_key, pipeline_run_key) 
+		DO UPDATE SET 
+			state = 'running',
+			expires_at = $3,
+			updated_at = NOW()
+		WHERE concurrency_slots.state != 'running'`
 
 	result, err := tx.ExecContext(ctx, insertQuery, repoKey, pipelineRunKey, expiresAt)
 	if err != nil {
-		return false, 0, fmt.Errorf("failed to insert concurrency slot: %w", err)
+		return false, 0, fmt.Errorf("failed to insert/update concurrency slot: %w", err)
 	}
 
 	rowsAffected, err := result.RowsAffected()
@@ -179,8 +185,9 @@ func (pd *PostgreSQLDriver) AcquireSlot(ctx context.Context, repo *v1alpha1.Repo
 	}
 
 	if rowsAffected == 0 {
-		// Slot already exists (race condition)
-		return false, 0, nil
+		// Slot already exists and is already in 'running' state
+		// This could happen if the same PipelineRun tries to acquire a slot multiple times
+		pd.logger.Debugf("slot already exists in running state for %s in repository %s", pipelineRunKey, repoKey)
 	}
 
 	// Get the inserted slot ID

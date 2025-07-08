@@ -48,6 +48,7 @@ func getDefaultExpectedConfig() map[string]string {
 		"etcd-key-file":                              "",
 		"etcd-ca-file":                               "",
 		"etcd-server-name":                           "",
+		"concurrency-enabled":                        "false",
 		"concurrency-driver":                         "",
 		"postgresql-host":                            "",
 		"postgresql-port":                            "0",

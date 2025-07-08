@@ -88,8 +88,9 @@ type Settings struct {
 	EtcdCAFile      string `json:"etcd-ca-file"`
 	EtcdServerName  string `json:"etcd-server-name"`
 
-	// Concurrency Driver Configuration
-	ConcurrencyDriver string `json:"concurrency-driver"`
+	// Concurrency System Configuration
+	ConcurrencyEnabled bool   `json:"concurrency-enabled"`
+	ConcurrencyDriver  string `json:"concurrency-driver"`
 
 	// PostgreSQL Configuration
 	PostgreSQLHost              string `json:"postgresql-host"`

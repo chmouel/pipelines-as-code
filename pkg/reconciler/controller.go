@@ -3,6 +3,7 @@ package reconciler
 import (
 	"context"
 	"path"
+	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
@@ -41,7 +42,24 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 			log.Fatal("failed to init kinit client : ", err)
 		}
 
-		// Start pac config syncer
+		// Perform initial config sync before creating concurrency manager
+		log.Info("Performing initial config sync...")
+		if err := run.UpdatePacConfig(ctx); err != nil {
+			log.Warnf("Initial config sync failed, will retry: %v", err)
+			// Retry a few times with exponential backoff
+			for i := 0; i < 3; i++ {
+				time.Sleep(time.Duration(1<<i) * time.Second)
+				if err := run.UpdatePacConfig(ctx); err == nil {
+					log.Info("Initial config sync completed successfully")
+					break
+				}
+				log.Warnf("Config sync retry %d failed: %v", i+1, err)
+			}
+		} else {
+			log.Info("Initial config sync completed successfully")
+		}
+
+		// Start pac config syncer for ongoing updates
 		go params.StartConfigSync(ctx, run)
 
 		pipelineRunInformer := tektonPipelineRunInformerv1.Get(ctx)
@@ -50,7 +68,7 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 			log.Fatalf("Failed to create pipeline as code metrics recorder %v", err)
 		}
 
-		// Initialize the concurrency system
+		// Initialize the concurrency system with settings from configmap
 		pacSettings := run.Info.GetPacOpts()
 		settingsMap := settings.ConvertPacStructToConfigMap(&pacSettings.Settings)
 		concurrencyManager, err := concurrency.CreateManagerFromSettings(settingsMap, run.Clients.Log)
