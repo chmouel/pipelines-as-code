@@ -18,6 +18,9 @@ const (
 	HubCatalogNameKey          = "hub-catalog-name"
 	HubURLDefaultValue         = "https://api.hub.tekton.dev/v1"
 	HubCatalogNameDefaultValue = "tekton"
+	HubTypeTekton              = "tekton"
+	HubTypeArtifact            = "artifact"
+	HubTypeDefaultValue        = HubTypeTekton
 
 	CustomConsoleNameKey         = "custom-console-name"
 	CustomConsoleURLKey          = "custom-console-url"
@@ -38,6 +41,7 @@ type HubCatalog struct {
 	Index string
 	Name  string
 	URL   string
+	Type  string
 }
 
 // if there is a change performed on the default value,
@@ -88,6 +92,7 @@ func DefaultSettings() Settings {
 		Index: "default",
 		Name:  HubCatalogNameDefaultValue,
 		URL:   HubURLDefaultValue,
+		Type:  HubTypeDefaultValue,
 	})
 	newSettings.HubCatalogs = hubCatalog
 
