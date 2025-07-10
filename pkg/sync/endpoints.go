@@ -187,7 +187,7 @@ func (qe *QueueEndpoints) checkForRunningPipelineRuns(ctx context.Context, tekto
 	return nil
 }
 
-// triggerReconciliationForPendingPipelineRuns adds a small annotation update to one pending PipelineRun
+// triggerReconciliationForPendingPipelineRuns updates the state annotation on one pending PipelineRun
 // for the specific repository to trigger reconciliation by the controller. The reconciler will then
 // process the queue and move items from pending to running based on concurrency limits.
 func (qe *QueueEndpoints) triggerReconciliationForPendingPipelineRuns(ctx context.Context, tektonClient tektonVersionedClient.Interface, namespace, repoName string) error {
@@ -205,11 +205,12 @@ func (qe *QueueEndpoints) triggerReconciliationForPendingPipelineRuns(ctx contex
 	for _, pr := range pipelineRuns.Items {
 		// Only trigger for PipelineRuns that are actually pending
 		if pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
-			// Add a small annotation update to trigger reconciliation
+			// Update the state annotation to trigger reconciliation
+			// We add a small timestamp to ensure the annotation value changes and triggers the controller
 			timestamp := fmt.Sprintf("%d", time.Now().Unix())
 
-			// Create a patch to add the reconciliation trigger annotation
-			patch := fmt.Sprintf(`{"metadata":{"annotations":{"pipelinesascode.tekton.dev/reconcile-trigger":"%s"}}}`, timestamp)
+			// Create a patch to update the state annotation and add a reconciliation trigger
+			patch := fmt.Sprintf(`{"metadata":{"annotations":{"pipelinesascode.tekton.dev/state":"%s","pipelinesascode.tekton.dev/reconcile-trigger":"%s"}}}`, kubeinteraction.StateQueued, timestamp)
 
 			_, err := tektonClient.TektonV1().PipelineRuns(namespace).Patch(ctx, pr.Name,
 				"application/merge-patch+json", []byte(patch), metav1.PatchOptions{})

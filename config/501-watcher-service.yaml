@@ -23,10 +23,14 @@ metadata:
     app: pipelines-as-code-watcher
 spec:
   ports:
-  - name: http-metrics
-    port: 9090
-    protocol: TCP
-    targetPort: 9090
+    - name: http-metrics
+      port: 9090
+      protocol: TCP
+      targetPort: 9090
+    - name: http-api
+      port: 8080
+      protocol: TCP
+      targetPort: 8080
   selector:
     app.kubernetes.io/name: watcher
     app.kubernetes.io/component: watcher
