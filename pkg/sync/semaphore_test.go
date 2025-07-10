@@ -682,3 +682,38 @@ func TestTryAcquireConcurrentAccess(t *testing.T) {
 	assert.Equal(t, acquired3, false)
 	assert.Equal(t, len(repo.getCurrentRunning()), 2)
 }
+
+func TestResetAllFunctionality(t *testing.T) {
+	// Test the resetAll functionality
+	repo := newSemaphore("reset-test", 2)
+	cw := clockwork.NewFakeClock()
+
+	// Add items to both running and pending queues
+	assert.Equal(t, repo.addToQueue("key1", cw.Now()), true)
+	assert.Equal(t, repo.addToQueue("key2", cw.Now().Add(1*time.Second)), true)
+	assert.Equal(t, repo.addToQueue("key3", cw.Now().Add(2*time.Second)), true)
+	assert.Equal(t, repo.addToQueue("key4", cw.Now().Add(3*time.Second)), true)
+
+	// Acquire some items to put them in running state
+	acquired, _ := repo.tryAcquire("key1")
+	assert.Equal(t, acquired, true)
+	acquired, _ = repo.tryAcquire("key2")
+	assert.Equal(t, acquired, true)
+
+	// Verify initial state
+	assert.Equal(t, len(repo.getCurrentRunning()), 2)
+	assert.Equal(t, len(repo.getCurrentPending()), 2)
+
+	// Reset all queues
+	repo.resetAll()
+
+	// Verify everything is cleared
+	assert.Equal(t, len(repo.getCurrentRunning()), 0)
+	assert.Equal(t, len(repo.getCurrentPending()), 0)
+
+	// Verify we can add new items after reset
+	assert.Equal(t, repo.addToQueue("new-key", cw.Now()), true)
+	acquired, _ = repo.tryAcquire("new-key")
+	assert.Equal(t, acquired, true)
+	assert.Equal(t, len(repo.getCurrentRunning()), 1)
+}

@@ -75,7 +75,7 @@ func TestAddToPendingQueueDirectly(t *testing.T) {
 	err := qm.AddToPendingQueue(repo, []string{PrKey(pr)})
 	assert.NilError(t, err)
 
-	sema := qm.queueMap[RepoKey(repo)]
+	sema := qm.queues[RepoKey(repo)]
 	assert.Equal(t, len(sema.getCurrentPending()), 1)
 }
 
@@ -256,7 +256,7 @@ func TestQueueManager_InitQueues(t *testing.T) {
 	assert.NilError(t, err)
 
 	// queues are built
-	sema := qm.queueMap[RepoKey(repo)]
+	sema := qm.queues[RepoKey(repo)]
 	assert.Equal(t, len(sema.getCurrentPending()), 2)
 	assert.Equal(t, len(sema.getCurrentRunning()), 1)
 
@@ -337,4 +337,182 @@ func TestFilterPipelineRunByInProgress(t *testing.T) {
 	filtered := FilterPipelineRunByState(ctx, stdata.Pipeline, orderList, tektonv1.PipelineRunSpecStatusPending, kubeinteraction.StateQueued)
 	expected := []string{"test-ns/pr1"}
 	assert.DeepEqual(t, filtered, expected)
+}
+
+func TestQueueManagerResetAll(t *testing.T) {
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+
+	qm := NewQueueManager(logger)
+
+	// Create multiple repositories with queues
+	repo1 := newTestRepo(2)
+	repo1.Name = "repo1"
+	repo2 := newTestRepo(1)
+	repo2.Name = "repo2"
+
+	// Add items to repo1
+	pr1 := newTestPR("pr1", time.Now(), nil, nil, tektonv1.PipelineRunSpec{})
+	pr2 := newTestPR("pr2", time.Now().Add(1*time.Second), nil, nil, tektonv1.PipelineRunSpec{})
+	pr3 := newTestPR("pr3", time.Now().Add(2*time.Second), nil, nil, tektonv1.PipelineRunSpec{})
+
+	started, err := qm.AddListToRunningQueue(repo1, []string{PrKey(pr1), PrKey(pr2), PrKey(pr3)})
+	assert.NilError(t, err)
+	assert.Equal(t, len(started), 2) // repo1 has limit 2
+
+	// Add items to repo2
+	pr4 := newTestPR("pr4", time.Now(), nil, nil, tektonv1.PipelineRunSpec{})
+	pr5 := newTestPR("pr5", time.Now().Add(1*time.Second), nil, nil, tektonv1.PipelineRunSpec{})
+
+	started, err = qm.AddListToRunningQueue(repo2, []string{PrKey(pr4), PrKey(pr5)})
+	assert.NilError(t, err)
+	assert.Equal(t, len(started), 1) // repo2 has limit 1
+
+	// Verify initial state
+	assert.Equal(t, len(qm.RunningPipelineRuns(repo1)), 2)
+	assert.Equal(t, len(qm.QueuedPipelineRuns(repo1)), 1)
+	assert.Equal(t, len(qm.RunningPipelineRuns(repo2)), 1)
+	assert.Equal(t, len(qm.QueuedPipelineRuns(repo2)), 1)
+
+	// Reset all queues
+	resetStats := qm.ResetAll()
+
+	// Verify reset statistics
+	assert.Equal(t, len(resetStats), 2) // 2 repositories
+	repo1Key := RepoKey(repo1)
+	repo2Key := RepoKey(repo2)
+	assert.Equal(t, resetStats[repo1Key], 3) // 2 running + 1 pending
+	assert.Equal(t, resetStats[repo2Key], 2) // 1 running + 1 pending
+
+	// Verify all queues are empty
+	assert.Equal(t, len(qm.RunningPipelineRuns(repo1)), 0)
+	assert.Equal(t, len(qm.QueuedPipelineRuns(repo1)), 0)
+	assert.Equal(t, len(qm.RunningPipelineRuns(repo2)), 0)
+	assert.Equal(t, len(qm.QueuedPipelineRuns(repo2)), 0)
+
+	// Verify we can add new items after reset
+	pr6 := newTestPR("pr6", time.Now(), nil, nil, tektonv1.PipelineRunSpec{})
+	started, err = qm.AddListToRunningQueue(repo1, []string{PrKey(pr6)})
+	assert.NilError(t, err)
+	assert.Equal(t, len(started), 1)
+	assert.Equal(t, len(qm.RunningPipelineRuns(repo1)), 1)
+}
+
+func TestQueueManagerRegistry(t *testing.T) {
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+
+	// Initially, QueueManager should not be registered
+	assert.Equal(t, IsQueueManagerRegistered(), false)
+	registeredQM := GetRegisteredQueueManager()
+	assert.Equal(t, registeredQM, nil)
+
+	// Create and register a QueueManager
+	qm := NewQueueManager(logger)
+	RegisterQueueManager(qm)
+
+	// Now QueueManager should be registered
+	assert.Equal(t, IsQueueManagerRegistered(), true)
+	registeredQM = GetRegisteredQueueManager()
+	assert.Assert(t, registeredQM != nil)
+
+	// Test that it's the same instance
+	repo := newTestRepo(1)
+	pr := newTestPR("test-pr", time.Now(), nil, nil, tektonv1.PipelineRunSpec{})
+
+	// Add something to the original QueueManager
+	started, err := qm.AddListToRunningQueue(repo, []string{PrKey(pr)})
+	assert.NilError(t, err)
+	assert.Equal(t, len(started), 1)
+
+	// Verify it's accessible through the registered instance
+	runningPRs := registeredQM.RunningPipelineRuns(repo)
+	assert.Equal(t, len(runningPRs), 1)
+	assert.Equal(t, runningPRs[0], PrKey(pr))
+
+	// Test ResetAll through registered instance
+	resetStats := registeredQM.ResetAll()
+	assert.Equal(t, len(resetStats), 1)
+	assert.Equal(t, resetStats[RepoKey(repo)], 1)
+
+	// Verify reset worked
+	assert.Equal(t, len(registeredQM.RunningPipelineRuns(repo)), 0)
+
+	// Reset the registry for other tests
+	RegisterQueueManager(nil)
+}
+
+func TestRebuildQueuesForNamespace(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+
+	qm := NewQueueManager(logger)
+
+	// Create test repositories
+	repo1 := newTestRepo(2)
+	repo1.Name = "repo1"
+	repo1.Namespace = "test-ns"
+
+	repo2 := newTestRepo(1)
+	repo2.Name = "repo2"
+	repo2.Namespace = "test-ns"
+
+	// Create test PipelineRuns
+	startedPR1 := newTestPR("started-pr1", time.Now(),
+		map[string]string{keys.State: kubeinteraction.StateStarted, keys.Repository: "repo1"},
+		map[string]string{keys.State: kubeinteraction.StateStarted, keys.Repository: "repo1", keys.ExecutionOrder: "test-ns/started-pr1"},
+		tektonv1.PipelineRunSpec{})
+	startedPR1.Namespace = "test-ns"
+
+	queuedPR1 := newTestPR("queued-pr1", time.Now().Add(1*time.Second),
+		map[string]string{keys.State: kubeinteraction.StateQueued, keys.Repository: "repo1"},
+		map[string]string{keys.State: kubeinteraction.StateQueued, keys.Repository: "repo1", keys.ExecutionOrder: "test-ns/queued-pr1"},
+		tektonv1.PipelineRunSpec{Status: tektonv1.PipelineRunSpecStatusPending})
+	queuedPR1.Namespace = "test-ns"
+
+	startedPR2 := newTestPR("started-pr2", time.Now(),
+		map[string]string{keys.State: kubeinteraction.StateStarted, keys.Repository: "repo2"},
+		map[string]string{keys.State: kubeinteraction.StateStarted, keys.Repository: "repo2", keys.ExecutionOrder: "test-ns/started-pr2"},
+		tektonv1.PipelineRunSpec{})
+	startedPR2.Namespace = "test-ns"
+
+	// Create test data
+	testData := testclient.Data{
+		Repositories: []*v1alpha1.Repository{repo1, repo2},
+		PipelineRuns: []*tektonv1.PipelineRun{startedPR1, queuedPR1, startedPR2},
+	}
+	stdata, _ := testclient.SeedTestData(t, ctx, testData)
+
+	// Test rebuild functionality
+	rebuildStats, err := qm.RebuildQueuesForNamespace(ctx, "test-ns", stdata.Pipeline, stdata.PipelineAsCode)
+	assert.NilError(t, err)
+
+	// Verify rebuild statistics
+	assert.Equal(t, rebuildStats["namespace"], "test-ns")
+	assert.Equal(t, rebuildStats["repositories_processed"], 2)
+
+	rebuiltRepos := rebuildStats["repositories_rebuilt"].(map[string]map[string]int)
+	assert.Equal(t, len(rebuiltRepos), 2)
+
+	// Check repo1 stats
+	repo1Key := RepoKey(repo1)
+	repo1Stats := rebuiltRepos[repo1Key]
+	assert.Equal(t, repo1Stats["rebuilt_running"], 1) // started-pr1
+	assert.Equal(t, repo1Stats["rebuilt_pending"], 1) // queued-pr1
+
+	// Check repo2 stats
+	repo2Key := RepoKey(repo2)
+	repo2Stats := rebuiltRepos[repo2Key]
+	assert.Equal(t, repo2Stats["rebuilt_running"], 1) // started-pr2
+
+	// Verify queue states
+	assert.Equal(t, len(qm.RunningPipelineRuns(repo1)), 1)
+	assert.Equal(t, len(qm.QueuedPipelineRuns(repo1)), 1)
+	assert.Equal(t, len(qm.RunningPipelineRuns(repo2)), 1)
+	assert.Equal(t, len(qm.QueuedPipelineRuns(repo2)), 0)
+
+	// Verify no errors occurred
+	errors := rebuildStats["errors"].([]string)
+	assert.Equal(t, len(errors), 0)
 }

@@ -17,4 +17,5 @@ type Semaphore interface {
 	getLimit() int
 	getCurrentRunning() []string
 	getCurrentPending() []string
+	resetAll()
 }

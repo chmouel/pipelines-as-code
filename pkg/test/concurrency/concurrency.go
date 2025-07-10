@@ -48,3 +48,11 @@ func (TestQMI) RemoveAndTakeItemFromQueue(_ *pacv1alpha1.Repository, _ *tektonv1
 	// TODO implement me
 	panic("implement me")
 }
+
+func (TestQMI) ResetAll() map[string]int {
+	return map[string]int{}
+}
+
+func (TestQMI) RebuildQueuesForNamespace(_ context.Context, _ string, _ tektonVersionedClient.Interface, _ pacVersionedClient.Interface) (map[string]interface{}, error) {
+	return map[string]interface{}{}, nil
+}

@@ -195,3 +195,17 @@ func (s *prioritySemaphore) acquire(key string) bool {
 	}
 	return false
 }
+
+func (s *prioritySemaphore) resetAll() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	// Clear all running items
+	for range s.running {
+		s.semaphore.Release(1)
+	}
+	s.running = make(map[string]bool)
+
+	// Clear all pending items
+	s.pending = &priorityQueue{itemByKey: make(map[string]*item)}
+}

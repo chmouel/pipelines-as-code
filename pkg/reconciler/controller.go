@@ -58,6 +58,11 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 			metrics:           metrics,
 			eventEmitter:      events.NewEventEmitter(run.Clients.Kube, run.Clients.Log),
 		}
+
+		// Register the QueueManager and clients so they can be accessed by the watcher
+		sync.RegisterQueueManager(r.qm)
+		sync.RegisterClients(run.Clients.Tekton, run.Clients.PipelineAsCode)
+
 		impl := tektonPipelineRunReconcilerv1.NewImpl(ctx, r, ctrlOpts())
 
 		if err := r.qm.InitQueues(ctx, run.Clients.Tekton, run.Clients.PipelineAsCode); err != nil {

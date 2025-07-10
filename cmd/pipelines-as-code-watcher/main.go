@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/reconciler"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/sync"
+	"go.uber.org/zap"
 	"k8s.io/client-go/rest"
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/sharedmain"
@@ -24,11 +26,20 @@ func main() {
 		probesPort = envProbePort
 	}
 
+	// Create logger for logging
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+	sugar := logger.Sugar()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/live", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, "ok")
 	})
+
+	// Create and register queue management endpoints
+	queueEndpoints := sync.NewQueueEndpoints(sugar)
+	queueEndpoints.RegisterHandlers(mux)
 
 	c := make(chan struct{})
 	go func() {
