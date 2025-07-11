@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,22 +12,16 @@ import (
 	apipac "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/generated/clientset/versioned"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	tektonVersionedClient "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
-
-const (
-	// QueueHealthCheckInterval is how often we check for stuck pending PipelineRuns
-	QueueHealthCheckInterval = 1 * time.Minute
-
-	// StuckPipelineRunThreshold is how long a PipelineRun can be pending before considered stuck
-	StuckPipelineRunThreshold = 2 * time.Minute
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // QueueHealthChecker periodically scans all repositories for stuck pending PipelineRuns
-// and automatically triggers reconciliation when repositories have available capacity
+// and automatically triggers reconciliation when repositories have available capacity.
 type QueueHealthChecker struct {
 	logger           *zap.SugaredLogger
 	queueManager     QueueManagerInterface
@@ -36,41 +31,83 @@ type QueueHealthChecker struct {
 	wg               sync.WaitGroup
 	lastTriggerTimes map[string]time.Time // Track last trigger time per repository
 	triggerMutex     sync.RWMutex         // Protect lastTriggerTimes map
+	settings         *settings.Settings   // Configuration settings
+	settingsMutex    sync.RWMutex         // Protect settings access
 }
 
-// NewQueueHealthChecker creates a new QueueHealthChecker instance
+// NewQueueHealthChecker creates a new QueueHealthChecker instance.
 func NewQueueHealthChecker(logger *zap.SugaredLogger) *QueueHealthChecker {
+	defaultSettings := settings.DefaultSettings()
 	return &QueueHealthChecker{
 		logger:           logger,
 		stopCh:           make(chan struct{}),
 		lastTriggerTimes: make(map[string]time.Time),
+		settings:         &defaultSettings,
 	}
 }
 
-// SetClients sets the Tekton and PAC clients
+// SetClients sets the Tekton and PAC clients.
 func (qhc *QueueHealthChecker) SetClients(tektonClient tektonVersionedClient.Interface, pacClient versioned.Interface) {
 	qhc.tektonClient = tektonClient
 	qhc.pacClient = pacClient
 }
 
-// SetQueueManager sets the queue manager instance
+// SetQueueManager sets the queue manager instance.
 func (qhc *QueueHealthChecker) SetQueueManager(queueManager QueueManagerInterface) {
 	qhc.queueManager = queueManager
 }
 
-// Start begins the periodic health checking in a background goroutine
+// UpdateSettings updates the health checker settings thread-safely.
+func (qhc *QueueHealthChecker) UpdateSettings(newSettings *settings.Settings) {
+	qhc.settingsMutex.Lock()
+	defer qhc.settingsMutex.Unlock()
+	qhc.settings = newSettings
+}
+
+// getSettings returns a copy of the current settings thread-safely.
+func (qhc *QueueHealthChecker) getSettings() *settings.Settings {
+	qhc.settingsMutex.RLock()
+	defer qhc.settingsMutex.RUnlock()
+	return qhc.settings
+}
+
+// isEnabled checks if the health checker is enabled based on configuration.
+func (qhc *QueueHealthChecker) isEnabled() bool {
+	settings := qhc.getSettings()
+	return settings.QueueHealthCheckInterval > 0 && settings.QueueHealthStuckThreshold > 0
+}
+
+// getCheckInterval returns the configured check interval.
+func (qhc *QueueHealthChecker) getCheckInterval() time.Duration {
+	settings := qhc.getSettings()
+	return time.Duration(settings.QueueHealthCheckInterval) * time.Second
+}
+
+// getStuckThreshold returns the configured stuck threshold.
+func (qhc *QueueHealthChecker) getStuckThreshold() time.Duration {
+	settings := qhc.getSettings()
+	return time.Duration(settings.QueueHealthStuckThreshold) * time.Second
+}
+
+// Start begins the periodic health checking in a background goroutine.
 func (qhc *QueueHealthChecker) Start(ctx context.Context) {
 	if qhc.queueManager == nil || qhc.tektonClient == nil || qhc.pacClient == nil {
 		qhc.logger.Error("HEALTH-CHECKER: not properly initialized - missing dependencies")
 		return
 	}
 
-	qhc.logger.Infof("HEALTH-CHECKER: Starting queue health checker with %v interval", QueueHealthCheckInterval)
+	if !qhc.isEnabled() {
+		qhc.logger.Info("HEALTH-CHECKER: disabled via configuration (queue-health-check-interval=0 or queue-health-stuck-threshold=0)")
+		return
+	}
+
+	checkInterval := qhc.getCheckInterval()
+	qhc.logger.Infof("HEALTH-CHECKER: Starting queue health checker with %v interval", checkInterval)
 
 	qhc.wg.Add(1)
 	go func() {
 		defer qhc.wg.Done()
-		ticker := time.NewTicker(QueueHealthCheckInterval)
+		ticker := time.NewTicker(checkInterval)
 		defer ticker.Stop()
 
 		for {
@@ -82,13 +119,27 @@ func (qhc *QueueHealthChecker) Start(ctx context.Context) {
 				qhc.logger.Info("HEALTH-CHECKER: stopped")
 				return
 			case <-ticker.C:
+				// Check if still enabled (settings might have changed)
+				if !qhc.isEnabled() {
+					qhc.logger.Info("HEALTH-CHECKER: disabled via configuration update, stopping")
+					return
+				}
+
+				// Update ticker interval if it changed
+				newInterval := qhc.getCheckInterval()
+				if newInterval != checkInterval {
+					qhc.logger.Infof("HEALTH-CHECKER: Updating check interval from %v to %v", checkInterval, newInterval)
+					ticker.Reset(newInterval)
+					checkInterval = newInterval
+				}
+
 				qhc.checkAllRepositories(ctx)
 			}
 		}
 	}()
 }
 
-// Stop gracefully stops the health checker
+// Stop gracefully stops the health checker.
 func (qhc *QueueHealthChecker) Stop() {
 	qhc.logger.Info("HEALTH-CHECKER: Stopping queue health checker...")
 	close(qhc.stopCh)
@@ -96,7 +147,7 @@ func (qhc *QueueHealthChecker) Stop() {
 	qhc.logger.Info("HEALTH-CHECKER: stopped")
 }
 
-// checkAllRepositories scans all repositories for stuck pending PipelineRuns
+// checkAllRepositories scans all repositories for stuck pending PipelineRuns.
 func (qhc *QueueHealthChecker) checkAllRepositories(ctx context.Context) {
 	repos, err := qhc.pacClient.PipelinesascodeV1alpha1().Repositories("").List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -132,7 +183,7 @@ func (qhc *QueueHealthChecker) checkAllRepositories(ctx context.Context) {
 }
 
 // checkRepositoryHealth checks a single repository for stuck pending PipelineRuns
-// and rebuilds the queue if necessary, then triggers reconciliation
+// and rebuilds the queue if necessary, then triggers reconciliation.
 func (qhc *QueueHealthChecker) checkRepositoryHealth(ctx context.Context, repo *apipac.Repository) (int, error) {
 	repoKey := fmt.Sprintf("%s/%s", repo.Namespace, repo.Name)
 
@@ -199,94 +250,84 @@ func (qhc *QueueHealthChecker) checkRepositoryHealth(ctx context.Context, repo *
 		return 0, nil
 	}
 
-	// If there are no pending PipelineRuns, no need to check further
 	if len(pendingPRs.Items) == 0 {
-		qhc.logger.Infof("HEALTH-CHECKER: Repository %s/%s: %d running, 0 pending - no action needed",
-			repo.Namespace, repo.Name, actualRunningCount)
+		qhc.logger.Debugf("HEALTH-CHECKER: Repository %s/%s has no pending PipelineRuns, no health check needed", repo.Namespace, repo.Name)
 		return 0, nil
 	}
 
-	// Filter for actually stuck PipelineRuns
-	stuckPRs := qhc.findStuckPipelineRuns(pendingPRs.Items)
+	// Check for high activity (many recently started PipelineRuns)
+	recentlyStartedPRs, err := qhc.tektonClient.TektonV1().PipelineRuns(repo.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s,%s=%s", keys.Repository, repo.Name, keys.State, kubeinteraction.StateStarted),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to list recently started PipelineRuns for repository %s/%s: %w", repo.Namespace, repo.Name, err)
+	}
 
-	// Check if we have capacity and pending PipelineRuns (stuck or not)
-	// If we have capacity and pending PipelineRuns, we should trigger processing
-	if availableCapacity > 0 && len(pendingPRs.Items) > 0 {
-		// Check rate limiting only for rebuild operations - don't rate limit simple triggers
+	// Count recently started PipelineRuns (started within the last 2 minutes)
+	recentlyStartedCount := 0
+	for _, pr := range recentlyStartedPRs.Items {
+		if time.Since(pr.CreationTimestamp.Time) < 2*time.Minute {
+			recentlyStartedCount++
+		}
+	}
+
+	// If there are many recently started PipelineRuns, the reconciler is likely active
+	if recentlyStartedCount > 5 {
+		qhc.logger.Infof("HEALTH-CHECKER: Repository %s/%s has high activity (%d recently started PipelineRuns), skipping trigger to avoid interference",
+			repo.Namespace, repo.Name, recentlyStartedCount)
+		return 0, nil
+	}
+
+	// Check if we need to rebuild the queue (if any PipelineRuns are stuck)
+	stuckThreshold := qhc.getStuckThreshold()
+	hasStuckPRs := false
+	for _, pr := range pendingPRs.Items {
+		if pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
+			age := time.Since(pr.CreationTimestamp.Time)
+			if age > stuckThreshold {
+				hasStuckPRs = true
+				break
+			}
+		}
+	}
+
+	needsRebuild := false
+	if hasStuckPRs {
+		// Check rate limiting for rebuilds (3 minutes)
 		qhc.triggerMutex.RLock()
 		lastTrigger, exists := qhc.lastTriggerTimes[repoKey]
 		qhc.triggerMutex.RUnlock()
 
-		needsRebuild := len(stuckPRs) > 0
-		minTriggerInterval := 3 * time.Minute // Minimum time between rebuilds for same repo
-
-		if needsRebuild {
-			// Only rate limit rebuilds, not simple triggers
-			if exists && time.Since(lastTrigger) < minTriggerInterval {
-				qhc.logger.Infof("HEALTH-CHECKER: Repository %s was recently rebuilt (%v ago), skipping rebuild but will try simple trigger",
-					repoKey, time.Since(lastTrigger))
-				needsRebuild = false
-			}
-		}
-
-		if needsRebuild {
-			qhc.logger.Infof("HEALTH-CHECKER: Repository %s/%s has %d stuck PipelineRuns with %d available capacity - rebuilding queue",
-				repo.Namespace, repo.Name, len(stuckPRs), availableCapacity)
-
-			// Update rate limiting tracker for rebuilds
+		if !exists || time.Since(lastTrigger) > 3*time.Minute {
+			needsRebuild = true
 			qhc.triggerMutex.Lock()
 			qhc.lastTriggerTimes[repoKey] = time.Now()
 			qhc.triggerMutex.Unlock()
-
-			// Rebuild the queue for this repository's namespace
-			// This will fix any queue state inconsistencies and allow natural processing
-			stats, err := qhc.queueManager.RebuildQueuesForNamespace(ctx, repo.Namespace, qhc.tektonClient, qhc.pacClient)
-			if err != nil {
-				qhc.logger.Errorf("HEALTH-CHECKER: Failed to rebuild queue for repository %s/%s: %v", repo.Namespace, repo.Name, err)
-				return 0, err
-			}
-
-			qhc.logger.Infof("HEALTH-CHECKER: Successfully rebuilt queue for repository %s/%s: %v", repo.Namespace, repo.Name, stats)
-		} else {
-			qhc.logger.Infof("HEALTH-CHECKER: Repository %s/%s has %d pending PipelineRuns with %d available capacity - triggering processing (no rebuild needed)",
-				repo.Namespace, repo.Name, len(pendingPRs.Items), availableCapacity)
 		}
+	}
 
-		// Always trigger reconciliation when we have capacity and pending PipelineRuns
-		err = qhc.triggerReconciliationForPendingPipelineRuns(ctx, repo.Namespace, repo.Name)
+	switch {
+	case needsRebuild:
+		qhc.logger.Infof("HEALTH-CHECKER: Repository %s/%s has %d stuck PipelineRuns with %d available capacity - rebuilding queue",
+			repo.Namespace, repo.Name, len(pendingPRs.Items), availableCapacity)
+
+		// Rebuild the queue to fix any state inconsistencies
+		_, err := qhc.queueManager.RebuildQueuesForNamespace(ctx, repo.Namespace, qhc.tektonClient, qhc.pacClient)
 		if err != nil {
-			qhc.logger.Warnf("HEALTH-CHECKER: Failed to trigger reconciliation for pending PipelineRuns: %v", err)
-			// Don't fail the health check, just log the warning
+			return 0, fmt.Errorf("failed to rebuild queue for repository %s/%s: %w", repo.Namespace, repo.Name, err)
 		}
-
-		// Return the number of PipelineRuns that should be processed
-		return len(pendingPRs.Items), nil
+		qhc.logger.Infof("HEALTH-CHECKER: Successfully rebuilt queue for repository %s/%s", repo.Namespace, repo.Name)
+	default:
+		qhc.logger.Infof("HEALTH-CHECKER: Repository %s/%s has %d pending PipelineRuns with %d available capacity - triggering processing (no rebuild needed)",
+			repo.Namespace, repo.Name, len(pendingPRs.Items), availableCapacity)
 	}
 
-	// No action needed
-	qhc.logger.Infof("HEALTH-CHECKER: Repository %s/%s: %d running, %d pending, %d stuck - no action needed (no capacity or no pending)",
-		repo.Namespace, repo.Name, actualRunningCount, len(pendingPRs.Items), len(stuckPRs))
-	return 0, nil
-}
-
-// findStuckPipelineRuns filters PipelineRuns that are actually stuck
-func (qhc *QueueHealthChecker) findStuckPipelineRuns(pipelineRuns []tektonv1.PipelineRun) []tektonv1.PipelineRun {
-	var stuckPRs []tektonv1.PipelineRun
-	now := time.Now()
-
-	for _, pr := range pipelineRuns {
-		// Only consider PipelineRuns that are actually pending
-		if pr.Spec.Status != tektonv1.PipelineRunSpecStatusPending {
-			continue
-		}
-
-		// Check if it's been pending long enough to be considered stuck
-		if pr.CreationTimestamp.Add(StuckPipelineRunThreshold).Before(now) {
-			stuckPRs = append(stuckPRs, pr)
-		}
+	// Trigger reconciliation for one pending PipelineRun to start queue processing
+	if err := qhc.triggerReconciliationForPendingPipelineRuns(ctx, repo.Namespace, repo.Name); err != nil {
+		return 0, fmt.Errorf("failed to trigger reconciliation for repository %s/%s: %w", repo.Namespace, repo.Name, err)
 	}
 
-	return stuckPRs
+	return len(pendingPRs.Items), nil
 }
 
 // triggerReconciliationForPendingPipelineRuns updates the state annotation on one pending PipelineRun
@@ -298,71 +339,61 @@ func (qhc *QueueHealthChecker) triggerReconciliationForPendingPipelineRuns(ctx c
 		LabelSelector: fmt.Sprintf("%s=%s,%s=%s", keys.Repository, repoName, keys.State, kubeinteraction.StateQueued),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to list queued PipelineRuns for repository %s: %w", repoName, err)
+		return fmt.Errorf("failed to list pending PipelineRuns for repository %s/%s: %w", namespace, repoName, err)
 	}
 
-	// Check if there are any PipelineRuns currently transitioning (recently modified)
-	// This helps avoid conflicts with ongoing reconciliation
-	recentlyModified := 0
-	now := time.Now()
+	// Filter to only pending PipelineRuns
+	var pendingPRs []tektonv1.PipelineRun
 	for _, pr := range pipelineRuns.Items {
-		if pr.Status.StartTime != nil && pr.Status.StartTime.Time.After(now.Add(-30*time.Second)) {
-			recentlyModified++
+		if pr.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
+			pendingPRs = append(pendingPRs, pr)
 		}
 	}
 
-	// If many PipelineRuns were recently modified, the reconciler might already be active
-	if recentlyModified > 3 {
-		qhc.logger.Debugf("HEALTH-CHECKER: Skipping reconciliation trigger for repository %s: %d PipelineRuns recently modified, reconciler likely active", repoName, recentlyModified)
+	if len(pendingPRs) == 0 {
+		qhc.logger.Debugf("HEALTH-CHECKER: No pending PipelineRuns found for repository %s/%s", namespace, repoName)
 		return nil
 	}
 
-	// Find the first pending PipelineRun and trigger reconciliation for it only
-	// The reconciler will then process the entire queue and move items from pending to running
-	// based on the repository's concurrency limit
-	for _, pr := range pipelineRuns.Items {
-		// Only trigger for PipelineRuns that are actually pending
-		if pr.Spec.Status != tektonv1.PipelineRunSpecStatusPending {
-			continue
-		}
+	// Trigger the first pending PipelineRun by updating its state annotation
+	// This will cause the controller to re-examine it and process the queue
+	pr := &pendingPRs[0]
 
+	// Retry logic for handling conflicts
+	maxRetries := 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
 		// Update the state annotation to trigger reconciliation
-		// We add a small timestamp to ensure the annotation value changes and triggers the controller
-		timestamp := fmt.Sprintf("%d", time.Now().Unix())
-		patch := fmt.Sprintf(`{"metadata":{"annotations":{"pipelinesascode.tekton.dev/state":"%s","pipelinesascode.tekton.dev/reconcile-trigger":"%s"}}}`, kubeinteraction.StateQueued, timestamp)
-
-		// Retry the patch operation to handle conflicts gracefully
-		maxRetries := 3
-		for attempt := 1; attempt <= maxRetries; attempt++ {
-			_, err := qhc.tektonClient.TektonV1().PipelineRuns(namespace).Patch(ctx, pr.Name,
-				"application/merge-patch+json", []byte(patch), metav1.PatchOptions{})
-			if err == nil {
-				qhc.logger.Infof("HEALTH-CHECKER: Triggered reconciliation for PipelineRun %s (repository %s) - this will kick off queue processing", pr.Name, repoName)
-				return nil // Successfully triggered one, let the queue management handle the rest
-			}
-
-			// Check if it's a conflict error
-			if strings.Contains(err.Error(), "the object has been modified") || strings.Contains(err.Error(), "Operation cannot be fulfilled") {
-				if attempt < maxRetries {
-					qhc.logger.Debugf("HEALTH-CHECKER: Conflict updating PipelineRun %s (attempt %d/%d), retrying: %v", pr.Name, attempt, maxRetries, err)
-					time.Sleep(time.Duration(attempt) * 100 * time.Millisecond) // Exponential backoff
-					continue
-				}
-			}
-
-			// Check if the PipelineRun was deleted
-			if strings.Contains(err.Error(), "not found") {
-				qhc.logger.Debugf("HEALTH-CHECKER: PipelineRun %s was deleted during reconciliation trigger, trying next one", pr.Name)
-				break // Try the next PipelineRun
-			}
-
-			qhc.logger.Warnf("HEALTH-CHECKER: Failed to trigger reconciliation for PipelineRun %s (attempt %d/%d): %v", pr.Name, attempt, maxRetries, err)
-			if attempt == maxRetries {
-				break // Try the next PipelineRun
-			}
+		mergePatch := map[string]any{
+			"metadata": map[string]any{
+				"annotations": map[string]string{
+					keys.State: kubeinteraction.StateQueued, // Re-set the same state to trigger controller
+				},
+			},
 		}
+
+		patchBytes, err := json.Marshal(mergePatch)
+		if err != nil {
+			return fmt.Errorf("failed to marshal patch for PipelineRun %s: %w", pr.Name, err)
+		}
+
+		_, err = qhc.tektonClient.TektonV1().PipelineRuns(namespace).Patch(ctx, pr.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{})
+		if err != nil {
+			if attempt < maxRetries && (strings.Contains(err.Error(), "the object has been modified") || strings.Contains(err.Error(), "Operation cannot be fulfilled")) {
+				qhc.logger.Debugf("HEALTH-CHECKER: Conflict updating PipelineRun %s (attempt %d/%d): %v", pr.Name, attempt, maxRetries, err)
+				// Exponential backoff
+				time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+				continue
+			}
+			if strings.Contains(err.Error(), "not found") {
+				qhc.logger.Debugf("HEALTH-CHECKER: PipelineRun %s not found, may have been deleted", pr.Name)
+				return nil
+			}
+			return fmt.Errorf("failed to patch PipelineRun %s after %d attempts: %w", pr.Name, attempt, err)
+		}
+
+		qhc.logger.Infof("HEALTH-CHECKER: Triggered reconciliation for PipelineRun %s (repository %s) - this will kick off queue processing", pr.Name, repoName)
+		return nil
 	}
 
-	qhc.logger.Infof("HEALTH-CHECKER: No pending PipelineRuns found to trigger reconciliation for repository %s", repoName)
-	return nil
+	return fmt.Errorf("failed to patch PipelineRun %s after %d attempts due to conflicts", pr.Name, maxRetries)
 }

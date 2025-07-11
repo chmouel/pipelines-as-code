@@ -139,18 +139,9 @@ There is a few things you can configure through the config map
 
 * `remember-ok-to-test`
 
-  If `remember-ok-to-test` is true then if `ok-to-test` is done on pull request then in
-  case of push event on pull request either through new commit or amend, then CI will
-  re-run automatically
+  When enabled, if a repository maintainer has commented `/ok-to-test` on a pull request, then any subsequent push to that pull request will automatically run the CI without requiring another `/ok-to-test` comment. This is useful for repositories where you want to allow CI to run on subsequent pushes after the initial approval.
 
-  By default, the `remember-ok-to-test` setting is set to false in Pipelines-as-Code to mitigate serious security risks.
-  An attacker could submit a seemingly harmless PR to gain the repository owner's trust, and later
-  inject malicious code designed to compromise the build system, such as exfiltrating secrets.
-
-  Enabling this feature increases the risk of unauthorized access and is therefore strongly discouraged
-  unless absolutely necessary. If you choose to enable it you can set it to true, you do so at your own
-  risk and should be aware of the potential security vulnerabilities.
-  (only GitHub and Gitea is supported at the moment).
+  Default: `false`
 
 * `skip-push-event-for-pr-commits`
 
@@ -163,6 +154,26 @@ There is a few things you can configure through the config map
   and if so, skipping the push event processing.
 
   Default: `true`
+
+* `queue-health-check-interval`
+
+  How often (in seconds) the queue health checker should scan for stuck pending PipelineRuns. The health checker monitors repositories with concurrency limits and automatically triggers reconciliation when PipelineRuns are stuck in pending state despite having available capacity.
+
+  Set to `0` to disable the queue health checker entirely (disabled by default to avoid server load).
+
+  Default: `0` (disabled)
+  
+  Example: `300` (check every 5 minutes)
+
+* `queue-health-stuck-threshold`
+
+  How long (in seconds) a PipelineRun can be pending before it's considered stuck and eligible for health checker intervention. PipelineRuns that have been pending longer than this threshold will trigger queue rebuilding and reconciliation.
+
+  Set to `0` to disable the queue health checker entirely. Note that the health checker will only be active if both this value and `queue-health-check-interval` are non-zero.
+
+  Default: `180` (3 minutes)
+  
+  Example: `300` (consider stuck after 5 minutes)
 
 {{< support_matrix github_app="true" github_webhook="true" gitea="false" gitlab="false" bitbucket_cloud="false" bitbucket_datacenter="false" >}}
 

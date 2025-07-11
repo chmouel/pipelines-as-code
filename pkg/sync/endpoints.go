@@ -18,25 +18,25 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// QueueEndpoints provides HTTP handlers for queue management operations
+// QueueEndpoints provides HTTP handlers for queue management operations.
 type QueueEndpoints struct {
 	logger *zap.SugaredLogger
 }
 
-// NewQueueEndpoints creates a new QueueEndpoints instance
+// NewQueueEndpoints creates a new QueueEndpoints instance.
 func NewQueueEndpoints(logger *zap.SugaredLogger) *QueueEndpoints {
 	return &QueueEndpoints{
 		logger: logger,
 	}
 }
 
-// RegisterHandlers registers the queue management endpoints with the provided mux
+// RegisterHandlers registers the queue management endpoints with the provided mux.
 func (qe *QueueEndpoints) RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/queue/reset", qe.handleQueueReset)
 	mux.HandleFunc("/api/v1/queue/rebuild", qe.handleQueueRebuild)
 }
 
-// handleQueueReset handles the queue reset endpoint
+// handleQueueReset handles the queue reset endpoint.
 func (qe *QueueEndpoints) handleQueueReset(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		qe.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -55,7 +55,7 @@ func (qe *QueueEndpoints) handleQueueReset(w http.ResponseWriter, r *http.Reques
 	resetStats := queueManager.ResetAll()
 
 	// Create response with statistics
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":  "success",
 		"message": "All queues reset",
 		"stats":   resetStats,
@@ -64,7 +64,7 @@ func (qe *QueueEndpoints) handleQueueReset(w http.ResponseWriter, r *http.Reques
 	qe.writeJSONResponse(w, http.StatusOK, response)
 }
 
-// handleQueueRebuild handles the queue rebuild endpoint
+// handleQueueRebuild handles the queue rebuild endpoint.
 func (qe *QueueEndpoints) handleQueueRebuild(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		qe.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -144,7 +144,7 @@ func (qe *QueueEndpoints) handleQueueRebuild(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Create success response with rebuild statistics
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":  "success",
 		"message": fmt.Sprintf("Successfully rebuilt queues for repository %s", repoName),
 		"stats":   rebuildStats,
@@ -155,7 +155,7 @@ func (qe *QueueEndpoints) handleQueueRebuild(w http.ResponseWriter, r *http.Requ
 }
 
 // checkForRunningPipelineRuns checks if there are any running PipelineRuns for the specific repository
-// Returns an error if there are running PipelineRuns, and writes the appropriate HTTP response
+// Returns an error if there are running PipelineRuns, and writes the appropriate HTTP response.
 func (qe *QueueEndpoints) checkForRunningPipelineRuns(ctx context.Context, tektonClient tektonVersionedClient.Interface, namespace, repoName string, w http.ResponseWriter) error {
 	runningPRs, err := tektonClient.TektonV1().PipelineRuns(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("%s=%s,%s=%s", keys.Repository, repoName, keys.State, kubeinteraction.StateStarted),
@@ -174,7 +174,7 @@ func (qe *QueueEndpoints) checkForRunningPipelineRuns(ctx context.Context, tekto
 			runningNames[i] = pr.Name
 		}
 
-		response := map[string]interface{}{
+		response := map[string]any{
 			"status":               "error",
 			"message":              fmt.Sprintf("Cannot rebuild queue: %d PipelineRuns are currently running for repository %s. Wait for them to complete or use force=true parameter.", len(runningPRs.Items), repoName),
 			"running_pipelineruns": runningNames,
@@ -217,10 +217,9 @@ func (qe *QueueEndpoints) triggerReconciliationForPendingPipelineRuns(ctx contex
 			if err != nil {
 				qe.logger.Warnf("Failed to trigger reconciliation for PipelineRun %s: %v", pr.Name, err)
 				continue // Try the next one if this fails
-			} else {
-				qe.logger.Infof("Triggered reconciliation for PipelineRun %s (repository %s) - this will kick off queue processing", pr.Name, repoName)
-				return nil // Successfully triggered one, let the queue management handle the rest
 			}
+			qe.logger.Infof("Triggered reconciliation for PipelineRun %s (repository %s) - this will kick off queue processing", pr.Name, repoName)
+			return nil // Successfully triggered one, let the queue management handle the rest
 		}
 	}
 
@@ -236,14 +235,14 @@ func (qe *QueueEndpoints) writeErrorResponse(w http.ResponseWriter, statusCode i
 }
 
 func (qe *QueueEndpoints) writeJSONErrorResponse(w http.ResponseWriter, statusCode int, message string) {
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":  "error",
 		"message": message,
 	}
 	qe.writeJSONResponse(w, statusCode, response)
 }
 
-func (qe *QueueEndpoints) writeJSONResponse(w http.ResponseWriter, statusCode int, response map[string]interface{}) {
+func (qe *QueueEndpoints) writeJSONResponse(w http.ResponseWriter, statusCode int, response map[string]any) {
 	responseJSON, err := json.Marshal(response)
 	if err != nil {
 		qe.logger.Errorf("Failed to marshal JSON response: %v", err)

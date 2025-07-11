@@ -81,6 +81,10 @@ type Settings struct {
 	CustomConsoleNamespaceURL string `json:"custom-console-url-namespace"`
 
 	RememberOKToTest bool `json:"remember-ok-to-test"`
+
+	// Queue Health Checker settings
+	QueueHealthCheckInterval  int `default:"0"   json:"queue-health-check-interval"`  // seconds, 0 to disable
+	QueueHealthStuckThreshold int `default:"180" json:"queue-health-stuck-threshold"` // seconds, 0 to disable
 }
 
 func (s *Settings) DeepCopy(out *Settings) {

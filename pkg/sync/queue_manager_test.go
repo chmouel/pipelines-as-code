@@ -492,7 +492,10 @@ func TestRebuildQueuesForNamespace(t *testing.T) {
 	assert.Equal(t, rebuildStats["namespace"], "test-ns")
 	assert.Equal(t, rebuildStats["repositories_processed"], 2)
 
-	rebuiltRepos := rebuildStats["repositories_rebuilt"].(map[string]map[string]int)
+	rebuiltRepos, ok := rebuildStats["repositories_rebuilt"].(map[string]map[string]int)
+	if !ok {
+		t.Fatalf("expected repositories_rebuilt to be map[string]map[string]int, got %T", rebuildStats["repositories_rebuilt"])
+	}
 	assert.Equal(t, len(rebuiltRepos), 2)
 
 	// Check repo1 stats
@@ -513,6 +516,9 @@ func TestRebuildQueuesForNamespace(t *testing.T) {
 	assert.Equal(t, len(qm.QueuedPipelineRuns(repo2)), 0)
 
 	// Verify no errors occurred
-	errors := rebuildStats["errors"].([]string)
+	errors, ok := rebuildStats["errors"].([]string)
+	if !ok {
+		t.Fatalf("expected errors to be []string, got %T", rebuildStats["errors"])
+	}
 	assert.Equal(t, len(errors), 0)
 }

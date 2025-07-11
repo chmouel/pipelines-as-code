@@ -11,6 +11,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/generated/clientset/versioned"
 	fake "github.com/openshift-pipelines/pipelines-as-code/pkg/generated/clientset/versioned/fake"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	tektonVersionedClient "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 	tektonfake "github.com/tektoncd/pipeline/pkg/client/clientset/versioned/fake"
@@ -22,41 +23,41 @@ import (
 	ktesting "k8s.io/client-go/testing"
 )
 
-// mockQueueManagerForHealthChecker implements the QueueManagerInterface for testing
+// mockQueueManagerForHealthChecker implements the QueueManagerInterface for testing.
 type mockQueueManagerForHealthChecker struct {
 	rebuildCalls []string
 	rebuildError error
 }
 
-func (m *mockQueueManagerForHealthChecker) InitQueues(ctx context.Context, tekton tektonVersionedClient.Interface, pac versioned.Interface) error {
+func (m *mockQueueManagerForHealthChecker) InitQueues(_ context.Context, _ tektonVersionedClient.Interface, _ versioned.Interface) error {
 	return nil
 }
 
-func (m *mockQueueManagerForHealthChecker) RemoveRepository(repo *apipac.Repository) {
+func (m *mockQueueManagerForHealthChecker) RemoveRepository(_ *apipac.Repository) {
 	// Not used in health checker tests
 }
 
-func (m *mockQueueManagerForHealthChecker) QueuedPipelineRuns(repo *apipac.Repository) []string {
+func (m *mockQueueManagerForHealthChecker) QueuedPipelineRuns(_ *apipac.Repository) []string {
 	return []string{}
 }
 
-func (m *mockQueueManagerForHealthChecker) RunningPipelineRuns(repo *apipac.Repository) []string {
+func (m *mockQueueManagerForHealthChecker) RunningPipelineRuns(_ *apipac.Repository) []string {
 	return []string{}
 }
 
-func (m *mockQueueManagerForHealthChecker) AddListToRunningQueue(repo *apipac.Repository, list []string) ([]string, error) {
+func (m *mockQueueManagerForHealthChecker) AddListToRunningQueue(_ *apipac.Repository, _ []string) ([]string, error) {
 	return []string{}, nil
 }
 
-func (m *mockQueueManagerForHealthChecker) AddToPendingQueue(repo *apipac.Repository, list []string) error {
+func (m *mockQueueManagerForHealthChecker) AddToPendingQueue(_ *apipac.Repository, _ []string) error {
 	return nil
 }
 
-func (m *mockQueueManagerForHealthChecker) RemoveFromQueue(repoKey, prKey string) bool {
+func (m *mockQueueManagerForHealthChecker) RemoveFromQueue(_, _ string) bool {
 	return true
 }
 
-func (m *mockQueueManagerForHealthChecker) RemoveAndTakeItemFromQueue(repo *apipac.Repository, run *tektonv1.PipelineRun) string {
+func (m *mockQueueManagerForHealthChecker) RemoveAndTakeItemFromQueue(_ *apipac.Repository, _ *tektonv1.PipelineRun) string {
 	return ""
 }
 
@@ -64,27 +65,27 @@ func (m *mockQueueManagerForHealthChecker) ResetAll() map[string]int {
 	return make(map[string]int)
 }
 
-func (m *mockQueueManagerForHealthChecker) RebuildQueuesForNamespace(ctx context.Context, namespace string, tekton tektonVersionedClient.Interface, pac versioned.Interface) (map[string]interface{}, error) {
+func (m *mockQueueManagerForHealthChecker) RebuildQueuesForNamespace(_ context.Context, namespace string, _ tektonVersionedClient.Interface, _ versioned.Interface) (map[string]any, error) {
 	m.rebuildCalls = append(m.rebuildCalls, namespace)
 	if m.rebuildError != nil {
 		return nil, m.rebuildError
 	}
-	return map[string]interface{}{
+	return map[string]any{
 		"namespace":              namespace,
 		"repositories_processed": 1,
-		"repositories_rebuilt": map[string]interface{}{
-			"test-repo": map[string]interface{}{
+		"repositories_rebuilt": map[string]any{
+			"test-repo": map[string]any{
 				"rebuilt_pending": 5,
 			},
 		},
 	}, nil
 }
 
-func createTestRepository(name, namespace string, concurrencyLimit *int) *apipac.Repository {
+func createTestRepository(name string, concurrencyLimit *int) *apipac.Repository {
 	repo := &apipac.Repository{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: "test-ns",
 		},
 		Spec: apipac.RepositorySpec{},
 	}
@@ -94,11 +95,26 @@ func createTestRepository(name, namespace string, concurrencyLimit *int) *apipac
 	return repo
 }
 
-func createTestPipelineRun(name, namespace, repoName string, state string, status tektonv1.PipelineRunSpecStatus, creationTime time.Time) *tektonv1.PipelineRun {
+func createTestQueueHealthChecker(logger *zap.SugaredLogger, tektonClient tektonVersionedClient.Interface, pacClient versioned.Interface, qm QueueManagerInterface) *QueueHealthChecker {
+	qhc := NewQueueHealthChecker(logger)
+	qhc.SetClients(tektonClient, pacClient)
+	qhc.SetQueueManager(qm)
+
+	// Enable health checker with test settings
+	testSettings := &settings.Settings{
+		QueueHealthCheckInterval:  10,
+		QueueHealthStuckThreshold: 120,
+	}
+	qhc.UpdateSettings(testSettings)
+
+	return qhc
+}
+
+func createTestPipelineRun(name, repoName, state string, status tektonv1.PipelineRunSpecStatus, creationTime time.Time) *tektonv1.PipelineRun {
 	pr := &tektonv1.PipelineRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              name,
-			Namespace:         namespace,
+			Namespace:         "test-ns",
 			CreationTimestamp: metav1.NewTime(creationTime),
 			Labels: map[string]string{
 				keys.Repository: repoName,
@@ -117,7 +133,11 @@ func TestNewQueueHealthChecker(t *testing.T) {
 	observer, _ := observer.New(zap.InfoLevel)
 	logger := zap.New(observer).Sugar()
 
-	qhc := NewQueueHealthChecker(logger)
+	tektonClient := tektonfake.NewSimpleClientset()
+	pacClient := fake.NewSimpleClientset()
+	mockQM := &mockQueueManagerForHealthChecker{}
+
+	qhc := createTestQueueHealthChecker(logger, tektonClient, pacClient, mockQM)
 
 	assert.Assert(t, qhc != nil)
 	assert.Assert(t, qhc.logger == logger)
@@ -133,9 +153,7 @@ func TestQueueHealthChecker_StartStop(t *testing.T) {
 	pacClient := fake.NewSimpleClientset()
 	mockQM := &mockQueueManagerForHealthChecker{}
 
-	qhc := NewQueueHealthChecker(logger)
-	qhc.SetClients(tektonClient, pacClient)
-	qhc.SetQueueManager(mockQM)
+	qhc := createTestQueueHealthChecker(logger, tektonClient, pacClient, mockQM)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -171,14 +189,14 @@ func TestQueueHealthChecker_checkRepositoryHealth(t *testing.T) {
 	}{
 		{
 			name:                    "no concurrency limit set",
-			repo:                    createTestRepository("test-repo", "test-ns", nil),
+			repo:                    createTestRepository("test-repo", nil),
 			expectedTriggered:       0,
 			expectedRebuildCalls:    0,
 			expectedAnnotationCalls: 0,
 		},
 		{
 			name: "repository at capacity",
-			repo: createTestRepository("test-repo", "test-ns", &[]int{2}[0]),
+			repo: createTestRepository("test-repo", &[]int{2}[0]),
 			runningPRs: []*tektonv1.PipelineRun{
 				createTestPipelineRun("running-pr-1", "test-ns", "test-repo", kubeinteraction.StateStarted, "", time.Now()),
 				createTestPipelineRun("running-pr-2", "test-ns", "test-repo", kubeinteraction.StateStarted, "", time.Now()),
@@ -192,7 +210,7 @@ func TestQueueHealthChecker_checkRepositoryHealth(t *testing.T) {
 		},
 		{
 			name: "has capacity with fresh pending PipelineRuns",
-			repo: createTestRepository("test-repo", "test-ns", &[]int{3}[0]),
+			repo: createTestRepository("test-repo", &[]int{3}[0]),
 			runningPRs: []*tektonv1.PipelineRun{
 				createTestPipelineRun("running-pr", "test-ns", "test-repo", kubeinteraction.StateStarted, "", time.Now()),
 			},
@@ -205,7 +223,7 @@ func TestQueueHealthChecker_checkRepositoryHealth(t *testing.T) {
 		},
 		{
 			name: "has capacity with stuck PipelineRuns",
-			repo: createTestRepository("test-repo", "test-ns", &[]int{3}[0]),
+			repo: createTestRepository("test-repo", &[]int{3}[0]),
 			runningPRs: []*tektonv1.PipelineRun{
 				createTestPipelineRun("running-pr", "test-ns", "test-repo", kubeinteraction.StateStarted, "", time.Now()),
 			},
@@ -218,7 +236,7 @@ func TestQueueHealthChecker_checkRepositoryHealth(t *testing.T) {
 		},
 		{
 			name: "no capacity but has pending PipelineRuns",
-			repo: createTestRepository("test-repo", "test-ns", &[]int{2}[0]),
+			repo: createTestRepository("test-repo", &[]int{2}[0]),
 			runningPRs: []*tektonv1.PipelineRun{
 				createTestPipelineRun("running-pr-1", "test-ns", "test-repo", kubeinteraction.StateStarted, "", time.Now()),
 				createTestPipelineRun("running-pr-2", "test-ns", "test-repo", kubeinteraction.StateStarted, "", time.Now()),
@@ -232,7 +250,7 @@ func TestQueueHealthChecker_checkRepositoryHealth(t *testing.T) {
 		},
 		{
 			name: "multiple stuck PipelineRuns with capacity",
-			repo: createTestRepository("test-repo", "test-ns", &[]int{5}[0]),
+			repo: createTestRepository("test-repo", &[]int{5}[0]),
 			pendingPRs: []*tektonv1.PipelineRun{
 				createTestPipelineRun("stuck-pr-1", "test-ns", "test-repo", kubeinteraction.StateQueued, tektonv1.PipelineRunSpecStatusPending, time.Now().Add(-5*time.Minute)),
 				createTestPipelineRun("stuck-pr-2", "test-ns", "test-repo", kubeinteraction.StateQueued, tektonv1.PipelineRunSpecStatusPending, time.Now().Add(-3*time.Minute)),
@@ -255,7 +273,7 @@ func TestQueueHealthChecker_checkRepositoryHealth(t *testing.T) {
 
 			// Track annotation calls
 			annotationCalls := 0
-			tektonClient.PrependReactor("patch", "pipelineruns", func(action ktesting.Action) (bool, runtime.Object, error) {
+			tektonClient.PrependReactor("patch", "pipelineruns", func(_ ktesting.Action) (bool, runtime.Object, error) {
 				annotationCalls++
 				return false, nil, nil
 			})
@@ -265,15 +283,13 @@ func TestQueueHealthChecker_checkRepositoryHealth(t *testing.T) {
 
 			// Add test data to clients
 			for _, pr := range tt.runningPRs {
-				tektonClient.TektonV1().PipelineRuns(tt.repo.Namespace).Create(context.TODO(), pr, metav1.CreateOptions{})
+				_, _ = tektonClient.TektonV1().PipelineRuns(tt.repo.Namespace).Create(context.TODO(), pr, metav1.CreateOptions{})
 			}
 			for _, pr := range tt.pendingPRs {
-				tektonClient.TektonV1().PipelineRuns(tt.repo.Namespace).Create(context.TODO(), pr, metav1.CreateOptions{})
+				_, _ = tektonClient.TektonV1().PipelineRuns(tt.repo.Namespace).Create(context.TODO(), pr, metav1.CreateOptions{})
 			}
 
-			qhc := NewQueueHealthChecker(logger)
-			qhc.SetClients(tektonClient, pacClient)
-			qhc.SetQueueManager(mockQM)
+			qhc := createTestQueueHealthChecker(logger, tektonClient, pacClient, mockQM)
 
 			triggered, err := qhc.checkRepositoryHealth(context.TODO(), tt.repo)
 
@@ -295,8 +311,8 @@ func TestQueueHealthChecker_checkAllRepositories(t *testing.T) {
 	logger := zap.New(observer).Sugar()
 
 	// Create test repositories
-	repoWithLimit := createTestRepository("repo-with-limit", "test-ns", &[]int{2}[0])
-	repoWithoutLimit := createTestRepository("repo-without-limit", "test-ns", nil)
+	repoWithLimit := createTestRepository("repo-with-limit", &[]int{2}[0])
+	repoWithoutLimit := createTestRepository("repo-without-limit", nil)
 
 	// Create test PipelineRuns - make one stuck and one not stuck
 	stuckPR := createTestPipelineRun("stuck-pr", "test-ns", "repo-with-limit", kubeinteraction.StateQueued, tektonv1.PipelineRunSpecStatusPending, time.Now().Add(-5*time.Minute))
@@ -308,7 +324,7 @@ func TestQueueHealthChecker_checkAllRepositories(t *testing.T) {
 
 	// Track annotation calls
 	annotationCalls := 0
-	tektonClient.PrependReactor("patch", "pipelineruns", func(action ktesting.Action) (bool, runtime.Object, error) {
+	tektonClient.PrependReactor("patch", "pipelineruns", func(_ ktesting.Action) (bool, runtime.Object, error) {
 		annotationCalls++
 		return false, nil, nil
 	})
@@ -317,14 +333,12 @@ func TestQueueHealthChecker_checkAllRepositories(t *testing.T) {
 	mockQM := &mockQueueManagerForHealthChecker{}
 
 	// Add test data to clients
-	tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), stuckPR, metav1.CreateOptions{})
-	tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), pendingPR, metav1.CreateOptions{})
-	pacClient.PipelinesascodeV1alpha1().Repositories("test-ns").Create(context.TODO(), repoWithLimit, metav1.CreateOptions{})
-	pacClient.PipelinesascodeV1alpha1().Repositories("test-ns").Create(context.TODO(), repoWithoutLimit, metav1.CreateOptions{})
+	_, _ = tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), stuckPR, metav1.CreateOptions{})
+	_, _ = tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), pendingPR, metav1.CreateOptions{})
+	_, _ = pacClient.PipelinesascodeV1alpha1().Repositories("test-ns").Create(context.TODO(), repoWithLimit, metav1.CreateOptions{})
+	_, _ = pacClient.PipelinesascodeV1alpha1().Repositories("test-ns").Create(context.TODO(), repoWithoutLimit, metav1.CreateOptions{})
 
-	qhc := NewQueueHealthChecker(logger)
-	qhc.SetClients(tektonClient, pacClient)
-	qhc.SetQueueManager(mockQM)
+	qhc := createTestQueueHealthChecker(logger, tektonClient, pacClient, mockQM)
 
 	qhc.checkAllRepositories(context.TODO())
 
@@ -338,7 +352,7 @@ func TestQueueHealthChecker_RateLimiting(t *testing.T) {
 	logger := zap.New(observer).Sugar()
 
 	// Create test repository
-	testRepo := createTestRepository("test-repo", "test-ns", &[]int{2}[0])
+	testRepo := createTestRepository("test-repo", &[]int{2}[0])
 
 	// Create stuck PipelineRun for first test
 	stuckPR := createTestPipelineRun("stuck-pr", "test-ns", "test-repo", kubeinteraction.StateQueued, tektonv1.PipelineRunSpecStatusPending, time.Now().Add(-5*time.Minute))
@@ -351,11 +365,9 @@ func TestQueueHealthChecker_RateLimiting(t *testing.T) {
 	mockQM := &mockQueueManagerForHealthChecker{}
 
 	// Add test data to clients
-	tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), stuckPR, metav1.CreateOptions{})
+	_, _ = tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), stuckPR, metav1.CreateOptions{})
 
-	qhc := NewQueueHealthChecker(logger)
-	qhc.SetClients(tektonClient, pacClient)
-	qhc.SetQueueManager(mockQM)
+	qhc := createTestQueueHealthChecker(logger, tektonClient, pacClient, mockQM)
 
 	// First call should trigger rebuild
 	triggered1, err := qhc.checkRepositoryHealth(context.TODO(), testRepo)
@@ -420,7 +432,7 @@ func TestQueueHealthChecker_triggerReconciliationForPendingPipelineRuns(t *testi
 
 			// Track patch calls
 			patchCalls := 0
-			tektonClient.PrependReactor("patch", "pipelineruns", func(action ktesting.Action) (bool, runtime.Object, error) {
+			tektonClient.PrependReactor("patch", "pipelineruns", func(_ ktesting.Action) (bool, runtime.Object, error) {
 				patchCalls++
 				if tt.patchError != nil {
 					return true, nil, tt.patchError
@@ -430,13 +442,11 @@ func TestQueueHealthChecker_triggerReconciliationForPendingPipelineRuns(t *testi
 
 			// Add test data to clients
 			for _, pr := range tt.pendingPRs {
-				tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), pr, metav1.CreateOptions{})
+				_, _ = tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), pr, metav1.CreateOptions{})
 			}
 
 			mockQM := &mockQueueManagerForHealthChecker{}
-			qhc := NewQueueHealthChecker(logger)
-			qhc.SetClients(tektonClient, pacClient)
-			qhc.SetQueueManager(mockQM)
+			qhc := createTestQueueHealthChecker(logger, tektonClient, pacClient, mockQM)
 
 			err := qhc.triggerReconciliationForPendingPipelineRuns(context.TODO(), "test-ns", "test-repo")
 
@@ -456,7 +466,7 @@ func TestQueueHealthChecker_ErrorHandling(t *testing.T) {
 	logger := zap.New(observer).Sugar()
 
 	// Create test repository
-	testRepo := createTestRepository("test-repo", "test-ns", &[]int{2}[0])
+	testRepo := createTestRepository("test-repo", &[]int{2}[0])
 
 	// Create fake clients
 	tektonClient := tektonfake.NewSimpleClientset()
@@ -467,12 +477,10 @@ func TestQueueHealthChecker_ErrorHandling(t *testing.T) {
 		rebuildError: fmt.Errorf("rebuild failed"),
 	}
 
-	qhc := NewQueueHealthChecker(logger)
-	qhc.SetClients(tektonClient, pacClient)
-	qhc.SetQueueManager(mockQM)
+	qhc := createTestQueueHealthChecker(logger, tektonClient, pacClient, mockQM)
 
 	// Test with list error
-	tektonClient.PrependReactor("list", "pipelineruns", func(action ktesting.Action) (bool, runtime.Object, error) {
+	tektonClient.PrependReactor("list", "pipelineruns", func(_ ktesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("list failed")
 	})
 
@@ -486,11 +494,11 @@ func TestQueueHealthChecker_ActivityDetection(t *testing.T) {
 	logger := zap.New(observer).Sugar()
 
 	// Create test repository
-	testRepo := createTestRepository("test-repo", "test-ns", &[]int{5}[0])
+	testRepo := createTestRepository("test-repo", &[]int{5}[0])
 
 	// Create many recently started PipelineRuns (high activity)
-	var recentPRs []*tektonv1.PipelineRun
-	for i := 0; i < 10; i++ {
+	recentPRs := []*tektonv1.PipelineRun{}
+	for i := range [10]struct{}{} {
 		pr := createTestPipelineRun(fmt.Sprintf("recent-pr-%d", i), "test-ns", "test-repo", kubeinteraction.StateStarted, "", time.Now().Add(-30*time.Second))
 		recentPRs = append(recentPRs, pr)
 	}
@@ -504,21 +512,19 @@ func TestQueueHealthChecker_ActivityDetection(t *testing.T) {
 
 	// Track annotation calls
 	annotationCalls := 0
-	tektonClient.PrependReactor("patch", "pipelineruns", func(action ktesting.Action) (bool, runtime.Object, error) {
+	tektonClient.PrependReactor("patch", "pipelineruns", func(_ ktesting.Action) (bool, runtime.Object, error) {
 		annotationCalls++
 		return false, nil, nil
 	})
 
 	// Add test data to clients
 	for _, pr := range recentPRs {
-		tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), pr, metav1.CreateOptions{})
+		_, _ = tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), pr, metav1.CreateOptions{})
 	}
-	tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), pendingPR, metav1.CreateOptions{})
+	_, _ = tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), pendingPR, metav1.CreateOptions{})
 
 	mockQM := &mockQueueManagerForHealthChecker{}
-	qhc := NewQueueHealthChecker(logger)
-	qhc.SetClients(tektonClient, pacClient)
-	qhc.SetQueueManager(mockQM)
+	qhc := createTestQueueHealthChecker(logger, tektonClient, pacClient, mockQM)
 
 	triggered, err := qhc.checkRepositoryHealth(context.TODO(), testRepo)
 	assert.NilError(t, err)
@@ -528,7 +534,7 @@ func TestQueueHealthChecker_ActivityDetection(t *testing.T) {
 	assert.Equal(t, annotationCalls, 0)
 }
 
-func TestQueueHealthChecker_NilDependencies(t *testing.T) {
+func TestQueueHealthChecker_NilDependencies(_ *testing.T) {
 	observer, _ := observer.New(zap.InfoLevel)
 	logger := zap.New(observer).Sugar()
 
@@ -543,7 +549,7 @@ func TestQueueHealthChecker_NilDependencies(t *testing.T) {
 	qhc.Stop()
 }
 
-func TestQueueHealthChecker_ConcurrentAccess(t *testing.T) {
+func TestQueueHealthChecker_ConcurrentAccess(_ *testing.T) {
 	observer, _ := observer.New(zap.InfoLevel)
 	logger := zap.New(observer).Sugar()
 
@@ -552,23 +558,21 @@ func TestQueueHealthChecker_ConcurrentAccess(t *testing.T) {
 	pacClient := fake.NewSimpleClientset()
 	mockQM := &mockQueueManagerForHealthChecker{}
 
-	qhc := NewQueueHealthChecker(logger)
-	qhc.SetClients(tektonClient, pacClient)
-	qhc.SetQueueManager(mockQM)
+	qhc := createTestQueueHealthChecker(logger, tektonClient, pacClient, mockQM)
 
 	// Test concurrent access to lastTriggerTimes map
 	done := make(chan bool, 10)
-	for i := 0; i < 10; i++ {
+	for i := range [10]struct{}{} {
 		go func(id int) {
 			defer func() { done <- true }()
 			repoName := fmt.Sprintf("test-repo-%d", id)
 			testRepo := createTestRepository(repoName, "test-ns", &[]int{2}[0])
-			qhc.checkRepositoryHealth(context.TODO(), testRepo)
+			_, _ = qhc.checkRepositoryHealth(context.TODO(), testRepo)
 		}(i)
 	}
 
 	// Wait for all goroutines to complete
-	for i := 0; i < 10; i++ {
+	for range [10]struct{}{} {
 		<-done
 	}
 
@@ -580,7 +584,7 @@ func TestQueueHealthChecker_StuckPipelineRunDetection(t *testing.T) {
 	logger := zap.New(observer).Sugar()
 
 	// Create test repository
-	testRepo := createTestRepository("test-repo", "test-ns", &[]int{3}[0])
+	testRepo := createTestRepository("test-repo", &[]int{3}[0])
 
 	// Create mix of stuck and fresh PipelineRuns
 	stuckPR1 := createTestPipelineRun("stuck-pr-1", "test-ns", "test-repo", kubeinteraction.StateQueued, tektonv1.PipelineRunSpecStatusPending, time.Now().Add(-5*time.Minute))
@@ -592,14 +596,12 @@ func TestQueueHealthChecker_StuckPipelineRunDetection(t *testing.T) {
 	pacClient := fake.NewSimpleClientset()
 
 	// Add test data to clients
-	tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), stuckPR1, metav1.CreateOptions{})
-	tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), stuckPR2, metav1.CreateOptions{})
-	tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), freshPR, metav1.CreateOptions{})
+	_, _ = tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), stuckPR1, metav1.CreateOptions{})
+	_, _ = tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), stuckPR2, metav1.CreateOptions{})
+	_, _ = tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), freshPR, metav1.CreateOptions{})
 
 	mockQM := &mockQueueManagerForHealthChecker{}
-	qhc := NewQueueHealthChecker(logger)
-	qhc.SetClients(tektonClient, pacClient)
-	qhc.SetQueueManager(mockQM)
+	qhc := createTestQueueHealthChecker(logger, tektonClient, pacClient, mockQM)
 
 	triggered, err := qhc.checkRepositoryHealth(context.TODO(), testRepo)
 	assert.NilError(t, err)
@@ -618,14 +620,12 @@ func TestQueueHealthChecker_RepositoryListError(t *testing.T) {
 	pacClient := fake.NewSimpleClientset()
 
 	// Make repository list fail
-	pacClient.PrependReactor("list", "repositories", func(action ktesting.Action) (bool, runtime.Object, error) {
+	pacClient.PrependReactor("list", "repositories", func(_ ktesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("repository list failed")
 	})
 
 	mockQM := &mockQueueManagerForHealthChecker{}
-	qhc := NewQueueHealthChecker(logger)
-	qhc.SetClients(tektonClient, pacClient)
-	qhc.SetQueueManager(mockQM)
+	qhc := createTestQueueHealthChecker(logger, tektonClient, pacClient, mockQM)
 
 	// Should handle error gracefully
 	qhc.checkAllRepositories(context.TODO())
@@ -647,7 +647,7 @@ func TestQueueHealthChecker_PatchRetryLogic(t *testing.T) {
 
 	// Track patch attempts
 	patchAttempts := 0
-	tektonClient.PrependReactor("patch", "pipelineruns", func(action ktesting.Action) (bool, runtime.Object, error) {
+	tektonClient.PrependReactor("patch", "pipelineruns", func(_ ktesting.Action) (bool, runtime.Object, error) {
 		patchAttempts++
 		if patchAttempts < 3 {
 			// Simulate conflict error for first 2 attempts
@@ -658,12 +658,10 @@ func TestQueueHealthChecker_PatchRetryLogic(t *testing.T) {
 	})
 
 	// Add test data to clients
-	tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), pendingPR, metav1.CreateOptions{})
+	_, _ = tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), pendingPR, metav1.CreateOptions{})
 
 	mockQM := &mockQueueManagerForHealthChecker{}
-	qhc := NewQueueHealthChecker(logger)
-	qhc.SetClients(tektonClient, pacClient)
-	qhc.SetQueueManager(mockQM)
+	qhc := createTestQueueHealthChecker(logger, tektonClient, pacClient, mockQM)
 
 	err := qhc.triggerReconciliationForPendingPipelineRuns(context.TODO(), "test-ns", "test-repo")
 	assert.NilError(t, err)
@@ -677,7 +675,7 @@ func TestQueueHealthChecker_Integration(t *testing.T) {
 	logger := zap.New(observer).Sugar()
 
 	// Create test repository
-	testRepo := createTestRepository("test-repo", "test-ns", &[]int{2}[0])
+	testRepo := createTestRepository("test-repo", &[]int{2}[0])
 
 	// Create a mix of PipelineRuns
 	runningPR := createTestPipelineRun("running-pr", "test-ns", "test-repo", kubeinteraction.StateStarted, "", time.Now())
@@ -690,7 +688,7 @@ func TestQueueHealthChecker_Integration(t *testing.T) {
 
 	// Track all operations
 	var operations []string
-	tektonClient.PrependReactor("patch", "pipelineruns", func(action ktesting.Action) (bool, runtime.Object, error) {
+	tektonClient.PrependReactor("patch", "pipelineruns", func(_ ktesting.Action) (bool, runtime.Object, error) {
 		operations = append(operations, "patch")
 		return false, nil, nil
 	})
@@ -699,14 +697,12 @@ func TestQueueHealthChecker_Integration(t *testing.T) {
 	mockQM.rebuildError = nil // Ensure rebuild succeeds
 
 	// Add test data to clients
-	tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), runningPR, metav1.CreateOptions{})
-	tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), stuckPR, metav1.CreateOptions{})
-	tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), freshPR, metav1.CreateOptions{})
-	pacClient.PipelinesascodeV1alpha1().Repositories("test-ns").Create(context.TODO(), testRepo, metav1.CreateOptions{})
+	_, _ = tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), runningPR, metav1.CreateOptions{})
+	_, _ = tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), stuckPR, metav1.CreateOptions{})
+	_, _ = tektonClient.TektonV1().PipelineRuns("test-ns").Create(context.TODO(), freshPR, metav1.CreateOptions{})
+	_, _ = pacClient.PipelinesascodeV1alpha1().Repositories("test-ns").Create(context.TODO(), testRepo, metav1.CreateOptions{})
 
-	qhc := NewQueueHealthChecker(logger)
-	qhc.SetClients(tektonClient, pacClient)
-	qhc.SetQueueManager(mockQM)
+	qhc := createTestQueueHealthChecker(logger, tektonClient, pacClient, mockQM)
 
 	// Run full health check
 	qhc.checkAllRepositories(context.TODO())

@@ -21,43 +21,43 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// Mock QueueManager for testing
+// Mock QueueManager for testing.
 type mockQueueManager struct {
 	resetAllCalled                  bool
 	rebuildQueuesForNamespaceCalled bool
 	rebuildError                    error
 	resetStats                      map[string]int
-	rebuildStats                    map[string]interface{}
+	rebuildStats                    map[string]any
 }
 
-func (m *mockQueueManager) InitQueues(ctx context.Context, tekton tektonVersionedClient.Interface, pac versioned.Interface) error {
+func (m *mockQueueManager) InitQueues(_ context.Context, _ tektonVersionedClient.Interface, _ versioned.Interface) error {
 	return nil
 }
 
-func (m *mockQueueManager) RemoveRepository(repo *apipac.Repository) {
+func (m *mockQueueManager) RemoveRepository(_ *apipac.Repository) {
 }
 
-func (m *mockQueueManager) QueuedPipelineRuns(repo *apipac.Repository) []string {
+func (m *mockQueueManager) QueuedPipelineRuns(_ *apipac.Repository) []string {
 	return []string{}
 }
 
-func (m *mockQueueManager) RunningPipelineRuns(repo *apipac.Repository) []string {
+func (m *mockQueueManager) RunningPipelineRuns(_ *apipac.Repository) []string {
 	return []string{}
 }
 
-func (m *mockQueueManager) AddListToRunningQueue(repo *apipac.Repository, list []string) ([]string, error) {
+func (m *mockQueueManager) AddListToRunningQueue(_ *apipac.Repository, _ []string) ([]string, error) {
 	return []string{}, nil
 }
 
-func (m *mockQueueManager) AddToPendingQueue(repo *apipac.Repository, list []string) error {
+func (m *mockQueueManager) AddToPendingQueue(_ *apipac.Repository, _ []string) error {
 	return nil
 }
 
-func (m *mockQueueManager) RemoveFromQueue(repoKey, prKey string) bool {
+func (m *mockQueueManager) RemoveFromQueue(_, _ string) bool {
 	return false
 }
 
-func (m *mockQueueManager) RemoveAndTakeItemFromQueue(repo *apipac.Repository, run *tektonv1.PipelineRun) string {
+func (m *mockQueueManager) RemoveAndTakeItemFromQueue(_ *apipac.Repository, _ *tektonv1.PipelineRun) string {
 	return ""
 }
 
@@ -69,10 +69,10 @@ func (m *mockQueueManager) ResetAll() map[string]int {
 	return m.resetStats
 }
 
-func (m *mockQueueManager) RebuildQueuesForNamespace(ctx context.Context, namespace string, tektonClient tektonVersionedClient.Interface, pacClient versioned.Interface) (map[string]interface{}, error) {
+func (m *mockQueueManager) RebuildQueuesForNamespace(_ context.Context, _ string, _ tektonVersionedClient.Interface, _ versioned.Interface) (map[string]any, error) {
 	m.rebuildQueuesForNamespaceCalled = true
 	if m.rebuildStats == nil {
-		return make(map[string]interface{}), m.rebuildError
+		return make(map[string]any), m.rebuildError
 	}
 	return m.rebuildStats, m.rebuildError
 }
@@ -167,7 +167,7 @@ func TestQueueEndpoints_HandleQueueReset(t *testing.T) {
 				}
 
 				// Check response body for success case
-				var response map[string]interface{}
+				var response map[string]any
 				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 					t.Errorf("Failed to unmarshal response: %v", err)
 				}
@@ -209,7 +209,7 @@ func TestQueueEndpoints_HandleQueueRebuild(t *testing.T) {
 			name:                "successful rebuild",
 			method:              http.MethodPost,
 			url:                 "/api/v1/queue/rebuild?repository=test-repo",
-			queueManager:        &mockQueueManager{rebuildStats: map[string]interface{}{"rebuilt": 3}},
+			queueManager:        &mockQueueManager{rebuildStats: map[string]any{"rebuilt": 3}},
 			hasRunningPRs:       false,
 			expectedStatus:      http.StatusOK,
 			expectError:         false,
@@ -256,7 +256,7 @@ func TestQueueEndpoints_HandleQueueRebuild(t *testing.T) {
 			name:                "force rebuild with running pipelineruns",
 			method:              http.MethodPost,
 			url:                 "/api/v1/queue/rebuild?repository=test-repo&force=true",
-			queueManager:        &mockQueueManager{rebuildStats: map[string]interface{}{"rebuilt": 2}},
+			queueManager:        &mockQueueManager{rebuildStats: map[string]any{"rebuilt": 2}},
 			hasRunningPRs:       true,
 			expectedStatus:      http.StatusOK,
 			expectError:         false,
@@ -347,7 +347,7 @@ func TestQueueEndpoints_HandleQueueRebuild(t *testing.T) {
 
 			if !tt.expectError && tt.queueManager != nil {
 				// Check response body for success case
-				var response map[string]interface{}
+				var response map[string]any
 				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 					t.Errorf("Failed to unmarshal response: %v", err)
 				}
@@ -523,7 +523,7 @@ func TestQueueEndpoints_WriteResponses(t *testing.T) {
 			t.Errorf("Expected status %d, got %d", http.StatusInternalServerError, w.Code)
 		}
 
-		var response map[string]interface{}
+		var response map[string]any
 		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 			t.Errorf("Failed to unmarshal response: %v", err)
 		}
@@ -539,7 +539,7 @@ func TestQueueEndpoints_WriteResponses(t *testing.T) {
 
 	t.Run("writeJSONResponse", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		testResponse := map[string]interface{}{
+		testResponse := map[string]any{
 			"status": "success",
 			"data":   "test data",
 		}
@@ -553,7 +553,7 @@ func TestQueueEndpoints_WriteResponses(t *testing.T) {
 			t.Errorf("Expected Content-Type 'application/json', got '%s'", w.Header().Get("Content-Type"))
 		}
 
-		var response map[string]interface{}
+		var response map[string]any
 		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 			t.Errorf("Failed to unmarshal response: %v", err)
 		}

@@ -103,46 +103,34 @@ data:
 
   # Global setting to control whether Pipelines-as-Code should automatically cancel
   # any in-progress PipelineRuns associated with a pull request when that pull request is updated.
-  # This helps prevent multiple redundant runs from executing simultaneously.
-  # Default value: false.
   enable-cancel-in-progress-on-pull-requests: "false"
 
-  # Global setting to determine whether Pipelines-as-Code should automatically cancel
-  # in-progress PipelineRuns triggered by a push event, if a new push occurs on the same branch.
-  # This prevents overlapping or redundant runs for the same branch.
-  # Default value: false.
+  # Global setting to control whether Pipelines-as-Code should automatically cancel
+  # any in-progress PipelineRuns associated with a push when another push is made to the same branch.
   enable-cancel-in-progress-on-push: "false"
 
-  # Since public bitbucket doesn't have the concept of Secret, we need to be
-  # able to secure the request by querying https://ip-ranges.atlassian.com/,
-  # this only happen for public bitbucket (ie: when provider.url is not set in
-  # repository spec). If you want to override this, you need to bear in mind
-  # this could be a security issue, a malicious user can send a PR to your repo
-  # with a modification to your PipelineRun that would grab secrets, tunnel or
-  # others and then send a malicious webhook payload to the controller which
-  # look like a authorized owner has send the PR to run it..
+  # Maximum number of PipelineRuns to keep for each repository
+  # This is the upper limit for the max-keep-runs annotation on PipelineRuns
+  # max-keep-run-upper-limit: "10"
+
+  # Default number of PipelineRuns to keep for each repository
+  # This is used when the max-keep-runs annotation is not set on the PipelineRun
+  # default-max-keep-runs: "5"
+
+  # Whether to check the source IP of the incoming webhook request for Bitbucket Cloud
   bitbucket-cloud-check-source-ip: "true"
 
-  # Add extra IPS (ie: 127.0.0.1) or networks (127.0.0.0/16) separated by commas.
-  bitbucket-cloud-additional-source-ip: ""
+  # Additional IP addresses to check for Bitbucket Cloud webhook requests
+  # bitbucket-cloud-additional-source-ip: "10.0.0.1,10.0.0.2"
 
-  # max-keep-run-upper-limit defines the upper limit for max-keep-run annotation
-  # value which a user can set on pipelineRun. the value set on annotation
-  # should be less than or equal to the upper limit otherwise the upper limit
-  # will be used while cleaning up
-  max-keep-run-upper-limit: ""
-
-  # if defined then applies to all pipelineRun who doesn't have max-keep-runs annotation
-  default-max-keep-runs: ""
-
-  # Whether to auto configure newly created repositories, this will create a new
-  # namespace and repository CR, supported only with GitHub App
+  # Whether to automatically configure a new GitHub repository
+  # when a webhook is received for a repository that doesn't have a Repository CR
   auto-configure-new-github-repo: "false"
 
-  # Add a template to generate the name for a Repository CR for an auto-configured
-  # GitHub repository. Supported fields are `repo_owner` and `repo_name`. e.g.,
-  # if defined as `{{repo_owner}}-{{repo_name}}-repo-cr`, the generated CR name for
-  # https://github.com/owner/test will be `owner-test-repo-cr`
+  # Template for the namespace name when auto-configuring a new GitHub repository
+  # Supported fields are repo_owner, repo_name e.g. if defined as
+  # `{{repo_owner}}-{{repo_name}}-ci`, then namespace generated for repository
+  # https://github.com/owner/repo will be `owner-repo-ci`
   auto-configure-repo-namespace-template: ""
 
   # add a template to generate name for repository for your auto configured
@@ -166,6 +154,17 @@ data:
   # a duplicate pipeline run.
   # Default: true
   skip-push-event-for-pr-commits: "true"
+
+  # Queue health checker settings
+  # How often (in seconds) to check for stuck pending PipelineRuns
+  # Set to 0 to disable the queue health checker (disabled by default)
+  # Example: "300" to check every 5 minutes
+  queue-health-check-interval: "0"
+
+  # How long (in seconds) a PipelineRun can be pending before it's considered stuck
+  # Set to 0 to disable the queue health checker
+  # Default: "180" (3 minutes)
+  queue-health-stuck-threshold: "180"
 
   # Configure a custom console here, the driver support custom parameters from
   # Repo CR along a few other template variable, see documentation for more

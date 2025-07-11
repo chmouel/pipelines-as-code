@@ -10,6 +10,7 @@ import (
 	"time"
 
 	pacversioned "github.com/openshift-pipelines/pipelines-as-code/pkg/generated/clientset/versioned"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/reconciler"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/sync"
 	tektonversioned "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
@@ -82,10 +83,50 @@ func main() {
 	sync.RegisterQueueManager(queueManager)
 	sync.RegisterClients(tektonClient, pacClient)
 
+	// Create the run instance for configuration management
+	run := params.New()
+	err = run.Clients.NewClients(ctx, &run.Info)
+	if err != nil {
+		log.Fatalf("Failed to initialize clients: %v", err)
+	}
+
 	// Create and setup queue health checker
 	healthChecker := sync.NewQueueHealthChecker(sugar)
 	healthChecker.SetClients(tektonClient, pacClient)
 	healthChecker.SetQueueManager(queueManager)
+
+	// Initialize configuration and update health checker settings
+	if err := run.UpdatePacConfig(ctx); err != nil {
+		log.Printf("Failed to load initial configuration: %v", err)
+	} else {
+		pacOpts := run.Info.GetPacOpts()
+		healthChecker.UpdateSettings(&pacOpts.Settings)
+	}
+
+	// Start configuration syncing to keep settings updated
+	go func() {
+		params.StartConfigSync(ctx, run)
+	}()
+
+	// Start a goroutine to periodically update health checker settings
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := run.UpdatePacConfig(ctx); err != nil {
+					sugar.Warnf("Failed to update configuration: %v", err)
+				} else {
+					pacOpts := run.Info.GetPacOpts()
+					healthChecker.UpdateSettings(&pacOpts.Settings)
+				}
+			}
+		}
+	}()
 
 	// Start the health checker in the background
 	go healthChecker.Start(ctx)

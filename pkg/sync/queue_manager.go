@@ -23,14 +23,14 @@ const (
 	creationTimestamp = "{.metadata.creationTimestamp}"
 )
 
-// QueueManager manages queues for multiple repositories
+// QueueManager manages queues for multiple repositories.
 type QueueManager struct {
 	logger *zap.SugaredLogger
 	queues map[string]Semaphore
 	lock   *sync.Mutex
 }
 
-// NewQueueManager creates a new QueueManager
+// NewQueueManager creates a new QueueManager.
 func NewQueueManager(logger *zap.SugaredLogger) *QueueManager {
 	return &QueueManager{
 		logger: logger,
@@ -306,7 +306,7 @@ func sortPipelineRunsByCreationTimestamp(prs []tektonv1.PipelineRun) []*tektonv1
 }
 
 // ResetAll resets all queues in the QueueManager
-// Returns a map of repository keys to the number of items that were cleared
+// Returns a map of repository keys to the number of items that were cleared.
 func (qm *QueueManager) ResetAll() map[string]int {
 	qm.lock.Lock()
 	defer qm.lock.Unlock()
@@ -344,11 +344,11 @@ func (qm *QueueManager) ResetAll() map[string]int {
 // RebuildQueuesForNamespace analyzes all pending PipelineRuns in a namespace and rebuilds
 // the queues according to the repository concurrency settings.
 // This is useful for operational scenarios where queues may have gotten out of sync.
-func (qm *QueueManager) RebuildQueuesForNamespace(ctx context.Context, namespace string, tekton versioned2.Interface, pac versioned.Interface) (map[string]interface{}, error) {
+func (qm *QueueManager) RebuildQueuesForNamespace(ctx context.Context, namespace string, tekton versioned2.Interface, pac versioned.Interface) (map[string]any, error) {
 	qm.lock.Lock()
 	defer qm.lock.Unlock()
 
-	rebuildStats := make(map[string]interface{})
+	rebuildStats := make(map[string]any)
 	rebuildStats["namespace"] = namespace
 	rebuildStats["repositories_processed"] = 0
 	rebuildStats["repositories_rebuilt"] = make(map[string]map[string]int)
@@ -363,7 +363,11 @@ func (qm *QueueManager) RebuildQueuesForNamespace(ctx context.Context, namespace
 	qm.logger.Infof("Starting queue rebuild for namespace %s with %d repositories", namespace, len(repos.Items))
 
 	for _, repo := range repos.Items {
-		rebuildStats["repositories_processed"] = rebuildStats["repositories_processed"].(int) + 1
+		if val, ok := rebuildStats["repositories_processed"].(int); ok {
+			rebuildStats["repositories_processed"] = val + 1
+		} else {
+			rebuildStats["repositories_processed"] = 1
+		}
 
 		// Skip repositories without concurrency limits
 		if repo.Spec.ConcurrencyLimit == nil || *repo.Spec.ConcurrencyLimit == 0 {
@@ -397,7 +401,9 @@ func (qm *QueueManager) RebuildQueuesForNamespace(ctx context.Context, namespace
 		})
 		if err != nil {
 			errMsg := fmt.Sprintf("failed to list started PipelineRuns for repo %s: %v", repoKey, err)
-			rebuildStats["errors"] = append(rebuildStats["errors"].([]string), errMsg)
+			if errs, ok := rebuildStats["errors"].([]string); ok {
+				rebuildStats["errors"] = append(errs, errMsg)
+			}
 			continue
 		}
 
@@ -409,7 +415,9 @@ func (qm *QueueManager) RebuildQueuesForNamespace(ctx context.Context, namespace
 		})
 		if err != nil {
 			errMsg := fmt.Sprintf("failed to list queued PipelineRuns for repo %s: %v", repoKey, err)
-			rebuildStats["errors"] = append(rebuildStats["errors"].([]string), errMsg)
+			if errs, ok := rebuildStats["errors"].([]string); ok {
+				rebuildStats["errors"] = append(errs, errMsg)
+			}
 			continue
 		}
 
@@ -427,14 +435,9 @@ func (qm *QueueManager) RebuildQueuesForNamespace(ctx context.Context, namespace
 
 		// Add started PipelineRuns to running queue
 		if len(startedList) > 0 {
-			acquired, err := qm.addListToRunningQueueInternal(&repo, startedList, sema)
-			if err != nil {
-				errMsg := fmt.Sprintf("failed to add started PipelineRuns to running queue for repo %s: %v", repoKey, err)
-				rebuildStats["errors"] = append(rebuildStats["errors"].([]string), errMsg)
-			} else {
-				repoStats["rebuilt_running"] = len(acquired)
-				qm.logger.Infof("Added %d started PipelineRuns to running queue for repo %s", len(acquired), repoKey)
-			}
+			acquired := qm.addListToRunningQueueInternal(&repo, startedList, sema)
+			repoStats["rebuilt_running"] = len(acquired)
+			qm.logger.Infof("Added %d started PipelineRuns to running queue for repo %s", len(acquired), repoKey)
 		}
 
 		// Process queued PipelineRuns (add to pending queue)
@@ -453,31 +456,32 @@ func (qm *QueueManager) RebuildQueuesForNamespace(ctx context.Context, namespace
 
 		// Add queued PipelineRuns to pending queue
 		if len(queuedList) > 0 {
-			err := qm.addToPendingQueueInternal(&repo, queuedList, sema)
-			if err != nil {
-				errMsg := fmt.Sprintf("failed to add queued PipelineRuns to pending queue for repo %s: %v", repoKey, err)
-				rebuildStats["errors"] = append(rebuildStats["errors"].([]string), errMsg)
-			} else {
-				repoStats["rebuilt_pending"] = len(queuedList)
-				qm.logger.Infof("Added %d queued PipelineRuns to pending queue for repo %s", len(queuedList), repoKey)
-			}
+			qm.addToPendingQueueInternal(&repo, queuedList, sema)
+			repoStats["rebuilt_pending"] = len(queuedList)
+			qm.logger.Infof("Added %d queued PipelineRuns to pending queue for repo %s", len(queuedList), repoKey)
 		}
 
 		// Store repository rebuild stats
-		rebuildStats["repositories_rebuilt"].(map[string]map[string]int)[repoKey] = repoStats
+		if reposMap, ok := rebuildStats["repositories_rebuilt"].(map[string]map[string]int); ok {
+			reposMap[repoKey] = repoStats
+		}
 
 		qm.logger.Infof("Completed queue rebuild for repo %s: %d running, %d pending",
 			repoKey, len(sema.getCurrentRunning()), len(sema.getCurrentPending()))
 	}
 
+	reposProcessed, ok := rebuildStats["repositories_processed"].(int)
+	if !ok {
+		reposProcessed = 0
+	}
 	qm.logger.Infof("Completed queue rebuild for namespace %s: processed %d repositories",
-		namespace, rebuildStats["repositories_processed"].(int))
+		namespace, reposProcessed)
 
 	return rebuildStats, nil
 }
 
-// addListToRunningQueueInternal is an internal version that works with an existing semaphore
-func (qm *QueueManager) addListToRunningQueueInternal(repo *v1alpha1.Repository, list []string, sema Semaphore) ([]string, error) {
+// addListToRunningQueueInternal is an internal version that works with an existing semaphore.
+func (qm *QueueManager) addListToRunningQueueInternal(repo *v1alpha1.Repository, list []string, sema Semaphore) []string {
 	for _, pr := range list {
 		if sema.addToQueue(pr, time.Now()) {
 			qm.logger.Infof("added pipelineRun (%s) to running queue for repository (%s)", pr, RepoKey(repo))
@@ -486,7 +490,7 @@ func (qm *QueueManager) addListToRunningQueueInternal(repo *v1alpha1.Repository,
 
 	// if concurrency limit is not set or is zero, return all pending PipelineRuns
 	if repo.Spec.ConcurrencyLimit == nil || *repo.Spec.ConcurrencyLimit == 0 {
-		return sema.getCurrentPending(), nil
+		return sema.getCurrentPending()
 	}
 
 	acquiredList := []string{}
@@ -498,15 +502,14 @@ func (qm *QueueManager) addListToRunningQueueInternal(repo *v1alpha1.Repository,
 		}
 	}
 
-	return acquiredList, nil
+	return acquiredList
 }
 
-// addToPendingQueueInternal is an internal version that works with an existing semaphore
-func (qm *QueueManager) addToPendingQueueInternal(repo *v1alpha1.Repository, list []string, sema Semaphore) error {
+// addToPendingQueueInternal is an internal version that works with an existing semaphore.
+func (qm *QueueManager) addToPendingQueueInternal(repo *v1alpha1.Repository, list []string, sema Semaphore) {
 	for _, pr := range list {
 		if sema.addToPendingQueue(pr, time.Now()) {
 			qm.logger.Infof("added pipelineRun (%s) to pending queue for repository (%s)", pr, RepoKey(repo))
 		}
 	}
-	return nil
 }
