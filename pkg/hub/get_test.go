@@ -16,6 +16,7 @@ import (
 func TestGetTask(t *testing.T) {
 	const testHubURL = "https://myprecioushub"
 	const testCatalogHubName = "tekton"
+	const testArtifactHubURL = "https://artifacthub.example"
 
 	var hubCatalogs sync.Map
 	hubCatalogs.Store(
@@ -23,12 +24,21 @@ func TestGetTask(t *testing.T) {
 			Index: "default",
 			URL:   testHubURL,
 			Name:  testCatalogHubName,
+			Type:  settings.HubTypeTekton,
 		})
 	hubCatalogs.Store(
 		"anotherHub", settings.HubCatalog{
 			Index: "1",
 			URL:   testHubURL,
 			Name:  testCatalogHubName,
+			Type:  settings.HubTypeTekton,
+		})
+	hubCatalogs.Store(
+		"artifactHub", settings.HubCatalog{
+			Index: "2",
+			URL:   testArtifactHubURL,
+			Name:  testCatalogHubName,
+			Type:  settings.HubTypeArtifact,
 		})
 	tests := []struct {
 		name        string
@@ -205,6 +215,20 @@ func TestGetTask(t *testing.T) {
 				},
 				fmt.Sprintf("%s/resource/%s/pipeline/pipeline2/1.1/raw", testHubURL, testCatalogHubName): {
 					"body": "This is Pipeline2",
+					"code": "200",
+				},
+			},
+		},
+		{
+			name:        "get-task-artifacthub",
+			resource:    "task1",
+			want:        "This is Task1",
+			wantErr:     false,
+			catalogName: "artifactHub",
+			kind:        "task",
+			config: map[string]map[string]string{
+				fmt.Sprintf("%s/api/v1/packages/tekton/task/task1", testArtifactHubURL): {
+					"body": `{"data":{"manifestRaw":"This is Task1"}}`,
 					"code": "200",
 				},
 			},

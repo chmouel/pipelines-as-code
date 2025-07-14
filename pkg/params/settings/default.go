@@ -24,6 +24,7 @@ func getHubCatalogs(logger *zap.SugaredLogger, catalogs *sync.Map, config map[st
 		Index: "default",
 		Name:  config[HubCatalogNameKey],
 		URL:   config[HubURLKey],
+		Type:  HubTypeDefaultValue,
 	})
 
 	for k := range config {
@@ -70,6 +71,7 @@ func getHubCatalogs(logger *zap.SugaredLogger, catalogs *sync.Map, config map[st
 					Index: index,
 					Name:  catalogName,
 					URL:   catalogURL,
+					Type:  HubTypeDefaultValue,
 				})
 			}
 		}
