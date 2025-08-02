@@ -3,6 +3,7 @@ package gitlab
 import (
 	"testing"
 
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/cache"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	thelp "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab/test"
 	rtesting "knative.dev/pkg/reconciler/testing"
@@ -98,7 +99,9 @@ func TestIsAllowed(t *testing.T) {
 				targetProjectID: tt.fields.targetProjectID,
 				sourceProjectID: tt.fields.sourceProjectID,
 				userID:          tt.fields.userID,
+				cache:           cache.GetInstance(),
 			}
+			v.cache.Flush()
 			if tt.wantClient {
 				client, mux, tearDown := thelp.Setup(t)
 				v.gitlabClient = client
