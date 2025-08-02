@@ -232,7 +232,7 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 	v.eventEmitter = eventsEmitter
 	v.repo = repo
 	v.triggerEvent = runevent.EventType
-	v.cache = cache.GetInstance()
+	v.cache = cache.GetInstance(0)
 
 	return nil
 }

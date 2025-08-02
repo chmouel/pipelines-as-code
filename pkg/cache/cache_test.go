@@ -24,8 +24,8 @@ func TestExpiration(t *testing.T) {
 }
 
 func TestSingleton(t *testing.T) {
-	instance1 := GetInstance()
-	instance2 := GetInstance()
+	instance1 := GetInstance(0)
+	instance2 := GetInstance(0)
 	assert.Equal(t, instance1, instance2)
 }
 

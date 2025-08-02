@@ -47,6 +47,7 @@ func TestSyncConfig(t *testing.T) {
 				CustomConsolePRTaskLog:               "",
 				CustomConsoleNamespaceURL:            "",
 				RememberOKToTest:                     false,
+				CacheACLDuration:                     "5m",
 			},
 		},
 		{
