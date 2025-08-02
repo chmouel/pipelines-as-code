@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/cache"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/opscomments"
@@ -62,6 +63,7 @@ type Provider struct {
 	eventEmitter      *events.EventEmitter
 	repo              *v1alpha1.Repository
 	triggerEvent      string
+	cache             *cache.Cache
 }
 
 func (v *Provider) Client() *gitlab.Client {
@@ -230,6 +232,7 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 	v.eventEmitter = eventsEmitter
 	v.repo = repo
 	v.triggerEvent = runevent.EventType
+	v.cache = cache.GetInstance()
 
 	return nil
 }

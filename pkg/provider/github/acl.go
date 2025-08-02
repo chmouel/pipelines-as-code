@@ -17,25 +17,34 @@ import (
 // if the team is not found we explicitly disallow the policy, user have to correct the setting.
 func (v *Provider) CheckPolicyAllowing(ctx context.Context, event *info.Event, allowedTeams []string) (bool, string) {
 	for _, team := range allowedTeams {
-		// TODO: caching
+		cacheKey := fmt.Sprintf("CheckPolicyAllowing-%s-%s-%s", event.Organization, team, event.Sender)
+		if val, ok := v.cache.Get(cacheKey); ok {
+			if allowed, ok := val.(bool); ok && allowed {
+				return true, fmt.Sprintf("allowing user: %s as a member of the team: %s (cached)", event.Sender, team)
+			}
+			continue
+		}
+
 		opt := github.ListOptions{PerPage: v.PaginedNumber}
 		for {
 			members, resp, err := v.Client().Teams.ListTeamMembersBySlug(ctx, event.Organization, team, &github.TeamListTeamMembersOptions{ListOptions: opt})
 			if resp.StatusCode == http.StatusNotFound {
-				// we explicitly disallow the policy when the team is not found
-				// maybe we should ignore it instead? i'd rather keep this explicit
-				// and conservative since being security related.
 				return false, fmt.Sprintf("team: %s is not found on the organization: %s", team, event.Organization)
 			}
 			if err != nil {
-				// probably a 500 or another api error, no need to try again and again with other teams
 				return false, fmt.Sprintf("error while getting team membership for user: %s in team: %s, error: %s", event.Sender, team, err.Error())
 			}
+			found := false
 			for _, member := range members {
 				if member.GetLogin() == event.Sender {
+					v.cache.Set(cacheKey, true, 0)
 					return true, fmt.Sprintf("allowing user: %s as a member of the team: %s", event.Sender, team)
 				}
 			}
+			if !found {
+				v.cache.Set(cacheKey, false, 0)
+			}
+
 			if resp.NextPage == 0 {
 				break
 			}
@@ -49,6 +58,13 @@ func (v *Provider) CheckPolicyAllowing(ctx context.Context, event *info.Event, a
 // IsAllowedOwnersFile get the owner files (OWNERS, OWNERS_ALIASES) from main branch
 // and check if we have explicitly allowed the user in there.
 func (v *Provider) IsAllowedOwnersFile(ctx context.Context, event *info.Event) (bool, error) {
+	cacheKey := fmt.Sprintf("isAllowedOwnersFile-%s-%s-%s", event.Organization, event.Repository, event.Sender)
+	if val, ok := v.cache.Get(cacheKey); ok {
+		if allowed, ok := val.(bool); ok {
+			return allowed, nil
+		}
+	}
+
 	ownerContent, err := v.getFileFromDefaultBranch(ctx, "OWNERS", event)
 	if err != nil {
 		if strings.Contains(err.Error(), "cannot find") {
@@ -65,7 +81,12 @@ func (v *Provider) IsAllowedOwnersFile(ctx context.Context, event *info.Event) (
 		}
 	}
 
-	return acl.UserInOwnerFile(ownerContent, ownerAliasesContent, event.Sender)
+	allowed, err := acl.UserInOwnerFile(ownerContent, ownerAliasesContent, event.Sender)
+	if err != nil {
+		return false, err
+	}
+	v.cache.Set(cacheKey, allowed, 0)
+	return allowed, nil
 }
 
 func (v *Provider) IsAllowed(ctx context.Context, event *info.Event) (bool, error) {

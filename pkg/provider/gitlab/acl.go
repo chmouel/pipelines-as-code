@@ -13,6 +13,14 @@ import (
 // IsAllowedOwnersFile get the owner files (OWNERS, OWNERS_ALIASES) from main branch
 // and check if we have explicitly allowed the user in there.
 func (v *Provider) IsAllowedOwnersFile(_ context.Context, event *info.Event) (bool, error) {
+	// Caching owners file for 5 minutes
+	cacheKey := fmt.Sprintf("isAllowedOwnersFile-%d-%s", v.targetProjectID, event.Sender)
+	if val, ok := v.cache.Get(cacheKey); ok {
+		if allowed, ok := val.(bool); ok {
+			return allowed, nil
+		}
+	}
+
 	ownerContent, _, _ := v.getObject("OWNERS", event.DefaultBranch, v.targetProjectID)
 	if string(ownerContent) == "" {
 		return false, nil
@@ -23,16 +31,27 @@ func (v *Provider) IsAllowedOwnersFile(_ context.Context, event *info.Event) (bo
 		return false, err
 	}
 	allowed, _ := acl.UserInOwnerFile(string(ownerContent), string(ownerAliasesContent), event.Sender)
+	v.cache.Set(cacheKey, allowed, 0)
 	return allowed, nil
 }
 
 func (v *Provider) checkMembership(ctx context.Context, event *info.Event, userid int) bool {
+	// Caching checkMembership for 5 minutes
+	cacheKey := fmt.Sprintf("checkMembership-%d-%d", v.targetProjectID, userid)
+	if _, found := v.cache.Get(cacheKey); found {
+		return true
+	}
+
 	member, _, err := v.Client().ProjectMembers.GetInheritedProjectMember(v.targetProjectID, userid)
 	if err == nil && member.ID != 0 && member.ID == userid {
+		v.cache.Set(cacheKey, true, 0)
 		return true
 	}
 
 	isAllowed, _ := v.IsAllowedOwnersFile(ctx, event)
+	if isAllowed {
+		v.cache.Set(cacheKey, true, 0)
+	}
 	return isAllowed
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/cache"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
@@ -57,6 +58,7 @@ type Provider struct {
 	userType      string // The type of user i.e bot or not
 	skippedRun
 	triggerEvent string
+	cache        *cache.Cache
 }
 
 type skippedRun struct {
@@ -298,6 +300,7 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 	v.repo = repo
 	v.eventEmitter = eventsEmitter
 	v.triggerEvent = event.EventType
+	v.cache = cache.GetInstance()
 
 	// check that the Client is not already set, so we don't override our fakeclient
 	// from unittesting.

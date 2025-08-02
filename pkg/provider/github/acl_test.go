@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/go-github/v71/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/cache"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
@@ -93,8 +95,9 @@ func TestCheckPolicyAllowing(t *testing.T) {
 				repo:          repo,
 				Logger:        logger,
 				PaginedNumber: 1,
+				cache:         cache.GetInstance(),
 			}
-
+			gprovider.cache.Flush()
 			gotAllowed, gotReason := gprovider.CheckPolicyAllowing(ctx, event, tt.allowedTeams)
 			assert.Equal(t, tt.wantAllowed, gotAllowed)
 			assert.Equal(t, tt.wantReason, gotReason)
@@ -332,7 +335,9 @@ func TestOkToTestComment(t *testing.T) {
 				PaginedNumber: 1,
 				Run:           &params.Run{},
 				pacInfo:       pacopts,
+				cache:         cache.GetInstance(),
 			}
+			gprovider.cache.Flush()
 
 			got, err := gprovider.IsAllowed(ctx, &tt.runevent)
 			if (err != nil) != tt.wantErr {
@@ -406,7 +411,9 @@ func TestAclCheckAll(t *testing.T) {
 		ghClient:      fakeclient,
 		Logger:        logger,
 		PaginedNumber: 1,
+		cache:         cache.GetInstance(),
 	}
+	gprovider.cache.Flush()
 
 	tests := []struct {
 		name     string
@@ -595,6 +602,7 @@ func TestIfPullRequestIsForSameRepoWithoutFork(t *testing.T) {
 			gprovider := Provider{
 				ghClient: fakeclient,
 				repo:     repo,
+				cache:    cache.New(10 * time.Minute),
 			}
 
 			got, err := gprovider.aclCheckAll(ctx, tt.event)
