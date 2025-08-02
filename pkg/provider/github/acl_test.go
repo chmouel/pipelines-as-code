@@ -95,7 +95,7 @@ func TestCheckPolicyAllowing(t *testing.T) {
 				repo:          repo,
 				Logger:        logger,
 				PaginedNumber: 1,
-				cache:         cache.GetInstance(),
+				cache:         cache.GetInstance(0),
 			}
 			gprovider.cache.Flush()
 			gotAllowed, gotReason := gprovider.CheckPolicyAllowing(ctx, event, tt.allowedTeams)
@@ -335,7 +335,7 @@ func TestOkToTestComment(t *testing.T) {
 				PaginedNumber: 1,
 				Run:           &params.Run{},
 				pacInfo:       pacopts,
-				cache:         cache.GetInstance(),
+				cache:         cache.GetInstance(0),
 			}
 			gprovider.cache.Flush()
 
@@ -411,7 +411,7 @@ func TestAclCheckAll(t *testing.T) {
 		ghClient:      fakeclient,
 		Logger:        logger,
 		PaginedNumber: 1,
-		cache:         cache.GetInstance(),
+		cache:         cache.GetInstance(0),
 	}
 	gprovider.cache.Flush()
 

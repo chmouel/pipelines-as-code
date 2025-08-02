@@ -300,7 +300,7 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 	v.repo = repo
 	v.eventEmitter = eventsEmitter
 	v.triggerEvent = event.EventType
-	v.cache = cache.GetInstance()
+	v.cache = cache.GetInstance(0)
 
 	// check that the Client is not already set, so we don't override our fakeclient
 	// from unittesting.

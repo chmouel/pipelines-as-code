@@ -12,6 +12,7 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/cache"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -64,6 +65,9 @@ var _ adapter.Adapter = (*listener)(nil)
 
 func New(run *params.Run, k *kubeinteraction.Interaction) adapter.AdapterConstructor {
 	return func(ctx context.Context, _ adapter.EnvConfigAccessor, _ cloudevents.Client) adapter.Adapter {
+		if err := cache.Init(run.Info.Pac.CacheACLDuration); err != nil {
+			logging.FromContext(ctx).Fatalf("failed to init cache: %v", err)
+		}
 		return &listener{
 			logger: logging.FromContext(ctx),
 			run:    run,

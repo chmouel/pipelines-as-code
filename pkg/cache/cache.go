@@ -20,9 +20,18 @@ type Item struct {
 	Expiration int64
 }
 
-func GetInstance() *Cache {
+func Init(duration string) error {
+	d, err := time.ParseDuration(duration)
+	if err != nil {
+		return err
+	}
+	GetInstance(d)
+	return nil
+}
+
+func GetInstance(duration time.Duration) *Cache {
 	once.Do(func() {
-		instance = New(10 * time.Minute)
+		instance = New(duration)
 	})
 	return instance
 }

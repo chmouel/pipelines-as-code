@@ -99,7 +99,7 @@ func TestIsAllowed(t *testing.T) {
 				targetProjectID: tt.fields.targetProjectID,
 				sourceProjectID: tt.fields.sourceProjectID,
 				userID:          tt.fields.userID,
-				cache:           cache.GetInstance(),
+				cache:           cache.GetInstance(0),
 			}
 			v.cache.Flush()
 			if tt.wantClient {

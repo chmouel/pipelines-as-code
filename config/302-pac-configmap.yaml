@@ -150,6 +150,9 @@ data:
   # Default: true
   skip-push-event-for-pr-commits: "true"
 
+  # How long to cache ACL/OWNERS/Repo information, in minutes.
+  cache-acl-duration: "5m"
+
   # Configure a custom console here, the driver support custom parameters from
   # Repo CR along a few other template variable, see documentation for more
   # details

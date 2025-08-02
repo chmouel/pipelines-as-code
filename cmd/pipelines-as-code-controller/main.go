@@ -54,5 +54,6 @@ func main() {
 	ctx = context.WithValue(ctx, client.Key{}, run.Clients.Kube)
 	ctx = evadapter.WithNamespace(ctx, system.Namespace())
 	ctx = evadapter.WithConfigWatcherEnabled(ctx)
+
 	evadapter.MainWithContext(ctx, PACControllerLogKey, adapter.NewEnvConfig, adapter.New(run, kinteract))
 }

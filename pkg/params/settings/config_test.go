@@ -47,6 +47,7 @@ func TestSyncConfig(t *testing.T) {
 				CustomConsolePRTaskLog:               "",
 				CustomConsoleNamespaceURL:            "",
 				RememberOKToTest:                     false,
+				CacheACLDuration:                     "5m",
 			},
 		},
 		{
@@ -75,6 +76,7 @@ func TestSyncConfig(t *testing.T) {
 				"custom-console-url-namespace":           "https://custom-console-namespace",
 				"remember-ok-to-test":                    "false",
 				"skip-push-event-for-pr-commits":         "true",
+				"cache-acl-duration":                     "10m",
 			},
 			expectedStruct: Settings{
 				ApplicationName:                    "pac-pac",
@@ -101,6 +103,7 @@ func TestSyncConfig(t *testing.T) {
 				CustomConsoleNamespaceURL:          "https://custom-console-namespace",
 				RememberOKToTest:                   false,
 				SkipPushEventForPRCommits:          true,
+				CacheACLDuration:                   "10m",
 			},
 		},
 		{

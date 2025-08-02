@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/configutil"
 	"go.uber.org/zap"
@@ -75,6 +76,8 @@ type Settings struct {
 	CustomConsoleNamespaceURL string `json:"custom-console-url-namespace"`
 
 	RememberOKToTest bool `json:"remember-ok-to-test"`
+
+	CacheACLDuration string `json:"cache-acl-duration" default:"5m"`
 }
 
 func (s *Settings) DeepCopy(out *Settings) {
@@ -103,6 +106,7 @@ func DefaultValidators() map[string]func(string) error {
 		"CustomConsoleURL":           isValidURL,
 		"CustomConsolePRTaskLog":     startWithHTTPorHTTPS,
 		"CustomConsolePRDetail":      startWithHTTPorHTTPS,
+		"CacheACLDuration":           isValidDuration,
 	}
 }
 
@@ -149,6 +153,13 @@ func isValidRegex(regex string) error {
 func startWithHTTPorHTTPS(url string) error {
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		return fmt.Errorf("invalid value, must start with http:// or https://")
+	}
+	return nil
+}
+
+func isValidDuration(duration string) error {
+	if _, err := time.ParseDuration(duration); err != nil {
+		return fmt.Errorf("invalid duration: %w", err)
 	}
 	return nil
 }
