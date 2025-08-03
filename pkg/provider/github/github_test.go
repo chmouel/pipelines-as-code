@@ -691,8 +691,12 @@ func TestGithubSetClient(t *testing.T) {
 				Clients: clients.Clients{
 					Log: testLog,
 				},
+				Info: info.Info{
+					Pac: info.NewPacOpts(),
+				},
 			}
 			v := Provider{}
+			v.pacInfo = fakeRun.Info.Pac
 			err := v.SetClient(ctx, fakeRun, tt.event, nil, nil)
 			assert.NilError(t, err)
 			assert.Equal(t, tt.expectedURL, *v.APIURL)

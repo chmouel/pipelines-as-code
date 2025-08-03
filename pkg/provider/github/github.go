@@ -86,6 +86,10 @@ func (v *Provider) Client() *github.Client {
 	return v.ghClient
 }
 
+func (v *Provider) GetHTTPClient() *http.Client {
+	return v.ghClient.Client()
+}
+
 func (v *Provider) SetGithubClient(client *github.Client) {
 	v.ghClient = client
 }
@@ -209,13 +213,18 @@ func (v *Provider) GetConfig() *info.ProviderConfig {
 	}
 }
 
-func MakeClient(ctx context.Context, apiURL, token string) (*github.Client, string, *string) {
+func MakeClient(ctx context.Context, logger *zap.SugaredLogger, apiURL, token string) (*github.Client, string, *string) {
 	var client *github.Client
 	ts := oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: token},
 	)
 
-	tc := oauth2.NewClient(ctx, ts)
+	tc := NewProfingClient(logger)
+	tc.Transport = &oauth2.Transport{
+		Source: ts,
+		Base:   tc.Transport,
+	}
+
 	if apiURL != "" {
 		if !strings.HasPrefix(apiURL, "https") && !strings.HasPrefix(apiURL, "http") {
 			apiURL = "https://" + apiURL
@@ -294,7 +303,7 @@ func (v *Provider) checkWebhookSecretValidity(ctx context.Context, cw clockwork.
 }
 
 func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.Event, repo *v1alpha1.Repository, eventsEmitter *events.EventEmitter) error {
-	client, providerName, apiURL := MakeClient(ctx, event.Provider.URL, event.Provider.Token)
+	client, providerName, apiURL := MakeClient(ctx, v.Logger, event.Provider.URL, event.Provider.Token)
 	v.providerName = providerName
 	v.Run = run
 	v.repo = repo

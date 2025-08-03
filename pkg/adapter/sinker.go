@@ -11,6 +11,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"go.uber.org/zap"
 )
 
@@ -72,5 +73,12 @@ func (s *sinker) processEvent(ctx context.Context, request *http.Request) error 
 	}
 
 	p := pipelineascode.NewPacs(s.event, s.vcx, s.run, s.pacInfo, s.kint, s.logger, s.globalRepo)
+	defer func() {
+		if ghprovider, ok := s.vcx.(*github.Provider); ok {
+			if transport, ok := ghprovider.GetHTTPClient().Transport.(*github.ProfilingTransport); ok {
+				s.logger.Debugf("Total GitHub API calls: %d", transport.Counter)
+			}
+		}
+	}()
 	return p.Run(ctx)
 }

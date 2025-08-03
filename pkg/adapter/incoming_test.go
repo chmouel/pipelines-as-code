@@ -666,6 +666,7 @@ func Test_listener_detectIncoming(t *testing.T) {
 					Controller: &info.ControllerInfo{
 						Secret: info.DefaultPipelinesAscodeSecretName,
 					},
+					Pac: info.NewPacOpts(),
 				},
 			}
 			observer, _ := zapobserver.New(zap.InfoLevel)

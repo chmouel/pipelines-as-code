@@ -61,7 +61,7 @@ func (ip *Install) GetAndUpdateInstallationID(ctx context.Context) (string, stri
 
 	logger := logging.FromContext(ctx)
 	opt := &gt.ListOptions{PerPage: ip.ghClient.PaginedNumber}
-	client, _, _ := github.MakeClient(ctx, apiURL, jwtToken)
+	client, _, _ := github.MakeClient(ctx, logger, apiURL, jwtToken)
 	installationData := []*gt.Installation{}
 
 	// List all installations

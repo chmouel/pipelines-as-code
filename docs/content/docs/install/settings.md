@@ -480,3 +480,15 @@ In this case, all Pipelines-as-Code components get a common log level from `zap-
 * fatal - immediately exit with exit status 1 (failure)
 
 See more: <https://knative.dev/docs/serving/observability/logging/config-logging>
+
+### API Provider Logging
+
+If you need to troubleshoot interactions with your Git provider (e.g., GitHub), you can enable debug-level logging for the `pipelines-as-code-controller`. This will provide detailed information for each API call, including the time it took to complete and the remaining API rate-limit quota.
+
+To enable debug logging for the controller, use the following `kubectl patch` command:
+
+```bash
+kubectl patch configmap pac-config-logging -n pipelines-as-code --type json -p '[{"op": "replace", "path": "/data/loglevel.pipelinesascode", "value":"debug"}]'
+```
+
+After applying this change, the controller will restart, and you will see detailed API call information in its logs.

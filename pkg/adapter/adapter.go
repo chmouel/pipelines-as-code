@@ -147,7 +147,6 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		var logger *zap.SugaredLogger
 
 		l.event = info.NewEvent()
-		pacInfo := l.run.Info.GetPacOpts()
 
 		globalRepo, err := l.run.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(l.run.Info.Kube.Namespace).Get(
 			ctx, l.run.Info.Controller.GlobalRepository, metav1.GetOptions{},
@@ -158,7 +157,7 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 			globalRepo = &v1alpha1.Repository{}
 		}
 
-		detected, configuring, err := github.ConfigureRepository(ctx, l.run, request, string(payload), &pacInfo, l.logger)
+		detected, configuring, err := github.ConfigureRepository(ctx, l.run, request, string(payload), l.run.Info.Pac, l.logger)
 		if detected {
 			if configuring && err == nil {
 				l.writeResponse(response, http.StatusCreated, "configured")
@@ -190,7 +189,7 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 			l.writeResponse(response, http.StatusOK, err.Error())
 			return
 		}
-		gitProvider.SetPacInfo(&pacInfo)
+		gitProvider.SetPacInfo(l.run.Info.Pac)
 
 		s := sinker{
 			run:        l.run,
@@ -199,7 +198,7 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 			event:      l.event,
 			logger:     logger,
 			payload:    payload,
-			pacInfo:    &pacInfo,
+			pacInfo:    l.run.Info.Pac,
 			globalRepo: globalRepo,
 		}
 
