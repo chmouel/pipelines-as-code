@@ -3,6 +3,7 @@ package bitbucketcloud
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -326,4 +327,368 @@ func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (st
 
 func (v *Provider) GetTemplate(commentType provider.CommentType) string {
 	return provider.GetMarkdownTemplate(commentType)
+}
+
+func (v *Provider) Client() *bitbucket.Client {
+	providerMetrics.RecordAPIUsage(
+		v.Logger,
+		v.GetConfig().Name,
+		v.triggerEvent,
+		v.repo,
+	)
+	return v.bbClient
+}
+
+func (v *Provider) CreateComment(_ context.Context, _ *info.Event, _, _ string) error {
+	return nil
+}
+
+// CheckPolicyAllowing TODO: Implement ME.
+func (v *Provider) CheckPolicyAllowing(_ context.Context, _ *info.Event, _ []string) (bool, string) {
+	return false, ""
+}
+
+// GetTaskURI TODO: Implement ME.
+func (v *Provider) GetTaskURI(_ context.Context, _ *info.Event, _ string) (bool, string, error) {
+	return false, "", nil
+}
+
+func (v *Provider) SetPacInfo(pacInfo *info.PacOpts) {
+	v.pacInfo = pacInfo
+}
+
+const taskStatusTemplate = `{{range $taskrun := .TaskRunList }} | **{{ formatCondition $taskrun.PipelineRunTaskRunStatus.Status.Conditions }}** | {{ $taskrun.ConsoleLogURL }} | *{{ formatDuration $taskrun.PipelineRunTaskRunStatus.Status.StartTime $taskrun.PipelineRunTaskRunStatus.Status.CompletionTime }}* |
+{{ end }}`
+
+func (v *Provider) Validate(_ context.Context, _ *params.Run, _ *info.Event) error {
+	return nil
+}
+
+func (v *Provider) SetLogger(logger *zap.SugaredLogger) {
+	v.Logger = logger
+}
+
+func (v *Provider) GetConfig() *info.ProviderConfig {
+	return &info.ProviderConfig{
+		TaskStatusTMPL: taskStatusTemplate,
+		APIURL:         bitbucket.DEFAULT_BITBUCKET_API_BASE_URL,
+		Name:           "bitbucket-cloud",
+	}
+}
+
+func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusopts provider.StatusOpts) error {
+	switch statusopts.Conclusion {
+	case "skipped":
+		statusopts.Conclusion = "STOPPED"
+		statusopts.Title = "➖ Skipping this commit"
+	case "neutral":
+		statusopts.Conclusion = "STOPPED"
+		statusopts.Title = "➖ CI has stopped"
+	case "failure":
+		statusopts.Conclusion = "FAILED"
+		statusopts.Title = "❌ Failed"
+	case "pending":
+		statusopts.Conclusion = "INPROGRESS"
+		statusopts.Title = "⚡ CI has started"
+	case "success":
+		statusopts.Conclusion = "SUCCESSFUL"
+		statusopts.Title = "✅ Commit has been validated"
+	case "completed":
+		statusopts.Conclusion = "SUCCESSFUL"
+		statusopts.Title = "✅ Completed"
+	}
+	detailsURL := event.Provider.URL
+	if statusopts.DetailsURL != "" {
+		detailsURL = statusopts.DetailsURL
+	}
+
+	cso := &bitbucket.CommitStatusOptions{
+		Key:         v.pacInfo.ApplicationName,
+		Url:         detailsURL,
+		State:       statusopts.Conclusion,
+		Description: statusopts.Title,
+	}
+	cmo := &bitbucket.CommitsOptions{
+		Owner:    event.Organization,
+		RepoSlug: event.Repository,
+		Revision: event.SHA,
+	}
+
+	if v.bbClient == nil {
+		return fmt.Errorf("no token has been set, cannot set status")
+	}
+
+	_, err := v.Client().Repositories.Commits.CreateCommitStatus(cmo, cso)
+	if err != nil {
+		// Only emit an event to notify the user that something went wrong with the commit status API,
+		// and proceed with creating the comment (if applicable).
+		v.eventEmitter.EmitMessage(v.repo, zap.ErrorLevel, "FailedToSetCommitStatus",
+			"cannot set status with the Bitbucket Cloud token because of: "+err.Error())
+	}
+
+	eventType := triggertype.IsPullRequestType(event.EventType)
+	if statusopts.Conclusion != "STOPPED" && statusopts.Status == "completed" &&
+		statusopts.Text != "" &&
+		(eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
+		onPr := ""
+		if statusopts.OriginalPipelineRunName != "" {
+			onPr = "/" + statusopts.OriginalPipelineRunName
+		}
+		_, err = v.Client().Repositories.PullRequests.AddComment(
+			&bitbucket.PullRequestCommentOptions{
+				Owner:         event.Organization,
+				RepoSlug:      event.Repository,
+				PullRequestID: strconv.Itoa(event.PullRequestNumber),
+				Content:       fmt.Sprintf("**%s%s** - %s\n\n%s", v.pacInfo.ApplicationName, onPr, statusopts.Title, statusopts.Text),
+			})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, provenance string) (string, error) {
+	v.provenance = provenance
+	repositoryFiles, err := v.getDir(event, path)
+	if err != nil {
+		return "", err
+	}
+
+	return v.concatAllYamlFiles(repositoryFiles, event)
+}
+
+func (v *Provider) getDir(event *info.Event, path string) ([]bitbucket.RepositoryFile, error) {
+	// default set provenance from the SHA
+	revision := event.SHA
+	if v.provenance == "default_branch" {
+		revision = event.DefaultBranch
+		v.Logger.Infof("Using PipelineRun definition from default_branch: %s", event.DefaultBranch)
+	} else {
+		v.Logger.Infof("Using PipelineRun definition from source %s commit SHA: %s", event.TriggerTarget.String(), event.SHA)
+	}
+	repoFileOpts := &bitbucket.RepositoryFilesOptions{
+		Owner:    event.Organization,
+		RepoSlug: event.Repository,
+		Ref:      revision,
+		Path:     path,
+	}
+
+	repositoryFiles, err := v.Client().Repositories.Repository.ListFiles(repoFileOpts)
+	if err != nil {
+		return nil, err
+	}
+	return repositoryFiles, nil
+}
+
+func (v *Provider) GetFileInsideRepo(_ context.Context, event *info.Event, path, _ string) (string, error) {
+	revision := event.SHA
+	if v.provenance == "default_branch" {
+		revision = event.DefaultBranch
+	}
+	return v.getBlob(event, revision, path)
+}
+
+func (v *Provider) SetClient(_ context.Context, run *params.Run, event *info.Event, repo *v1alpha1.Repository, eventEmitter *events.EventEmitter) error {
+	if event.Provider.Token == "" {
+		return fmt.Errorf("no git_provider.secret has been set in the repo crd")
+	}
+	if event.Provider.User == "" {
+		return fmt.Errorf("no git_provider.user has been in repo crd")
+	}
+	v.bbClient = bitbucket.NewBasicAuth(event.Provider.User, event.Provider.Token)
+
+	// Added log for security audit purposes to log client access when a token is used
+	run.Clients.Log.Infof("bitbucket-cloud: initialized client with provided token for user=%s", event.Provider.User)
+
+	v.Token = &event.Provider.Token
+	v.Username = &event.Provider.User
+	v.run = run
+	v.eventEmitter = eventEmitter
+	v.repo = repo
+	v.triggerEvent = event.EventType
+	return nil
+}
+
+func (v *Provider) Client() *bitbucket.Client {
+	providerMetrics.RecordAPIUsage(
+		v.Logger,
+		v.GetConfig().Name,
+		v.triggerEvent,
+		v.repo,
+	)
+	return v.bbClient
+}
+
+func (v *Provider) CreateComment(_ context.Context, _ *info.Event, _, _ string) error {
+	return nil
+}
+
+// CheckPolicyAllowing TODO: Implement ME.
+func (v *Provider) CheckPolicyAllowing(_ context.Context, _ *info.Event, _ []string) (bool, string) {
+	return false, ""
+}
+
+// GetTaskURI TODO: Implement ME.
+func (v *Provider) GetTaskURI(_ context.Context, _ *info.Event, _ string) (bool, string, error) {
+	return false, "", nil
+}
+
+func (v *Provider) SetPacInfo(pacInfo *info.PacOpts) {
+	v.pacInfo = pacInfo
+}
+
+const taskStatusTemplate = `{{range $taskrun := .TaskRunList }} | **{{ formatCondition $taskrun.PipelineRunTaskRunStatus.Status.Conditions }}** | {{ $taskrun.ConsoleLogURL }} | *{{ formatDuration $taskrun.PipelineRunTaskRunStatus.Status.StartTime $taskrun.PipelineRunTaskRunStatus.Status.CompletionTime }}* |
+{{ end }}`
+
+func (v *Provider) Validate(_ context.Context, _ *params.Run, _ *info.Event) error {
+	return nil
+}
+
+func (v *Provider) SetLogger(logger *zap.SugaredLogger) {
+	v.Logger = logger
+}
+
+func (v *Provider) GetConfig() *info.ProviderConfig {
+	return &info.ProviderConfig{
+		TaskStatusTMPL: taskStatusTemplate,
+		APIURL:         bitbucket.DEFAULT_BITBUCKET_API_BASE_URL,
+		Name:           "bitbucket-cloud",
+	}
+}
+
+func (v *Provider) CreateStatus(_ context.Context, event *info.Event, statusopts provider.StatusOpts) error {
+	switch statusopts.Conclusion {
+	case "skipped":
+		statusopts.Conclusion = "STOPPED"
+		statusopts.Title = "➖ Skipping this commit"
+	case "neutral":
+		statusopts.Conclusion = "STOPPED"
+		statusopts.Title = "➖ CI has stopped"
+	case "failure":
+		statusopts.Conclusion = "FAILED"
+		statusopts.Title = "❌ Failed"
+	case "pending":
+		statusopts.Conclusion = "INPROGRESS"
+		statusopts.Title = "⚡ CI has started"
+	case "success":
+		statusopts.Conclusion = "SUCCESSFUL"
+		statusopts.Title = "✅ Commit has been validated"
+	case "completed":
+		statusopts.Conclusion = "SUCCESSFUL"
+		statusopts.Title = "✅ Completed"
+	}
+	detailsURL := event.Provider.URL
+	if statusopts.DetailsURL != "" {
+		detailsURL = statusopts.DetailsURL
+	}
+
+	cso := &bitbucket.CommitStatusOptions{
+		Key:         v.pacInfo.ApplicationName,
+		Url:         detailsURL,
+		State:       statusopts.Conclusion,
+		Description: statusopts.Title,
+	}
+	cmo := &bitbucket.CommitsOptions{
+		Owner:    event.Organization,
+		RepoSlug: event.Repository,
+		Revision: event.SHA,
+	}
+
+	if v.bbClient == nil {
+		return fmt.Errorf("no token has been set, cannot set status")
+	}
+
+	_, err := v.Client().Repositories.Commits.CreateCommitStatus(cmo, cso)
+	if err != nil {
+		// Only emit an event to notify the user that something went wrong with the commit status API,
+		// and proceed with creating the comment (if applicable).
+		v.eventEmitter.EmitMessage(v.repo, zap.ErrorLevel, "FailedToSetCommitStatus",
+			"cannot set status with the Bitbucket Cloud token because of: "+err.Error())
+	}
+
+	eventType := triggertype.IsPullRequestType(event.EventType)
+	if statusopts.Conclusion != "STOPPED" && statusopts.Status == "completed" &&
+		statusopts.Text != "" &&
+		(eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
+		onPr := ""
+		if statusopts.OriginalPipelineRunName != "" {
+			onPr = "/" + statusopts.OriginalPipelineRunName
+		}
+		_, err = v.Client().Repositories.PullRequests.AddComment(
+			&bitbucket.PullRequestCommentOptions{
+				Owner:         event.Organization,
+				RepoSlug:      event.Repository,
+				PullRequestID: strconv.Itoa(event.PullRequestNumber),
+				Content:       fmt.Sprintf("**%s%s** - %s\n\n%s", v.pacInfo.ApplicationName, onPr, statusopts.Title, statusopts.Text),
+			})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *Provider) GetTektonDir(_ context.Context, event *info.Event, path, provenance string) (string, error) {
+	v.provenance = provenance
+	repositoryFiles, err := v.getDir(event, path)
+	if err != nil {
+		return "", err
+	}
+
+	return v.concatAllYamlFiles(repositoryFiles, event)
+}
+
+func (v *Provider) getDir(event *info.Event, path string) ([]bitbucket.RepositoryFile, error) {
+	// default set provenance from the SHA
+	revision := event.SHA
+	if v.provenance == "default_branch" {
+		revision = event.DefaultBranch
+		v.Logger.Infof("Using PipelineRun definition from default_branch: %s", event.DefaultBranch)
+	} else {
+		v.Logger.Infof("Using PipelineRun definition from source %s commit SHA: %s", event.TriggerTarget.String(), event.SHA)
+	}
+	repoFileOpts := &bitbucket.RepositoryFilesOptions{
+		Owner:    event.Organization,
+		RepoSlug: event.Repository,
+		Ref:      revision,
+		Path:     path,
+	}
+
+	repositoryFiles, err := v.Client().Repositories.Repository.ListFiles(repoFileOpts)
+	if err != nil {
+		return nil, err
+	}
+	return repositoryFiles, nil
+}
+
+func (v *Provider) GetFileInsideRepo(_ context.Context, event *info.Event, path, _ string) (string, error) {
+	revision := event.SHA
+	if v.provenance == "default_branch" {
+		revision = event.DefaultBranch
+	}
+	return v.getBlob(event, revision, path)
+}
+
+func (v *Provider) SetClient(_ context.Context, run *params.Run, event *info.Event, repo *v1alpha1.Repository, eventEmitter *events.EventEmitter) error {
+	if event.Provider.Token == "" {
+		return fmt.Errorf("no git_provider.secret has been set in the repo crd")
+	}
+	if event.Provider.User == "" {
+		return fmt.Errorf("no git_provider.user has been in repo crd")
+	}
+	v.httpClient = profiler.NewProfingClient(v.Logger)
+	v.bbClient = bitbucket.NewBasicAuth(event.Provider.User, event.Provider.Token)
+	v.bbClient.SetHTTPClient(v.httpClient)
+
+	// Added log for security audit purposes to log client access when a token is used
+	run.Clients.Log.Infof("bitbucket-cloud: initialized client with provided token for user=%s", event.Provider.User)
+
+	v.Token = &event.Provider.Token
+	v.Username = &event.Provider.User
+	v.run = run
+	v.eventEmitter = eventEmitter
+	v.repo = repo
+	v.triggerEvent = event.EventType
+	return nil
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/metrics"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/profiler"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 	"k8s.io/client-go/kubernetes"
@@ -219,7 +220,7 @@ func MakeClient(ctx context.Context, logger *zap.SugaredLogger, apiURL, token st
 		&oauth2.Token{AccessToken: token},
 	)
 
-	tc := NewProfingClient(logger)
+	tc := profiler.NewProfingClient(logger)
 	tc.Transport = &oauth2.Transport{
 		Source: ts,
 		Base:   tc.Transport,

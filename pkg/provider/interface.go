@@ -47,6 +47,7 @@ type Interface interface {
 	CheckPolicyAllowing(context.Context, *info.Event, []string) (bool, string)
 	GetTemplate(CommentType) string
 	CreateComment(ctx context.Context, event *info.Event, comment, updateMarker string) error
+	GetHTTPClient() *http.Client
 }
 
 const DefaultProviderAPIUser = "git"

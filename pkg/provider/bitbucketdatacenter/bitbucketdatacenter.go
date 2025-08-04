@@ -20,6 +20,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/metrics"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/profiler"
 	"go.uber.org/zap"
 )
 
@@ -42,6 +43,11 @@ type Provider struct {
 	projectKey                string
 	repo                      *v1alpha1.Repository
 	triggerEvent              string
+	httpClient                *http.Client
+}
+
+func (v *Provider) GetHTTPClient() *http.Client {
+	return v.httpClient
 }
 
 func (v Provider) Client() *scm.Client {
@@ -297,15 +303,15 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 		if err != nil {
 			return err
 		}
-		client.Client = &http.Client{
-			Transport: &oauth2.Transport{
-				Source: oauth2.StaticTokenSource(
-					&scm.Token{
-						Token: event.Provider.Token,
-					},
-				),
-			},
+		v.httpClient = profiler.NewProfingClient(v.Logger)
+		v.httpClient.Transport = &oauth2.Transport{
+			Source: oauth2.StaticTokenSource(
+				&scm.Token{
+					Token: event.Provider.Token,
+				},
+			),
 		}
+		client.Client = v.httpClient
 		v.client = client
 
 		// Added for security audit purposes to log client access when a token is used

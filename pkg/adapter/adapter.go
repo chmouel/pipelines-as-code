@@ -23,6 +23,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitea"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/github"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/gitlab"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/profiler"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/eventing/pkg/adapter/v2"
@@ -206,6 +207,13 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		localRequest := request.Clone(request.Context())
 
 		go func() {
+			defer func() {
+				if httpClient := gitProvider.GetHTTPClient(); httpClient != nil {
+					if transport, ok := httpClient.Transport.(*profiler.ProfilingTransport); ok {
+						logger.Debugf("Total API calls for this event: %d", transport.Counter)
+					}
+				}
+			}()
 			err := s.processEvent(ctx, localRequest)
 			if err != nil {
 				logger.Errorf("an error occurred: %v", err)

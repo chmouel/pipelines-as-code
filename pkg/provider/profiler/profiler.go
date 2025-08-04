@@ -1,4 +1,4 @@
-package github
+package profiler
 
 import (
 	"net/http"
@@ -19,10 +19,9 @@ func (t *ProfilingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	duration := time.Since(start)
 	t.Counter++
 	if resp != nil {
-		remaining := resp.Header.Get("X-RateLimit-Remaining")
-		t.Logger.Debugf("GitHub API call to %s took %v, ratelimit-remaining: %s", req.URL, duration, remaining)
+		t.Logger.Debugf("API call to %s took %v", req.URL, duration)
 	} else {
-		t.Logger.Debugf("GitHub API call to %s took %v", req.URL, duration)
+		t.Logger.Debugf("API call to %s took %v", req.URL, duration)
 	}
 	return resp, err
 }

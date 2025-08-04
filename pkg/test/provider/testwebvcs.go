@@ -33,6 +33,10 @@ type TestProviderImp struct {
 	pacInfo                *info.PacOpts
 }
 
+func (v *TestProviderImp) GetHTTPClient() *http.Client {
+	return nil
+}
+
 func (v *TestProviderImp) SetPacInfo(pacInfo *info.PacOpts) {
 	v.pacInfo = pacInfo
 }

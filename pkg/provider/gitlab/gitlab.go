@@ -21,6 +21,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/metrics"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/profiler"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"go.uber.org/zap"
 )
@@ -64,6 +65,11 @@ type Provider struct {
 	repo              *v1alpha1.Repository
 	triggerEvent      string
 	cache             *cache.Cache
+	httpClient        *http.Client
+}
+
+func (v *Provider) GetHTTPClient() *http.Client {
+	return v.httpClient
 }
 
 func (v *Provider) Client() *gitlab.Client {
@@ -197,7 +203,12 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 	}
 	v.apiURL = apiURL
 
-	v.gitlabClient, err = gitlab.NewClient(runevent.Provider.Token, gitlab.WithBaseURL(apiURL))
+	v.httpClient = profiler.NewProfingClient(v.Logger)
+	opts := []gitlab.ClientOptionFunc{
+		gitlab.WithBaseURL(apiURL),
+		gitlab.WithHTTPClient(v.httpClient),
+	}
+	v.gitlabClient, err = gitlab.NewClient(runevent.Provider.Token, opts...)
 	if err != nil {
 		return err
 	}
