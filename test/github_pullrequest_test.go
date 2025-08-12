@@ -624,7 +624,7 @@ func TestGithubDisableCommentsOnPR(t *testing.T) {
 	ctx := context.Background()
 
 	g := &tgithub.PRTest{
-		Label:     "Github PullRequest onWebhook",
+		Label:     "Github Disable Comments onWebhook",
 		YamlFiles: []string{"testdata/pipelinerun.yaml"},
 		Webhook:   true,
 	}
@@ -648,6 +648,16 @@ func TestGithubDisableCommentsOnPR(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 0, successCommentsPost)
+}
+
+func TestGithubStepActions(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label:     "Github PullRequest",
+		YamlFiles: []string{"testdata/pipelinerun-stepactions.yaml"},
+	}
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
 }
 
 // Local Variables:

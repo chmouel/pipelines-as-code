@@ -13,16 +13,24 @@ spec:
       - name: stepactions-task
         taskSpec:
           steps:
-            - name: fetch-repo-with-stepaction
+            - name: step-1
               ref:
                 resolver: http
                 params:
                   - name: url
-                    value: https://raw.githubusercontent.com/openshift-pipelines/pipelines-as-code/refs/heads/main/.tekton/stepactions/git-clone.yaml
+                    value: https://raw.githubusercontent.com/pipelines-as-code/catalog/b69fb7f82f229e818309ed861d1ab4f43e077fd6/stepactions/test/0.1/test.yaml
+            - name: step-2
+              ref:
+                resolver: http
+                params:
+                  - name: url
+                    value: https://raw.githubusercontent.com/pipelines-as-code/catalog/b69fb7f82f229e818309ed861d1ab4f43e077fd6/stepactions/test/0.1/test.yaml
               params:
-                - name: output-path
-                  value: "/tmp/output"
-                - name: url
-                  value: "https://github.com/openshift-pipelines/pac-demo"
-                - name: revision
-                  value: "main"
+                - name: exit
+                  value: "1"
+            - name: step-3
+              ref:
+                resolver: http
+                params:
+                  - name: url
+                    value: https://raw.githubusercontent.com/pipelines-as-code/catalog/b69fb7f82f229e818309ed861d1ab4f43e077fd6/stepactions/test/0.1/test.yaml

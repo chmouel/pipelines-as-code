@@ -41,6 +41,22 @@ func (trs taskrunList) Less(i, j int) bool {
 	return trs[j].Status.StartTime.Before(trs[i].Status.StartTime)
 }
 
+// visibleSteps returns the sequence of step states up to and including
+// the first failed step. If no failures are present, it returns all steps.
+func visibleSteps(status *tektonv1.TaskRunStatus) []tektonv1.StepState {
+	if status == nil {
+		return nil
+	}
+	out := []tektonv1.StepState{}
+	for _, s := range status.Steps {
+		out = append(out, s)
+		if s.Terminated != nil && s.Terminated.ExitCode != 0 {
+			break
+		}
+	}
+	return out
+}
+
 // TaskStatusTmpl generate a template of all status of a TaskRuns sorted to a statusTemplate as defined by the git provider.
 func TaskStatusTmpl(pr *tektonv1.PipelineRun, trStatus map[string]*tektonv1.PipelineRunTaskRunStatus, runs *params.Run, config *info.ProviderConfig) (string, error) {
 	trl := taskrunList{}
@@ -61,6 +77,9 @@ func TaskStatusTmpl(pr *tektonv1.PipelineRun, trStatus map[string]*tektonv1.Pipe
 	funcMap := template.FuncMap{
 		"formatDuration":  formatting.Duration,
 		"formatCondition": formatting.ConditionEmoji,
+		"formatStepState": formatting.StepStateEmoji,
+		"stepDuration":    formatting.StepDuration,
+		"visibleSteps":    visibleSteps,
 	}
 
 	if config.SkipEmoji {
