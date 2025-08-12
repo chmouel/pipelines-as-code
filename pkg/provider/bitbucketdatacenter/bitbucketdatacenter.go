@@ -24,6 +24,9 @@ import (
 )
 
 const taskStatusTemplate = `{{range $taskrun := .TaskRunList }}| **{{ formatCondition $taskrun.PipelineRunTaskRunStatus.Status.Conditions }}** | {{ $taskrun.ConsoleLogURL }} | *{{ formatDuration $taskrun.Status.StartTime $taskrun.Status.CompletionTime }}* |
+{{- $steps := visibleSteps $taskrun.PipelineRunTaskRunStatus.Status }}
+{{- range $s := $steps }}| {{ formatStepState $s }} | ↳ {{ $s.Name }} | *{{ stepDuration $s }}* |
+{{- end }}
 {{ end }}`
 const apiResponseLimit = 100
 

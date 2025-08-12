@@ -25,18 +25,36 @@ import (
 )
 
 const (
-	taskStatusTemplate = `
+    taskStatusTemplate = `
 <table>
   <tr><th>Status</th><th>Duration</th><th>Name</th></tr>
 
 {{- range $taskrun := .TaskRunList }}
 <tr>
-<td>{{ formatCondition $taskrun.PipelineRunTaskRunStatus.Status.Conditions }}</td>
-<td>{{ formatDuration $taskrun.PipelineRunTaskRunStatus.Status.StartTime $taskrun.Status.CompletionTime }}</td><td>
-
-{{ $taskrun.ConsoleLogURL }}
-
-</td></tr>
+  <td>{{ formatCondition $taskrun.PipelineRunTaskRunStatus.Status.Conditions }}</td>
+  <td>{{ formatDuration $taskrun.PipelineRunTaskRunStatus.Status.StartTime $taskrun.Status.CompletionTime }}</td>
+  <td>{{ $taskrun.ConsoleLogURL }}</td>
+</tr>
+{{- $steps := visibleSteps $taskrun.PipelineRunTaskRunStatus.Status }}
+{{- if $steps }}
+<tr>
+  <td colspan="3">
+    <details>
+      <summary>Steps</summary>
+      <table>
+        <tr><th>Status</th><th>Duration</th><th>Step</th></tr>
+        {{- range $s := $steps }}
+        <tr>
+          <td>{{ formatStepState $s }}</td>
+          <td>{{ stepDuration $s }}</td>
+          <td>{{ $s.Name }}</td>
+        </tr>
+        {{- end }}
+      </table>
+    </details>
+  </td>
+</tr>
+{{- end }}
 {{- end }}
 </table>`
 )
