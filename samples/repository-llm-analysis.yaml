@@ -1,0 +1,179 @@
+# Example Repository CRD with LLM Analysis Configuration
+# This demonstrates how to configure AI/LLM analysis for automated CI/CD pipeline analysis
+
+apiVersion: pipelinesascode.tekton.dev/v1alpha1
+kind: Repository
+metadata:
+  name: example-repo-with-llm
+  namespace: default
+spec:
+  url: "https://github.com/example/my-project"
+
+  settings:
+    # AI Analysis Configuration
+    ai_analysis:
+      enabled: true
+      # can be gemini
+      provider: "openai"
+      timeout_seconds: 30
+      max_tokens: 1000
+
+      # Reference to Kubernetes secret containing LLM API token
+      token_secret_ref:
+        name: "openai-api-key"
+        key: "token"
+
+      # Analysis roles define different scenarios and their configurations
+      roles:
+        # Role 1: Failure Analysis for Pull Requests
+        - name: "failure-analysis"
+          prompt: |
+            You are a DevOps expert analyzing a failed CI/CD pipeline.
+            Examine the provided error logs, task failures, and context to:
+
+            1. Identify the root cause of the failure
+            2. Suggest specific steps to fix the issue
+            3. Recommend preventive measures for the future
+
+            Focus on actionable insights and avoid generic advice.
+
+          # Only trigger for failed pipelines in pull requests
+          on_cel: 'body.pipelineRun.status.conditions[0].reason == "Failed" && body.event.event_type == "pull_request"'
+
+          # Include relevant context for failure analysis
+          context_items:
+            error_content: true
+            container_logs:
+              enabled: true
+              max_lines: 100
+            commit_content: true
+            pr_content: true
+
+          # Post results as PR comment
+          output: "pr-comment"
+
+        # Role 2: Performance Analysis for Main Branch
+        - name: "performance-review"
+          prompt: |
+            Analyze this CI/CD pipeline execution for performance insights.
+            Look at the pipeline duration, task execution times, and suggest optimizations.
+
+            Provide recommendations for:
+            - Faster build times
+            - Better resource utilization
+            - Pipeline efficiency improvements
+
+          # Only trigger for main branch pushes that took longer than usual
+          on_cel: 'body.event.base_branch == "main" && body.pipelineRun.status.conditions[0].reason == "Succeeded"'
+
+          context_items:
+            container_logs:
+              enabled: true
+              max_lines: 50
+            commit_content: true
+
+          # Create a GitHub check run
+          output: "check-run"
+
+        # Role 3: Security Analysis (JSON Output)
+        - name: "security-scan"
+          prompt: |
+            Analyze this pipeline for potential security issues.
+            Look for:
+            - Exposed secrets or credentials
+            - Insecure practices
+            - Vulnerability scan results
+
+            Respond in JSON format with:
+            {
+              "security_score": 1-10,
+              "issues": [{"severity": "high|medium|low", "description": "..."}],
+              "recommendations": ["..."]
+            }
+
+          json_output: true
+
+          # Trigger for any pipeline completion
+          on_cel: 'body.pipelineRun.status.conditions[0].reason in ["Succeeded", "Failed"]'
+
+          context_items:
+            error_content: true
+            container_logs:
+              enabled: true
+              max_lines: 200
+            commit_content: true
+
+          # Store as annotations for programmatic access
+          output: "annotation"
+
+---
+# Secret containing the OpenAI API key
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openai-api-key
+  namespace: default
+type: Opaque
+data:
+  # Base64 encoded OpenAI API key
+  # Example: echo -n "sk-your-openai-api-key" | base64
+  token: c2stWW91ck9wZW5BSUFQSUtleUhlcmU=
+
+---
+# Alternative example with Google Gemini
+apiVersion: pipelinesascode.tekton.dev/v1alpha1
+kind: Repository
+metadata:
+  name: example-repo-gemini
+  namespace: default
+spec:
+  url: "https://github.com/example/gemini-project"
+
+  settings:
+    ai_analysis:
+      enabled: true
+      provider: "gemini"
+      timeout_seconds: 45
+      max_tokens: 2000
+
+      token_secret_ref:
+        name: "gemini-api-key"
+        key: "api_key"
+
+      roles:
+        - name: "code-review-assistant"
+          prompt: |
+            You are a senior software engineer reviewing this failed CI/CD pipeline.
+
+            Based on the test failures and code changes, provide:
+            1. Analysis of what went wrong
+            2. Code quality observations
+            3. Suggestions for improvement
+            4. Testing recommendations
+
+            Be constructive and specific in your feedback.
+
+          on_cel: 'body.pipelineRun.status.conditions[0].reason == "Failed"'
+
+          context_items:
+            error_content: true
+            container_logs:
+              enabled: true
+              max_lines: 150
+            commit_content: true
+            pr_content: true
+
+          output: "pr-comment"
+
+---
+# Secret for Google Gemini API
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gemini-api-key
+  namespace: default
+type: Opaque
+data:
+  # Base64 encoded Gemini API key
+  # Example: echo -n "your-gemini-api-key" | base64
+  api_key: WW91ckdlbWluaUFQSUtleUhlcmU=
