@@ -1,0 +1,349 @@
+package openai
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+)
+
+const (
+	defaultBaseURL = "https://api.openai.com/v1"
+	defaultModel   = "gpt-4"
+	
+	// Default configuration values
+	defaultTimeoutSeconds = 30
+	defaultMaxTokens      = 1000
+)
+
+// AnalysisRequest represents a request to analyze CI/CD pipeline data
+type AnalysisRequest struct {
+	Prompt         string                 `json:"prompt"`
+	Context        map[string]interface{} `json:"context"`
+	JSONOutput     bool                   `json:"json_output"`
+	MaxTokens      int                    `json:"max_tokens"`
+	TimeoutSeconds int                    `json:"timeout_seconds"`
+}
+
+// AnalysisResponse represents the response from an LLM analysis
+type AnalysisResponse struct {
+	Content    string                 `json:"content"`
+	TokensUsed int                    `json:"tokens_used"`
+	JSONParsed map[string]interface{} `json:"json_parsed,omitempty"`
+	Provider   string                 `json:"provider"`
+	Timestamp  time.Time              `json:"timestamp"`
+	Duration   time.Duration          `json:"duration"`
+}
+
+// AnalysisError represents an error during LLM analysis
+type AnalysisError struct {
+	Provider  string
+	Type      string
+	Message   string
+	Retryable bool
+}
+
+func (e *AnalysisError) Error() string {
+	return e.Message
+}
+
+// Config holds the configuration for OpenAI client
+type Config struct {
+	APIKey         string
+	BaseURL        string
+	Model          string
+	TimeoutSeconds int
+	MaxTokens      int
+}
+
+// Client implements the LLM interface for OpenAI
+type Client struct {
+	config     *Config
+	httpClient *http.Client
+}
+
+// NewClient creates a new OpenAI client
+func NewClient(config *Config) (*Client, error) {
+	if config == nil {
+		return nil, fmt.Errorf("config is required")
+	}
+
+	if config.APIKey == "" {
+		return nil, fmt.Errorf("API key is required")
+	}
+
+	// Set defaults
+	if config.BaseURL == "" {
+		config.BaseURL = defaultBaseURL
+	}
+	if config.Model == "" {
+		config.Model = defaultModel
+	}
+	if config.TimeoutSeconds == 0 {
+		config.TimeoutSeconds = defaultTimeoutSeconds
+	}
+	if config.MaxTokens == 0 {
+		config.MaxTokens = defaultMaxTokens
+	}
+
+	client := &Client{
+		config: config,
+		httpClient: &http.Client{
+			Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
+		},
+	}
+
+	return client, nil
+}
+
+// Analyze sends an analysis request to OpenAI and returns the response
+func (c *Client) Analyze(ctx context.Context, request *AnalysisRequest) (*AnalysisResponse, error) {
+	startTime := time.Now()
+
+	// Build the prompt with context
+	fullPrompt, err := c.buildPrompt(request)
+	if err != nil {
+		return nil, &AnalysisError{
+			Provider:  c.GetProviderName(),
+			Type:      "prompt_build_error",
+			Message:   fmt.Sprintf("failed to build prompt: %v", err),
+			Retryable: false,
+		}
+	}
+
+	// Create OpenAI API request
+	apiRequest := &openaiRequest{
+		Model:     c.config.Model,
+		MaxTokens: request.MaxTokens,
+		Messages: []openaiMessage{
+			{
+				Role:    "user",
+				Content: fullPrompt,
+			},
+		},
+	}
+
+	if request.JSONOutput {
+		apiRequest.ResponseFormat = &responseFormat{Type: "json_object"}
+		// Add JSON instruction to the prompt if not already present
+		if !strings.Contains(fullPrompt, "JSON") && !strings.Contains(fullPrompt, "json") {
+			apiRequest.Messages[0].Content = fullPrompt + "\n\nPlease respond with valid JSON format."
+		}
+	}
+
+	// Marshal request
+	requestBody, err := json.Marshal(apiRequest)
+	if err != nil {
+		return nil, &AnalysisError{
+			Provider:  c.GetProviderName(),
+			Type:      "request_marshal_error",
+			Message:   fmt.Sprintf("failed to marshal request: %v", err),
+			Retryable: false,
+		}
+	}
+
+	// Create HTTP request
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.config.BaseURL+"/chat/completions", bytes.NewBuffer(requestBody))
+	if err != nil {
+		return nil, &AnalysisError{
+			Provider:  c.GetProviderName(),
+			Type:      "http_request_error",
+			Message:   fmt.Sprintf("failed to create HTTP request: %v", err),
+			Retryable: false,
+		}
+	}
+
+	// Set headers
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+
+	// Send request
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, &AnalysisError{
+			Provider:  c.GetProviderName(),
+			Type:      "http_error",
+			Message:   fmt.Sprintf("HTTP request failed: %v", err),
+			Retryable: true,
+		}
+	}
+	defer resp.Body.Close()
+
+	// Parse response
+	var apiResponse openaiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
+		return nil, &AnalysisError{
+			Provider:  c.GetProviderName(),
+			Type:      "response_parse_error",
+			Message:   fmt.Sprintf("failed to parse response: %v", err),
+			Retryable: false,
+		}
+	}
+
+	// Handle API errors
+	if resp.StatusCode != http.StatusOK {
+		errorType := "api_error"
+		retryable := false
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			errorType = "rate_limit_exceeded"
+			retryable = true
+		} else if resp.StatusCode == http.StatusUnauthorized {
+			errorType = "invalid_api_key"
+			retryable = false
+		} else if resp.StatusCode >= 500 {
+			errorType = "server_error"
+			retryable = true
+		}
+
+		errorMsg := fmt.Sprintf("OpenAI API error (status %d)", resp.StatusCode)
+		if apiResponse.Error != nil {
+			errorMsg = fmt.Sprintf("OpenAI API error: %s", apiResponse.Error.Message)
+		}
+
+		return nil, &AnalysisError{
+			Provider:  c.GetProviderName(),
+			Type:      errorType,
+			Message:   errorMsg,
+			Retryable: retryable,
+		}
+	}
+
+	// Extract content
+	if len(apiResponse.Choices) == 0 {
+		return nil, &AnalysisError{
+			Provider:  c.GetProviderName(),
+			Type:      "empty_response",
+			Message:   "no choices in API response",
+			Retryable: false,
+		}
+	}
+
+	content := apiResponse.Choices[0].Message.Content
+	tokensUsed := apiResponse.Usage.TotalTokens
+
+	// Build response
+	response := &AnalysisResponse{
+		Content:    content,
+		TokensUsed: tokensUsed,
+		Provider:   c.GetProviderName(),
+		Timestamp:  time.Now(),
+		Duration:   time.Since(startTime),
+	}
+
+	// Parse JSON if requested
+	if request.JSONOutput {
+		var jsonData map[string]interface{}
+		if err := json.Unmarshal([]byte(content), &jsonData); err != nil {
+			// JSON parsing failed, but we still return the raw content
+			response.JSONParsed = nil
+		} else {
+			response.JSONParsed = jsonData
+		}
+	}
+
+	return response, nil
+}
+
+// GetProviderName returns the provider name
+func (c *Client) GetProviderName() string {
+	return "openai"
+}
+
+// ValidateConfig validates the client configuration
+func (c *Client) ValidateConfig() error {
+	if c.config.APIKey == "" {
+		return fmt.Errorf("API key is required")
+	}
+	if c.config.TimeoutSeconds < 0 {
+		return fmt.Errorf("timeout seconds must be non-negative")
+	}
+	if c.config.MaxTokens < 0 {
+		return fmt.Errorf("max tokens must be non-negative")
+	}
+	return nil
+}
+
+// buildPrompt combines the base prompt with context data
+func (c *Client) buildPrompt(request *AnalysisRequest) (string, error) {
+	var promptBuilder strings.Builder
+
+	// Start with the base prompt
+	promptBuilder.WriteString(request.Prompt)
+	promptBuilder.WriteString("\n\n")
+
+	// Add context sections
+	if len(request.Context) > 0 {
+		promptBuilder.WriteString("Context Information:\n")
+
+		for key, value := range request.Context {
+			promptBuilder.WriteString(fmt.Sprintf("=== %s ===\n", strings.ToUpper(key)))
+
+			switch v := value.(type) {
+			case string:
+				promptBuilder.WriteString(v)
+			case map[string]interface{}, []interface{}:
+				jsonData, err := json.MarshalIndent(v, "", "  ")
+				if err != nil {
+					return "", fmt.Errorf("failed to marshal context %s: %w", key, err)
+				}
+				promptBuilder.WriteString(string(jsonData))
+			default:
+				promptBuilder.WriteString(fmt.Sprintf("%v", v))
+			}
+
+			promptBuilder.WriteString("\n\n")
+		}
+	}
+
+	return promptBuilder.String(), nil
+}
+
+// OpenAI API request/response structures
+
+type openaiRequest struct {
+	Model          string            `json:"model"`
+	Messages       []openaiMessage   `json:"messages"`
+	MaxTokens      int               `json:"max_tokens,omitempty"`
+	ResponseFormat *responseFormat   `json:"response_format,omitempty"`
+}
+
+type openaiMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type responseFormat struct {
+	Type string `json:"type"`
+}
+
+type openaiResponse struct {
+	ID      string          `json:"id"`
+	Object  string          `json:"object"`
+	Created int64           `json:"created"`
+	Model   string          `json:"model"`
+	Choices []openaiChoice  `json:"choices"`
+	Usage   openaiUsage     `json:"usage"`
+	Error   *openaiError    `json:"error,omitempty"`
+}
+
+type openaiChoice struct {
+	Index        int           `json:"index"`
+	Message      openaiMessage `json:"message"`
+	FinishReason string        `json:"finish_reason"`
+}
+
+type openaiUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+type openaiError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
+	Code    string `json:"code"`
+}
