@@ -66,9 +66,95 @@ func (v *Provider) CheckPolicyAllowing(_ context.Context, _ *info.Event, _ []str
 	return false, ""
 }
 
-// GetTaskURI TODO: Implement ME.
-func (v *Provider) GetTaskURI(_ context.Context, _ *info.Event, _ string) (bool, string, error) {
-	return false, "", nil
+// splitBitbucketDatacenterURL takes a BitBucket DataCenter URL and splits it into projectKey, repo, path and ref.
+// Supports both browse and raw URLs.
+func splitBitbucketDatacenterURL(uri string) (string, string, string, string, error) {
+	pURL, err := url.Parse(uri)
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("URL %s is not a valid provider URL: %w", uri, err)
+	}
+
+	path := pURL.Path
+	if pURL.RawPath != "" {
+		path = pURL.RawPath
+	}
+
+	// BitBucket DataCenter URLs follow patterns:
+	// /projects/{projectKey}/repos/{repository}/browse/{path}?at={ref}
+	// /projects/{projectKey}/repos/{repository}/raw/{path}?at={ref}
+	split := strings.Split(path, "/")
+	if len(split) < 6 || split[1] != "projects" || split[3] != "repos" {
+		return "", "", "", "", fmt.Errorf("URL %s does not seem to be a proper BitBucket DataCenter URL", uri)
+	}
+
+	projectKey := split[2]
+	repository := split[4]
+	var filePath string
+
+	// Check if it's a browse or raw URL
+	if len(split) >= 7 && (split[5] == "browse" || split[5] == "raw") {
+		filePath = strings.Join(split[6:], "/")
+	} else {
+		return "", "", "", "", fmt.Errorf("URL %s does not contain browse or raw path", uri)
+	}
+
+	// Get ref from query parameter 'at', default to empty string if not present
+	ref := pURL.Query().Get("at")
+
+	// URL decode the components
+	if projectKey, err = url.QueryUnescape(projectKey); err != nil {
+		return "", "", "", "", fmt.Errorf("cannot decode projectKey: %w", err)
+	}
+	if repository, err = url.QueryUnescape(repository); err != nil {
+		return "", "", "", "", fmt.Errorf("cannot decode repository: %w", err)
+	}
+	if filePath, err = url.QueryUnescape(filePath); err != nil {
+		return "", "", "", "", fmt.Errorf("cannot decode filePath: %w", err)
+	}
+	if ref, err = url.QueryUnescape(ref); err != nil {
+		return "", "", "", "", fmt.Errorf("cannot decode ref: %w", err)
+	}
+
+	return projectKey, repository, filePath, ref, nil
+}
+
+// GetTaskURI checks if the URI is from the same BitBucket DataCenter instance and fetches the file content.
+func (v *Provider) GetTaskURI(ctx context.Context, event *info.Event, uri string) (bool, string, error) {
+	if ret := provider.CompareHostOfURLS(uri, event.URL); !ret {
+		return false, "", nil
+	}
+
+	projectKey, repository, filePath, ref, err := splitBitbucketDatacenterURL(uri)
+	if err != nil {
+		return false, "", err
+	}
+
+	// Create a new event with the extracted information
+	nEvent := info.NewEvent()
+	nEvent.Organization = projectKey
+	nEvent.Repository = repository
+	// Preserve ref only for reference; GetFileInsideRepo logic uses SHA or empty revision
+	nEvent.BaseBranch = ref
+
+	// Decide how to fetch the content:
+	// - If ref is provided, use it as revision (set as SHA to be passed through)
+	// - If no ref is provided, pass an empty revision to fetch from the default branch of that repo
+	var targetBranch string
+	if ref != "" {
+		nEvent.SHA = ref
+		targetBranch = ref
+	} else {
+		// Leave SHA empty and do not set DefaultBranch; GetFileInsideRepo will pass empty revision
+		// which the API interprets as the repo's default branch.
+		targetBranch = ""
+	}
+
+	ret, err := v.GetFileInsideRepo(ctx, nEvent, filePath, targetBranch)
+	if err != nil {
+		return false, "", err
+	}
+
+	return true, ret, nil
 }
 
 func (v *Provider) SetLogger(logger *zap.SugaredLogger) {
@@ -249,13 +335,22 @@ func (v *Provider) GetTektonDir(ctx context.Context, event *info.Event, path, pr
 }
 
 func (v *Provider) GetFileInsideRepo(ctx context.Context, event *info.Event, path, targetBranch string) (string, error) {
-	branch := event.SHA
-	// TODO: this may be buggy? we need to figure out how to get the fromSource ref
-	if targetBranch == event.DefaultBranch {
-		branch = v.defaultBranchLatestCommit
+	// Determine which revision to use when fetching the file:
+	// - If targetBranch is empty: pass empty revision so the API uses the repo's default branch.
+	// - If targetBranch equals the repo's DefaultBranch (and DefaultBranch is non-empty):
+	//   use the cached latest commit for the default branch to be precise.
+	// - Otherwise: use event.SHA (which callers can set to a specific ref/sha).
+	var revision string
+	switch {
+	case targetBranch == "":
+		revision = ""
+	case event.DefaultBranch != "" && targetBranch == event.DefaultBranch:
+		revision = v.defaultBranchLatestCommit
+	default:
+		revision = event.SHA
 	}
 
-	ret, err := v.getRaw(ctx, event, branch, path)
+	ret, err := v.getRaw(ctx, event, revision, path)
 	return ret, err
 }
 

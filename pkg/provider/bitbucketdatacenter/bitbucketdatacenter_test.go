@@ -760,3 +760,177 @@ func TestGetFiles(t *testing.T) {
 		})
 	}
 }
+
+func TestGetTaskURI(t *testing.T) {
+	tests := []struct {
+		name         string
+		wantErr      bool
+		disallowed   bool
+		eventURL     string
+		uri          string
+		ret          string
+		fileContents map[string]string
+	}{
+		{
+			name:     "Get Task URI simple test",
+			eventURL: "https://bitbucket.datacenter.example.com/projects/owner/repos/repo/browse",
+			uri:      "https://bitbucket.datacenter.example.com/projects/owner/repos/repo/browse/foo/file.txt",
+			wantErr:  false,
+			ret:      "hello moto",
+			fileContents: map[string]string{
+				"foo/file.txt": "hello moto",
+			},
+		},
+		{
+			name:     "raw URL with ref",
+			eventURL: "https://bitbucket.datacenter.example.com/projects/owner/repos/repo/browse",
+			uri:      "https://bitbucket.datacenter.example.com/projects/owner/repos/repo/raw/foo/file.txt?at=feature%2Fbranch",
+			wantErr:  false,
+			ret:      "raw ref content",
+			fileContents: map[string]string{
+				"foo/file.txt": "raw ref content",
+			},
+		},
+		{
+			name:     "raw URL without ref",
+			eventURL: "https://bitbucket.datacenter.example.com/projects/owner/repos/repo/browse",
+			uri:      "https://bitbucket.datacenter.example.com/projects/owner/repos/repo/raw/foo/file.txt",
+			wantErr:  false,
+			ret:      "raw default content",
+			fileContents: map[string]string{
+				"foo/file.txt": "raw default content",
+			},
+		},
+		{
+			name:       "not comparable host",
+			eventURL:   "https://bitbucket.datacenter.example.com/projects/owner/repos/repo/browse",
+			uri:        "https://other.example.com/projects/owner/repos/repo/browse/file.yaml",
+			disallowed: true,
+		},
+		{
+			name:       "bad uri - missing projects",
+			eventURL:   "https://bitbucket.datacenter.example.com/projects/owner/repos/repo/browse",
+			uri:        "https://bitbucket.datacenter.example.com/owner/repos/repo/browse/file.yaml",
+			disallowed: true,
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			client, mux, tearDown, tURL := bbtest.SetupBBDataCenterClient()
+			defer tearDown()
+
+			// Create the test event like existing tests
+			event := bbtest.MakeEvent(nil)
+			event.URL = tt.eventURL
+
+			provider := &Provider{
+				client:                    client,
+				baseURL:                   tURL,
+				projectKey:                event.Organization,
+				defaultBranchLatestCommit: "1234",
+			}
+
+			// Update the event URL to use the test server URL to ensure host comparison works
+			if !tt.disallowed {
+				event.URL = strings.Replace(tt.eventURL, "https://bitbucket.datacenter.example.com", tURL, 1)
+				tt.uri = strings.Replace(tt.uri, "https://bitbucket.datacenter.example.com", tURL, 1)
+
+				// Set up mock file content exactly like the GetFileInsideRepo test
+				if tt.fileContents != nil {
+					bbtest.MuxFiles(t, mux, event, "main", "foo", tt.fileContents, false)
+				}
+			}
+
+			allowed, content, err := provider.GetTaskURI(ctx, event, tt.uri)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetTaskURI() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.disallowed && allowed {
+				t.Errorf("GetTaskURI() is allowed and we want it to be disallowed")
+				return
+			} else if tt.disallowed && !allowed {
+				return // Expected disallowed case
+			}
+			if allowed && content != tt.ret {
+				t.Errorf("GetTaskURI() got = %v, want %v", content, tt.ret)
+			}
+		})
+	}
+}
+
+func TestSplitBitbucketDatacenterURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		url         string
+		wantProject string
+		wantRepo    string
+		wantPath    string
+		wantRef     string
+		wantErr     bool
+	}{
+		{
+			name:        "browse URL with ref",
+			url:         "https://bitbucket.datacenter.example.com/projects/PROJ/repos/repo/browse/path/to/file.yaml?at=main",
+			wantProject: "PROJ",
+			wantRepo:    "repo",
+			wantPath:    "path/to/file.yaml",
+			wantRef:     "main",
+		},
+		{
+			name:        "raw URL with ref",
+			url:         "https://bitbucket.datacenter.example.com/projects/PROJ/repos/repo/raw/path/to/file.yaml?at=feature%2Fbranch",
+			wantProject: "PROJ",
+			wantRepo:    "repo",
+			wantPath:    "path/to/file.yaml",
+			wantRef:     "feature/branch",
+		},
+		{
+			name:        "browse URL without ref",
+			url:         "https://bitbucket.datacenter.example.com/projects/MY-PROJ/repos/my-repo/browse/file.yaml",
+			wantProject: "MY-PROJ",
+			wantRepo:    "my-repo",
+			wantPath:    "file.yaml",
+			wantRef:     "",
+		},
+		{
+			name:    "invalid URL - missing projects",
+			url:     "https://bitbucket.datacenter.example.com/PROJ/repos/repo/browse/file.yaml",
+			wantErr: true,
+		},
+		{
+			name:    "invalid URL - missing repos",
+			url:     "https://bitbucket.datacenter.example.com/projects/PROJ/repo/browse/file.yaml",
+			wantErr: true,
+		},
+		{
+			name:    "invalid URL - missing browse/raw",
+			url:     "https://bitbucket.datacenter.example.com/projects/PROJ/repos/repo/file.yaml",
+			wantErr: true,
+		},
+		{
+			name:    "malformed URL",
+			url:     "://invalid-url",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			project, repo, path, ref, err := splitBitbucketDatacenterURL(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("splitBitbucketDatacenterURL() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				assert.Equal(t, tt.wantProject, project)
+				assert.Equal(t, tt.wantRepo, repo)
+				assert.Equal(t, tt.wantPath, path)
+				assert.Equal(t, tt.wantRef, ref)
+			}
+		})
+	}
+}
