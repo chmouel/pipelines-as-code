@@ -27,6 +27,7 @@ const (
 	headersFileFlag = "headers"
 	providerFlag    = "provider"
 	githubTokenFlag = "github-token"
+	eventTypeFlag   = "event-type"
 )
 
 //go:embed templates/help.tmpl
@@ -536,7 +537,7 @@ func detectProvider(headers map[string]string, body []byte) (string, error) {
 }
 
 func Command(ioStreams *cli.IOStreams) *cobra.Command {
-	var bodyFile, headersFile, provider, githubToken string
+	var eventType, bodyFile, headersFile, provider, githubToken string
 
 	cmd := &cobra.Command{
 		Use:   "cel",
@@ -590,6 +591,16 @@ that would be used in PipelineRun configurations.`,
 						return err
 					}
 					headers = h
+				}
+			}
+			if eventType != "" {
+				switch provider {
+				case "github", "gitea":
+					headers["X-GitHub-Event"] = eventType
+				case "bitbucket-datacenter", "bitbucket-cloud":
+					headers["X-Event-Key"] = eventType
+				case "gitlab":
+					headers["X-Gitlab-Event"] = eventType
 				}
 			}
 			// nolint:ineffassign,staticcheck
@@ -740,5 +751,6 @@ that would be used in PipelineRun configurations.`,
 	cmd.Flags().StringVarP(&headersFile, headersFileFlag, "H", "", "path to headers file (JSON, HTTP format, or gosmee-generated shell script)")
 	cmd.Flags().StringVarP(&provider, providerFlag, "p", "auto", "payload provider (auto, github, gitlab, bitbucket-cloud, bitbucket-datacenter, gitea)")
 	cmd.Flags().StringVarP(&githubToken, githubTokenFlag, "t", "", "GitHub personal access token for API enrichment (enables full event processing)")
+	cmd.Flags().StringVarP(&eventType, eventTypeFlag, "E", "", "event type when we can do auto detection")
 	return cmd
 }

@@ -52,13 +52,18 @@ func ReplacePlaceHoldersVariables(template string, dico map[string]string, rawEv
 	return keys.ParamsRe.ReplaceAllStringFunc(template, func(s string) string {
 		parts := keys.ParamsRe.FindStringSubmatch(s)
 		key := strings.TrimSpace(parts[1])
-		if strings.HasPrefix(key, "body") || strings.HasPrefix(key, "headers") || strings.HasPrefix(key, "files") {
+		if strings.HasPrefix(key, "body") || strings.HasPrefix(key, "headers") || strings.HasPrefix(key, "files") || strings.HasPrefix(key, "cel:") {
+			// remove cel: if present
 			if rawEvent != nil && headers != nil {
 				// convert headers to map[string]string
 				headerMap := make(map[string]string)
 				for k, v := range headers {
 					headerMap[k] = v[0]
 				}
+
+				key = strings.TrimPrefix(key, "cel:")
+				key = strings.TrimSpace(key)
+				key = `has(body.toCommit) && body.toCommit.parents.size() > 1 ? body.toCommit.parents[body.toCommit.parents.size() - 1].id : body.toCommit.id`
 				val, err := cel.Value(key, rawEvent, headerMap, map[string]string{}, changedFiles)
 				if err != nil {
 					return s
