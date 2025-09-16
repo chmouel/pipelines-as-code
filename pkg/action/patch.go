@@ -8,6 +8,7 @@ import (
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 	"go.uber.org/zap"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -34,29 +35,39 @@ func PatchPipelineRun(ctx context.Context, logger *zap.SugaredLogger, whatPatchi
 	if pr == nil {
 		return nil, nil
 	}
+
+	patchBytes, err := json.Marshal(mergePatch)
+	if err != nil {
+		return pr, fmt.Errorf("marshal merge patch for %q: %w", whatPatching, err)
+	}
+
+	// Double steps and duration; leaving factor/jitter as defaults to avoid overly long backoff.
+	backoff := retry.DefaultRetry
+	backoff.Steps *= 2
+	backoff.Duration *= 2
+
 	var patchedPR *tektonv1.PipelineRun
-	// double the retry; see https://issues.redhat.com/browse/SRVKP-3134
-	doubleRetry := retry.DefaultRetry
-	doubleRetry.Steps *= 2
-	doubleRetry.Duration *= 2
-	doubleRetry.Factor *= 2
-	doubleRetry.Jitter *= 2
-	err := retry.RetryOnConflict(doubleRetry, func() error {
-		patch, err := json.Marshal(mergePatch)
-		if err != nil {
-			return err
+	err = retry.OnError(backoff, apierrors.IsConflict, func() error {
+		out, patchErr := tekton.TektonV1().PipelineRuns(pr.Namespace).Patch(
+			ctx, pr.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{},
+		)
+		if patchErr != nil {
+			if apierrors.IsConflict(patchErr) {
+				logger.Infof("conflict patching PipelineRun %s/%s with %s: %v; retrying",
+					pr.Namespace, pr.Name, whatPatching, patchErr)
+			} else {
+				logger.Infof("failed to patch PipelineRun %s/%s with %s: %v",
+					pr.Namespace, pr.Name, whatPatching, patchErr)
+			}
+			return patchErr
 		}
-		patchedPR, err = tekton.TektonV1().PipelineRuns(pr.GetNamespace()).Patch(ctx, pr.GetName(), types.MergePatchType, patch, metav1.PatchOptions{})
-		if err != nil {
-			logger.Infof("could not patch Pipelinerun with %v, retrying %v/%v: %v", whatPatching, pr.GetNamespace(), pr.GetName(), err)
-			return err
-		}
-		logger.Infof("patched pipelinerun with %v: %v/%v", whatPatching, patchedPR.Namespace, patchedPR.Name)
+		patchedPR = out
+		logger.Infof("patched PipelineRun with %s: %s/%s", whatPatching, out.Namespace, out.Name)
 		return nil
 	})
 	if err != nil {
-		// return the original PipelineRun, let the caller decide what to do with it after the error is processed
-		return pr, fmt.Errorf("failed to patch pipelinerun %v/%v with %v: %w", pr.Namespace, whatPatching, pr.Name, err)
+		// Fix placeholder order
+		return pr, fmt.Errorf("failed to patch PipelineRun %s/%s with %s: %w", pr.Namespace, pr.Name, whatPatching, err)
 	}
 	return patchedPR, nil
 }
