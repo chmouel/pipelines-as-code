@@ -57,8 +57,11 @@ func (a *Analyzer) Analyze(ctx context.Context, request *AnalyzeRequest) ([]Anal
 	if request == nil {
 		return nil, fmt.Errorf("analysis request is required")
 	}
+	if request.Repository == nil {
+		return nil, nil
+	}
 
-	if request.Repository == nil || request.Repository.Spec.Settings == nil || request.Repository.Spec.Settings.AIAnalysis == nil {
+	if request.Repository.Spec.Settings == nil || request.Repository.Spec.Settings.AIAnalysis == nil {
 		a.logger.With(
 			"repository", request.Repository.Name,
 			"namespace", request.Repository.Namespace,
@@ -107,6 +110,8 @@ func (a *Analyzer) Analyze(ctx context.Context, request *AnalyzeRequest) ([]Anal
 
 	// Process each role
 	results := []AnalysisResult{}
+	contextCache := make(map[string]map[string]any)
+
 	for _, role := range config.Roles {
 		roleLogger := analysisLogger.With("role", role.Name)
 
@@ -128,27 +133,33 @@ func (a *Analyzer) Analyze(ctx context.Context, request *AnalyzeRequest) ([]Anal
 
 		roleLogger.Info("Executing analysis role")
 
-		// Build context for this role
-		context, err := a.assembler.BuildContext(
-			ctx,
-			request.PipelineRun,
-			request.Event,
-			role.ContextItems,
-			request.Provider,
-		)
-		if err != nil {
-			roleLogger.With("error", err).Warn("Failed to build context for role")
-			results = append(results, AnalysisResult{
-				Role:  role.Name,
-				Error: fmt.Errorf("context build failed: %w", err),
-			})
-			continue
+		// Build context for this role, using cache if possible
+		contextKey := getContextCacheKey(role.ContextItems)
+		var roleContext map[string]any
+		var cached bool
+		if roleContext, cached = contextCache[contextKey]; !cached {
+			roleContext, err = a.assembler.BuildContext(
+				ctx,
+				request.PipelineRun,
+				request.Event,
+				role.ContextItems,
+				request.Provider,
+			)
+			if err != nil {
+				roleLogger.With("error", err).Warn("Failed to build context for role")
+				results = append(results, AnalysisResult{
+					Role:  role.Name,
+					Error: fmt.Errorf("context build failed: %w", err),
+				})
+				continue
+			}
+			contextCache[contextKey] = roleContext
 		}
 
 		// Create analysis request
 		analysisRequest := &ltypes.AnalysisRequest{
 			Prompt:         role.Prompt,
-			Context:        context,
+			Context:        roleContext,
 			JSONOutput:     role.JSONOutput,
 			MaxTokens:      config.MaxTokens,
 			TimeoutSeconds: config.TimeoutSeconds,
@@ -166,7 +177,7 @@ func (a *Analyzer) Analyze(ctx context.Context, request *AnalyzeRequest) ([]Anal
 			"max_tokens", analysisRequest.MaxTokens,
 			"timeout_seconds", analysisRequest.TimeoutSeconds,
 			"json_output", analysisRequest.JSONOutput,
-			"context_items", len(context),
+			"context_items", len(roleContext),
 		).Debug("Sending analysis request to LLM")
 
 		// Perform analysis
@@ -206,6 +217,20 @@ func (a *Analyzer) Analyze(ctx context.Context, request *AnalyzeRequest) ([]Anal
 	).Info("LLM analysis completed")
 
 	return results, nil
+}
+
+// getContextCacheKey generates a unique key for a context configuration.
+func getContextCacheKey(config *v1alpha1.ContextConfig) string {
+	if config == nil {
+		return "default"
+	}
+	return fmt.Sprintf("commit:%t-pr:%t-error:%t-logs:%t-%d",
+		config.CommitContent,
+		config.PRContent,
+		config.ErrorContent,
+		config.ContainerLogs != nil && config.ContainerLogs.Enabled,
+		config.ContainerLogs.GetMaxLines(),
+	)
 }
 
 // countSuccessfulResults counts the number of successful analysis results.

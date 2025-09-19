@@ -416,6 +416,13 @@ type ContainerLogsConfig struct {
 	MaxLines int `json:"max_lines,omitempty"`
 }
 
+func (c *ContainerLogsConfig) GetMaxLines() int {
+	if c == nil {
+		return 0
+	}
+	return c.MaxLines
+}
+
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // RepositoryList is the list of Repositories.
