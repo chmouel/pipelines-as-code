@@ -11,7 +11,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm/providers/openai"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/secrets/types"
-	"go.uber.org/zap"
 )
 
 // ClientConfig holds the configuration needed to create LLM clients.
@@ -57,9 +56,7 @@ func (f *Factory) CreateClient(ctx context.Context, config *ClientConfig, namesp
 		return nil, fmt.Errorf("failed to create %s client: %w", config.Provider, err)
 	}
 
-	// Wrap with resilient client for retry and circuit breaker functionality
-	logger := f.getLogger()
-	return NewResilientClient(baseClient, logger), nil
+	return baseClient, nil
 }
 
 // ValidateConfig validates the client configuration.
@@ -155,16 +152,6 @@ func (f *Factory) applyDefaults(timeoutSeconds, maxTokens int) (int, int) {
 		maxTokens = llmtypes.DefaultConfig.MaxTokens
 	}
 	return timeoutSeconds, maxTokens
-}
-
-// getLogger returns the logger from run.Clients.Log or creates a development logger.
-func (f *Factory) getLogger() *zap.SugaredLogger {
-	if f.run.Clients.Log != nil {
-		return f.run.Clients.Log
-	}
-	// Create a basic logger if none is available
-	devLogger, _ := zap.NewDevelopment()
-	return devLogger.Sugar()
 }
 
 // createProviderClient creates a provider-specific client.

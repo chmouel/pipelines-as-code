@@ -181,15 +181,36 @@ func (a *Analyzer) Analyze(ctx context.Context, request *AnalyzeRequest) ([]Anal
 		).Debug("Sending analysis request to LLM")
 
 		// Perform analysis
+		var response *ltypes.AnalysisResponse
 		analysisStart := time.Now()
-		response, err := client.Analyze(ctx, analysisRequest)
+
+		const maxRetries = 3
+		const retryDelay = 2 * time.Second
+
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			var err error
+			response, err = client.Analyze(ctx, analysisRequest)
+			if err == nil {
+				break // Success
+			}
+
+			roleLogger.With(
+				"error", err,
+				"attempt", attempt,
+				"max_attempts", maxRetries,
+			).Warn("LLM analysis attempt failed")
+
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+			}
+		}
 		analysisDuration := time.Since(analysisStart)
 
 		if err != nil {
 			roleLogger.With(
 				"error", err,
 				"duration", analysisDuration,
-			).Warn("LLM analysis failed for role")
+			).Warn("LLM analysis failed for role after all retries")
 			results = append(results, AnalysisResult{
 				Role:  role.Name,
 				Error: err,
