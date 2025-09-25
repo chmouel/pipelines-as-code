@@ -103,11 +103,8 @@ func (c *Client) Analyze(ctx context.Context, request *ltypes.AnalysisRequest) (
 	}
 
 	if request.JSONOutput {
-		// For JSON output, we add instruction to the prompt
-		// Gemini doesn't have a specific JSON mode like OpenAI
-		if !strings.Contains(fullPrompt, "JSON") && !strings.Contains(fullPrompt, "json") {
-			apiRequest.Contents[0].Parts[0].Text = fullPrompt + "\n\nPlease respond with valid JSON format only."
-		}
+		// For robust JSON, use Gemini's JSON mode
+		apiRequest.GenerationConfig.ResponseMimeType = "application/json"
 	}
 
 	// Marshal request
@@ -265,6 +262,27 @@ func (c *Client) buildPrompt(request *ltypes.AnalysisRequest) (string, error) {
 	promptBuilder.WriteString(request.Prompt)
 	promptBuilder.WriteString("\n\n")
 
+	// If JSON output is requested, provide the schema in the prompt.
+	if request.JSONOutput {
+		promptBuilder.WriteString("You must respond in valid JSON format. The JSON object must conform to the following schema:\n")
+		promptBuilder.WriteString("```json\n")
+		promptBuilder.WriteString(`
+{
+  "analysis_summary": "string",
+  "issues": [
+    {
+      "file_path": "string",
+      "line_number": "integer",
+      "severity": "string (e.g., 'error', 'warning', 'info')",
+      "error_message": "string",
+      "suggestion": "string"
+    }
+  ]
+}
+`)
+		promptBuilder.WriteString("\n```\n\n")
+	}
+
 	// Add context sections
 	if len(request.Context) > 0 {
 		promptBuilder.WriteString("Context Information:\n")
@@ -308,7 +326,8 @@ type geminiPart struct {
 }
 
 type geminiGenerationConfig struct {
-	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
+	MaxOutputTokens  int    `json:"maxOutputTokens,omitempty"`
+	ResponseMimeType string `json:"responseMimeType,omitempty"`
 }
 
 type geminiResponse struct {
