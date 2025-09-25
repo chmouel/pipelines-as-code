@@ -334,7 +334,7 @@ spec:
                     Settings contains the configuration settings for the repository, including
                     authorization policies, provider-specific configuration, and provenance settings.
                   properties:
-                    ai_analysis:
+                    ai:
                       description: AIAnalysis contains AI/LLM analysis configuration for automated CI/CD pipeline analysis.
                       properties:
                         enabled:
@@ -409,12 +409,7 @@ spec:
                             type: object
                           minItems: 1
                           type: array
-                        timeout_seconds:
-                          description: 'TimeoutSeconds sets the maximum time to wait for LLM analysis (default: 30)'
-                          maximum: 300
-                          minimum: 1
-                          type: integer
-                        token_secret_ref:
+                        secret_ref:
                           description: TokenSecretRef references the Kubernetes secret containing the LLM provider API token
                           properties:
                             key:
@@ -426,11 +421,16 @@ spec:
                           required:
                             - name
                           type: object
+                        timeout_seconds:
+                          description: 'TimeoutSeconds sets the maximum time to wait for LLM analysis (default: 30)'
+                          maximum: 300
+                          minimum: 1
+                          type: integer
                       required:
                         - enabled
                         - provider
                         - roles
-                        - token_secret_ref
+                        - secret_ref
                       type: object
                     github:
                       properties:

@@ -11,7 +11,7 @@ spec:
 
   settings:
     # AI Analysis Configuration
-    ai_analysis:
+    ai:
       enabled: true
       # can be gemini
       provider: "openai"
