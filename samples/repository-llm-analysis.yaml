@@ -13,12 +13,15 @@ spec:
     # AI Analysis Configuration
     ai:
       enabled: true
-      # can be gemini
+      # Supported providers: "openai" or "gemini"
       provider: "openai"
       timeout_seconds: 30
       max_tokens: 1000
 
       # Reference to Kubernetes secret containing LLM API token
+      # The secret must exist in the same namespace as this Repository
+      # For OpenAI: token should be your OpenAI API key (sk-...)
+      # For Gemini: token should be your Google AI API key
       token_secret_ref:
         name: "openai-api-key"
         key: "token"
@@ -104,6 +107,8 @@ spec:
             commit_content: true
 
           # Store as annotations for programmatic access
+          # Analysis data is stored as JSON in annotation: pipelinesascode.tekton.dev/llm-analysis-<role>
+          # Content is automatically truncated if it exceeds 200KB
           output: "annotation"
 
 ---
@@ -130,7 +135,7 @@ spec:
   url: "https://github.com/example/gemini-project"
 
   settings:
-    ai_analysis:
+    ai:
       enabled: true
       provider: "gemini"
       timeout_seconds: 45

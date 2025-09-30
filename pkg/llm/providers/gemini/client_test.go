@@ -13,10 +13,10 @@ import (
 
 type mockTransport struct {
 	response *http.Response
-	err error
+	err      error
 }
 
-func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (m *mockTransport) RoundTrip(_ *http.Request) (*http.Response, error) {
 	return m.response, m.err
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -356,28 +357,11 @@ func TestClient_BuildPrompt(t *testing.T) {
 			assert.NilError(t, err)
 
 			for _, expected := range tt.expectedContent {
-				assert.Assert(t, containsString(prompt, expected),
+				assert.Assert(t, strings.Contains(prompt, expected),
 					"expected prompt to contain '%s', got: %s", expected, prompt)
 			}
 		})
 	}
-}
-
-func containsString(text, substr string) bool {
-	return len(text) >= len(substr) &&
-		(len(substr) == 0 || findSubstring(text, substr))
-}
-
-func findSubstring(text, substr string) bool {
-	if len(substr) == 0 {
-		return true
-	}
-	for i := 0; i <= len(text)-len(substr); i++ {
-		if text[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestClient_Timeout(t *testing.T) {
