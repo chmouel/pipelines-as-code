@@ -32,7 +32,14 @@ func NewOrchestrator(run *params.Run, kinteract kubeinteraction.Interface, logge
 }
 
 // ExecuteAnalysis performs the complete LLM analysis workflow.
-func (o *Orchestrator) ExecuteAnalysis(ctx context.Context, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun, event *info.Event, prov provider.Interface) error {
+func (o *Orchestrator) ExecuteAnalysis(
+	ctx context.Context,
+	repo *v1alpha1.Repository,
+	pr *tektonv1.PipelineRun,
+	event *info.Event,
+	prov provider.Interface,
+	secretNamespace string,
+) error {
 	// Check if AI analysis is configured and enabled
 	if repo.Spec.Settings == nil || repo.Spec.Settings.AIAnalysis == nil || !repo.Spec.Settings.AIAnalysis.Enabled {
 		o.logger.Debug("AI analysis not configured or disabled, skipping")
@@ -46,10 +53,11 @@ func (o *Orchestrator) ExecuteAnalysis(ctx context.Context, repo *v1alpha1.Repos
 
 	// Create analysis request
 	request := &AnalyzeRequest{
-		PipelineRun: pr,
-		Event:       event,
-		Repository:  repo,
-		Provider:    prov,
+		PipelineRun:     pr,
+		Event:           event,
+		Repository:      repo,
+		Provider:        prov,
+		SecretNamespace: secretNamespace,
 	}
 
 	// Perform analysis

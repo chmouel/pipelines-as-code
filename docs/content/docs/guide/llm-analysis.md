@@ -194,7 +194,7 @@ kubectl create secret generic gemini-api-key \
 
 ## Example: Complete Configuration
 
-See the [complete example](https://github.com/openshift-pipelines/pipelines-as-code/blob/main/samples/repository-llm-analysis.yaml) for a full configuration with multiple roles.
+See the [complete example](https://github.com/openshift-pipelines/pipelines-as-code/blob/main/samples/repository-llm.yaml) for a full configuration with multiple roles.
 
 ## Best Practices
 
@@ -210,12 +210,12 @@ Example prompt:
 ```yaml
 prompt: |
   You are a DevOps expert analyzing a CI/CD pipeline failure.
-  
+
   Based on the error logs and context provided:
   1. Identify the root cause of the failure
   2. Suggest 2-3 specific steps to fix the issue
   3. Recommend one preventive measure for the future
-  
+
   Keep your response concise and actionable.
 ```
 

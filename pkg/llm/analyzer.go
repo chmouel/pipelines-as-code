@@ -46,10 +46,11 @@ func NewAnalyzer(run *params.Run, kinteract kubeinteraction.Interface, logger *z
 
 // AnalyzeRequest represents a request for LLM analysis.
 type AnalyzeRequest struct {
-	PipelineRun *tektonv1.PipelineRun
-	Event       *info.Event
-	Repository  *v1alpha1.Repository
-	Provider    provider.Interface
+	PipelineRun     *tektonv1.PipelineRun
+	Event           *info.Event
+	Repository      *v1alpha1.Repository
+	Provider        provider.Interface
+	SecretNamespace string
 }
 
 // Analyze performs LLM analysis based on the repository configuration.
@@ -95,7 +96,12 @@ func (a *Analyzer) Analyze(ctx context.Context, request *AnalyzeRequest) ([]Anal
 	}
 
 	// Create LLM client
-	client, err := a.createClient(ctx, config, request.Repository.Namespace)
+	namespace := request.Repository.Namespace
+	if request.SecretNamespace != "" {
+		namespace = request.SecretNamespace
+	}
+
+	client, err := a.createClient(ctx, config, namespace)
 	if err != nil {
 		analysisLogger.With("error", err).Error("Failed to create LLM client")
 		return nil, fmt.Errorf("failed to create LLM client: %w", err)
