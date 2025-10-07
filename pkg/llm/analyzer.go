@@ -207,7 +207,20 @@ func (a *Analyzer) Analyze(ctx context.Context, request *AnalyzeRequest) ([]Anal
 			).Warn("LLM analysis attempt failed")
 
 			if attempt < maxRetries {
-				time.Sleep(retryDelay)
+				timer := time.NewTimer(retryDelay)
+				select {
+				case <-timer.C:
+				case <-ctx.Done():
+					roleLogger.With("context_error", ctx.Err()).Warn("Context cancelled during retry backoff")
+					err = fmt.Errorf("context cancelled: %w", ctx.Err())
+					attempt = maxRetries
+				}
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
 			}
 		}
 		analysisDuration := time.Since(analysisStart)
