@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -146,11 +146,11 @@ func TestClient_Analyze(t *testing.T) {
 				TimeoutSeconds: 30,
 			},
 			mockResponse: `{
-				"id": "test-id",
-				"object": "chat.completion",
-				"choices": [
-					{
-						"index": 0,
+                "id": "test-id",
+                "object": "chat.completion",
+                "choices": [
+                    {
+                        "index": 0,
 						"message": {
 							"role": "assistant",
 							"content": "This is a test analysis response"
@@ -262,34 +262,24 @@ func TestClient_Analyze(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create mock server
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request method and headers
+			mockClient := makeMockHTTPClient(tt.mockStatusCode, tt.mockResponse, func(r *http.Request) {
 				assert.Equal(t, r.Method, "POST")
 				assert.Equal(t, r.Header.Get("Content-Type"), "application/json")
 				assert.Assert(t, r.Header.Get("Authorization") != "", "expected authorization header")
 
-				// Verify request body structure
 				var reqBody openaiRequest
 				err := json.NewDecoder(r.Body).Decode(&reqBody)
 				assert.NilError(t, err)
 				assert.Equal(t, reqBody.Model, defaultModel)
 				assert.Assert(t, len(reqBody.Messages) > 0, "expected messages in request")
+			})
 
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tt.mockStatusCode)
-				_, _ = w.Write([]byte(tt.mockResponse))
-			}))
-			defer server.Close()
-
-			// Create client with mock server URL
 			client, err := NewClient(&Config{
-				APIKey:  "test-key",
-				BaseURL: server.URL,
+				APIKey:     "test-key",
+				HTTPClient: mockClient,
 			})
 			assert.NilError(t, err)
 
-			// Make analysis request
 			ctx := context.Background()
 			resp, err := client.Analyze(ctx, tt.request)
 
@@ -365,24 +355,30 @@ func TestClient_BuildPrompt(t *testing.T) {
 }
 
 func TestClient_Timeout(t *testing.T) {
-	// Create a server that delays response
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(100 * time.Millisecond) // Delay longer than client timeout
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"choices": [{"message": {"content": "response"}}], "usage": {"total_tokens": 10}}`))
-	}))
-	defer server.Close()
+	slowTransport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		select {
+		case <-time.After(100 * time.Millisecond):
+			body := `{"choices": [{"message": {"content": "response"}}], "usage": {"total_tokens": 10}}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}, nil
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+	})
 
-	// Create client with very short timeout
+	customClient := &http.Client{
+		Timeout:   50 * time.Millisecond,
+		Transport: slowTransport,
+	}
+
 	client, err := NewClient(&Config{
-		APIKey:         "test-key",
-		BaseURL:        server.URL,
-		TimeoutSeconds: 1, // Very short timeout that will be converted to milliseconds in http.Client
+		APIKey:     "test-key",
+		HTTPClient: customClient,
 	})
 	assert.NilError(t, err)
-
-	// Override the HTTP client timeout to be very short for testing
-	client.httpClient.Timeout = 50 * time.Millisecond
 
 	ctx := context.Background()
 	request := &ltypes.AnalysisRequest{
@@ -393,9 +389,32 @@ func TestClient_Timeout(t *testing.T) {
 	_, err = client.Analyze(ctx, request)
 	assert.Assert(t, err != nil, "expected timeout error")
 
-	// Check if it's a timeout-related error
 	var analysisErr *ltypes.AnalysisError
 	assert.Assert(t, errors.As(err, &analysisErr), "expected AnalysisError")
 	assert.Equal(t, analysisErr.Type, "http_error")
 	assert.Assert(t, analysisErr.Retryable, "timeout errors should be retryable")
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func makeMockHTTPClient(statusCode int, body string, onRequest func(*http.Request)) *http.Client {
+	return &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if onRequest != nil {
+				onRequest(req)
+			}
+
+			resp := &http.Response{
+				StatusCode: statusCode,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}
+			resp.Header.Set("Content-Type", "application/json")
+			return resp, nil
+		}),
+	}
 }

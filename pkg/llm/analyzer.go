@@ -188,20 +188,20 @@ func (a *Analyzer) Analyze(ctx context.Context, request *AnalyzeRequest) ([]Anal
 
 		// Perform analysis
 		var response *ltypes.AnalysisResponse
+		var analysisErr error
 		analysisStart := time.Now()
 
 		const maxRetries = 3
 		const retryDelay = 2 * time.Second
 
 		for attempt := 1; attempt <= maxRetries; attempt++ {
-			var err error
-			response, err = client.Analyze(ctx, analysisRequest)
-			if err == nil {
+			response, analysisErr = client.Analyze(ctx, analysisRequest)
+			if analysisErr == nil {
 				break // Success
 			}
 
 			roleLogger.With(
-				"error", err,
+				"error", analysisErr,
 				"attempt", attempt,
 				"max_attempts", maxRetries,
 			).Warn("LLM analysis attempt failed")
@@ -212,7 +212,7 @@ func (a *Analyzer) Analyze(ctx context.Context, request *AnalyzeRequest) ([]Anal
 				case <-timer.C:
 				case <-ctx.Done():
 					roleLogger.With("context_error", ctx.Err()).Warn("Context cancelled during retry backoff")
-					err = fmt.Errorf("context cancelled: %w", ctx.Err())
+					analysisErr = fmt.Errorf("context cancelled: %w", ctx.Err())
 					attempt = maxRetries
 				}
 				if !timer.Stop() {
@@ -225,14 +225,14 @@ func (a *Analyzer) Analyze(ctx context.Context, request *AnalyzeRequest) ([]Anal
 		}
 		analysisDuration := time.Since(analysisStart)
 
-		if err != nil {
+		if analysisErr != nil {
 			roleLogger.With(
-				"error", err,
+				"error", analysisErr,
 				"duration", analysisDuration,
 			).Warn("LLM analysis failed for role after all retries")
 			results = append(results, AnalysisResult{
 				Role:  role.Name,
-				Error: err,
+				Error: analysisErr,
 			})
 			continue
 		}

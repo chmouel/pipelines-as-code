@@ -252,6 +252,72 @@ func TestAnalyzer_ValidateConfig(t *testing.T) {
 	}
 }
 
+func TestAnalyzer_ShouldTriggerRoleEvaluations(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	run := &params.Run{}
+	kinteract := &kubeinteraction.Interaction{}
+	analyzer := NewAnalyzer(run, kinteract, logger)
+
+	celContext := map[string]any{
+		"body": map[string]any{
+			"event": map[string]any{
+				"event_type": "pull_request",
+			},
+			"pipelineRun": map[string]any{
+				"status": map[string]any{
+					"conditions": []map[string]any{
+						{
+							"reason": "Failed",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		role      v1alpha1.AnalysisRole
+		want      bool
+		wantError bool
+	}{
+		{
+			name: "no expression returns true",
+			role: v1alpha1.AnalysisRole{},
+			want: true,
+		},
+		{
+			name: "expression evaluates true",
+			role: v1alpha1.AnalysisRole{OnCEL: "body.event.event_type == \"pull_request\""},
+			want: true,
+		},
+		{
+			name: "expression evaluates false",
+			role: v1alpha1.AnalysisRole{OnCEL: "body.event.event_type == \"push\""},
+			want: false,
+		},
+		{
+			name:      "invalid expression",
+			role:      v1alpha1.AnalysisRole{OnCEL: "body.event.event_type ="},
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := analyzer.shouldTriggerRole(tt.role, celContext)
+
+			if tt.wantError {
+				assert.Assert(t, err != nil, "expected error but got none")
+				return
+			}
+
+			assert.NilError(t, err)
+			assert.Equal(t, got, tt.want)
+		})
+	}
+}
+
 func TestAnalyzer_ShouldTriggerRole(t *testing.T) {
 	logger, _ := logger.GetLogger()
 	run := &params.Run{}

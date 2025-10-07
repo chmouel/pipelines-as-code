@@ -29,6 +29,7 @@ type Config struct {
 	Model          string
 	TimeoutSeconds int
 	MaxTokens      int
+	HTTPClient     *http.Client
 }
 
 // Client implements the LLM interface for OpenAI.
@@ -61,11 +62,18 @@ func NewClient(config *Config) (*Client, error) {
 		config.MaxTokens = defaultMaxTokens
 	}
 
+	httpClient := config.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{}
+	}
+
+	if config.TimeoutSeconds > 0 && httpClient.Timeout == 0 {
+		httpClient.Timeout = time.Duration(config.TimeoutSeconds) * time.Second
+	}
+
 	client := &Client{
-		config: config,
-		httpClient: &http.Client{
-			Timeout: time.Duration(config.TimeoutSeconds) * time.Second,
-		},
+		config:     config,
+		httpClient: httpClient,
 	}
 
 	return client, nil
