@@ -240,6 +240,8 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	// Perform LLM analysis if configured (best-effort, non-blocking)
 	if err := r.performLLMAnalysis(ctx, logger, repo, newPr, event, provider, r.secretNS); err != nil {
 		logger.Warnf("LLM analysis failed (non-blocking): %v", err)
+		r.eventEmitter.EmitMessage(repo, zap.WarnLevel, "LLMAnalysisFailed",
+			fmt.Sprintf("AI/LLM analysis failed for pipeline run %s: %v", newPr.Name, err))
 	}
 
 	if err := r.updateRepoRunStatus(ctx, logger, newPr, repo, event); err != nil {
