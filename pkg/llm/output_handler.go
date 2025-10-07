@@ -12,6 +12,7 @@ import (
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 )
 
 // OutputHandler handles the output of LLM analysis results to various destinations.
@@ -114,20 +115,52 @@ func (h *OutputHandler) handleAnnotation(ctx context.Context, result AnalysisRes
 		return fmt.Errorf("no response to store in annotations")
 	}
 
-	// Get the latest version of the PipelineRun to avoid conflicts
-	latestPR, err := h.run.Clients.Tekton.TektonV1().PipelineRuns(pr.Namespace).Get(
-		ctx,
-		pr.Name,
-		metav1.GetOptions{},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to get PipelineRun: %w", err)
-	}
-
 	// Prepare annotation key
 	annotationKey := fmt.Sprintf("pipelinesascode.tekton.dev/llm-analysis-%s", result.Role)
 
-	// Prepare annotation value with metadata
+	annotationValue, err := buildAnnotationValue(result, h.logger)
+	if err != nil {
+		return err
+	}
+
+	annotationSize := len(annotationValue)
+
+	updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latestPR, err := h.run.Clients.Tekton.TektonV1().PipelineRuns(pr.Namespace).Get(
+			ctx,
+			pr.Name,
+			metav1.GetOptions{},
+		)
+		if err != nil {
+			return fmt.Errorf("failed to get PipelineRun: %w", err)
+		}
+
+		if latestPR.Annotations == nil {
+			latestPR.Annotations = make(map[string]string)
+		}
+		latestPR.Annotations[annotationKey] = annotationValue
+
+		if _, err := h.run.Clients.Tekton.TektonV1().PipelineRuns(latestPR.Namespace).Update(
+			ctx,
+			latestPR,
+			metav1.UpdateOptions{},
+		); err != nil {
+			return err
+		}
+		return nil
+	})
+	if updateErr != nil {
+		return fmt.Errorf("failed to update PipelineRun annotations: %w", updateErr)
+	}
+
+	h.logger.Infof("Successfully stored LLM analysis for role %s in PipelineRun annotations (size: %d bytes)",
+		result.Role, annotationSize)
+	return nil
+}
+
+func buildAnnotationValue(result AnalysisResult, logger *zap.SugaredLogger) (string, error) {
+	const maxAnnotationSize = 200000
+
 	analysisData := map[string]interface{}{
 		"role":        result.Role,
 		"provider":    result.Response.Provider,
@@ -137,66 +170,46 @@ func (h *OutputHandler) handleAnnotation(ctx context.Context, result AnalysisRes
 		"content":     result.Response.Content,
 	}
 
-	// If JSON output was requested and parsed, include it
 	if result.Response.JSONParsed != nil {
 		analysisData["json_parsed"] = result.Response.JSONParsed
 	}
 
-	// Marshal to JSON
 	jsonData, err := json.Marshal(analysisData)
 	if err != nil {
-		return fmt.Errorf("failed to marshal analysis data: %w", err)
+		return "", fmt.Errorf("failed to marshal analysis data: %w", err)
 	}
 
-	// Check size and truncate if necessary
-	// Kubernetes annotation limit is 256KB, we use 200KB as safe limit
-	const maxAnnotationSize = 200000
 	annotationValue := string(jsonData)
-
-	if len(annotationValue) > maxAnnotationSize {
-		h.logger.Warnf("Analysis content for role %s exceeds size limit (%d bytes), truncating",
-			result.Role, len(annotationValue))
-
-		// Try to truncate just the content field
-		content := result.Response.Content
-		availableSize := maxAnnotationSize - (len(annotationValue) - len(content)) - 100 // buffer for truncation message
-
-		if availableSize > 0 {
-			truncationMsg := "\n\n...[Content truncated due to size limits]"
-			if availableSize > len(truncationMsg) {
-				analysisData["content"] = content[:availableSize-len(truncationMsg)] + truncationMsg
-			} else {
-				analysisData["content"] = "[Content too large to store]"
-			}
-			analysisData["truncated"] = true
-
-			jsonData, err = json.Marshal(analysisData)
-			if err != nil {
-				return fmt.Errorf("failed to marshal truncated analysis data: %w", err)
-			}
-			annotationValue = string(jsonData)
-		} else {
-			return fmt.Errorf("analysis content too large to store in annotations even after truncation")
-		}
+	if len(annotationValue) <= maxAnnotationSize {
+		return annotationValue, nil
 	}
 
-	// Update annotations
-	if latestPR.Annotations == nil {
-		latestPR.Annotations = make(map[string]string)
-	}
-	latestPR.Annotations[annotationKey] = annotationValue
-
-	// Patch the PipelineRun
-	_, err = h.run.Clients.Tekton.TektonV1().PipelineRuns(latestPR.Namespace).Update(
-		ctx,
-		latestPR,
-		metav1.UpdateOptions{},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update PipelineRun annotations: %w", err)
-	}
-
-	h.logger.Infof("Successfully stored LLM analysis for role %s in PipelineRun annotations (size: %d bytes)",
+	logger.Warnf("Analysis content for role %s exceeds size limit (%d bytes), truncating",
 		result.Role, len(annotationValue))
-	return nil
+
+	content := result.Response.Content
+	availableSize := maxAnnotationSize - (len(annotationValue) - len(content)) - 100
+	if availableSize <= 0 {
+		return "", fmt.Errorf("analysis content too large to store in annotations even after truncation")
+	}
+
+	truncationMsg := "\n\n...[Content truncated due to size limits]"
+	if availableSize > len(truncationMsg) {
+		analysisData["content"] = content[:availableSize-len(truncationMsg)] + truncationMsg
+	} else {
+		analysisData["content"] = "[Content too large to store]"
+	}
+	analysisData["truncated"] = true
+
+	jsonData, err = json.Marshal(analysisData)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal truncated analysis data: %w", err)
+	}
+
+	annotationValue = string(jsonData)
+	if len(annotationValue) > maxAnnotationSize {
+		return "", fmt.Errorf("analysis content too large to store in annotations even after truncation")
+	}
+
+	return annotationValue, nil
 }
