@@ -1,5 +1,10 @@
 package v1alpha1
 
+const (
+	// DefaultContainerLogsMaxLines is the default maximum number of log lines to fetch per container.
+	DefaultContainerLogsMaxLines = 50
+)
+
 // AIAnalysisConfig defines configuration for AI/LLM-powered analysis of CI/CD pipeline events.
 type AIAnalysisConfig struct {
 	// Enabled controls whether AI analysis is active for this repository
@@ -93,8 +98,8 @@ type ContainerLogsConfig struct {
 }
 
 func (c *ContainerLogsConfig) GetMaxLines() int {
-	if c == nil {
-		return 0
+	if c == nil || c.MaxLines == 0 {
+		return DefaultContainerLogsMaxLines
 	}
 	return c.MaxLines
 }
