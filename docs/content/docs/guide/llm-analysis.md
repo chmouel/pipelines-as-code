@@ -95,7 +95,7 @@ Control what information is sent to the LLM:
 | `pr_content` | boolean | Include PR title, description, metadata |
 | `error_content` | boolean | Include error messages and failures |
 | `container_logs.enabled` | boolean | Include container/task logs |
-| `container_logs.max_lines` | integer | Limit log lines (1-1000, default: 50) |
+| `container_logs.max_lines` | integer | Limit log lines (1-1000, default: 50). ⚠️ High values may impact performance |
 
 ## CEL Expressions for Triggers
 
@@ -238,7 +238,8 @@ prompt: |
 1. **Set reasonable timeouts**: Default 30s is usually sufficient
 2. **Non-blocking design**: Analysis runs in background, doesn't block pipeline
 3. **Selective context**: Only include relevant context items
-4. **Monitor failures**: Check logs if analysis consistently fails
+4. **Limit log fetching**: Setting `container_logs.max_lines` too high (>500) can impact performance when fetching logs from many containers. Start with lower values (50-100) and increase only if needed
+5. **Monitor failures**: Check logs if analysis consistently fails
 
 ## Troubleshooting
 
