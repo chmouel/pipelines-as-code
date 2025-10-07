@@ -118,7 +118,7 @@ func (h *OutputHandler) handleAnnotation(ctx context.Context, result AnalysisRes
 	// Prepare annotation key
 	annotationKey := fmt.Sprintf("pipelinesascode.tekton.dev/llm-analysis-%s", result.Role)
 
-	annotationValue, err := buildAnnotationValue(result, h.logger)
+	annotationValue, wasTruncated, err := buildAnnotationValue(result, h.logger)
 	if err != nil {
 		return err
 	}
@@ -153,12 +153,17 @@ func (h *OutputHandler) handleAnnotation(ctx context.Context, result AnalysisRes
 		return fmt.Errorf("failed to update PipelineRun annotations: %w", updateErr)
 	}
 
-	h.logger.Infof("Successfully stored LLM analysis for role %s in PipelineRun annotations (size: %d bytes)",
-		result.Role, annotationSize)
+	if wasTruncated {
+		h.logger.Warnf("Stored LLM analysis for role %s in PipelineRun annotations (size: %d bytes) - content was truncated due to size limits",
+			result.Role, annotationSize)
+	} else {
+		h.logger.Infof("Successfully stored LLM analysis for role %s in PipelineRun annotations (size: %d bytes)",
+			result.Role, annotationSize)
+	}
 	return nil
 }
 
-func buildAnnotationValue(result AnalysisResult, logger *zap.SugaredLogger) (string, error) {
+func buildAnnotationValue(result AnalysisResult, logger *zap.SugaredLogger) (string, bool, error) {
 	const maxAnnotationSize = 200000
 
 	analysisData := map[string]interface{}{
@@ -176,12 +181,12 @@ func buildAnnotationValue(result AnalysisResult, logger *zap.SugaredLogger) (str
 
 	jsonData, err := json.Marshal(analysisData)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal analysis data: %w", err)
+		return "", false, fmt.Errorf("failed to marshal analysis data: %w", err)
 	}
 
 	annotationValue := string(jsonData)
 	if len(annotationValue) <= maxAnnotationSize {
-		return annotationValue, nil
+		return annotationValue, false, nil
 	}
 
 	logger.Warnf("Analysis content for role %s exceeds size limit (%d bytes), truncating",
@@ -190,7 +195,7 @@ func buildAnnotationValue(result AnalysisResult, logger *zap.SugaredLogger) (str
 	content := result.Response.Content
 	availableSize := maxAnnotationSize - (len(annotationValue) - len(content)) - 100
 	if availableSize <= 0 {
-		return "", fmt.Errorf("analysis content too large to store in annotations even after truncation")
+		return "", false, fmt.Errorf("analysis content too large to store in annotations even after truncation")
 	}
 
 	truncationMsg := "\n\n...[Content truncated due to size limits]"
@@ -203,13 +208,13 @@ func buildAnnotationValue(result AnalysisResult, logger *zap.SugaredLogger) (str
 
 	jsonData, err = json.Marshal(analysisData)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal truncated analysis data: %w", err)
+		return "", false, fmt.Errorf("failed to marshal truncated analysis data: %w", err)
 	}
 
 	annotationValue = string(jsonData)
 	if len(annotationValue) > maxAnnotationSize {
-		return "", fmt.Errorf("analysis content too large to store in annotations even after truncation")
+		return "", false, fmt.Errorf("analysis content too large to store in annotations even after truncation")
 	}
 
-	return annotationValue, nil
+	return annotationValue, true, nil
 }
