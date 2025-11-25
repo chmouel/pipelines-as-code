@@ -377,7 +377,7 @@ func TestRun(t *testing.T) {
 			finalStatusText: "directory for this repository",
 		},
 		{
-			name: "Skipped/Test no repositories match",
+			name: "Error/Test no repositories match",
 			runevent: info.Event{
 				SHA:           "principale",
 				Organization:  "organizationes",
@@ -390,8 +390,8 @@ func TestRun(t *testing.T) {
 				TriggerTarget: "pull_request",
 			},
 			tektondir:       "",
-			finalStatus:     "skipped",
-			finalStatusText: "not find a namespace match",
+			finalStatus:     "failure",
+			finalStatusText: "No Pipelines-as-Code Repository CR found matching URL",
 			repositories: []*v1alpha1.Repository{
 				testnewrepo.NewRepo(
 					testnewrepo.RepoTestcreationOpts{

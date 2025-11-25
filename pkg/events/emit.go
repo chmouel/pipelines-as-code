@@ -22,12 +22,74 @@ func NewEventEmitter(client kubernetes.Interface, logger *zap.SugaredLogger) *Ev
 }
 
 type EventEmitter struct {
-	client kubernetes.Interface
-	logger *zap.SugaredLogger
+	client              kubernetes.Interface
+	logger              *zap.SugaredLogger
+	controllerNamespace string
 }
 
 func (e *EventEmitter) SetLogger(logger *zap.SugaredLogger) {
 	e.logger = logger
+}
+
+// SetControllerNamespace sets the controller namespace for emitting events
+// when no Repository CR is available.
+func (e *EventEmitter) SetControllerNamespace(ns string) {
+	e.controllerNamespace = ns
+}
+
+// EmitControllerEvent emits a Kubernetes event in the controller namespace
+// when no Repository CR is available (e.g., before repo matching or on parse errors).
+// This allows visibility into webhook processing errors even without a matched repository.
+func (e *EventEmitter) EmitControllerEvent(reason, message, sourceURL, sha string) {
+	// Always log the message
+	if e.logger != nil {
+		e.logger.Warnf("%s: %s", reason, message)
+	}
+
+	// Create K8s event in controller namespace if possible
+	if e.client == nil || e.controllerNamespace == "" {
+		return
+	}
+
+	annotations := map[string]string{
+		keys.ControllerInfo: "true",
+	}
+	if sourceURL != "" {
+		annotations[keys.SourceRepoURL] = sourceURL
+	}
+	if sha != "" {
+		annotations[keys.SHA] = sha
+	}
+
+	event := &v1.Event{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "pac-webhook-",
+			Namespace:    e.controllerNamespace,
+			Labels: map[string]string{
+				"pipelinesascode.tekton.dev/event-type": "webhook-error",
+			},
+			Annotations: annotations,
+		},
+		Message: message,
+		Reason:  reason,
+		Type:    v1.EventTypeWarning,
+		// InvolvedObject references a generic resource in the controller namespace
+		// since we don't have a specific Repository CR to reference
+		InvolvedObject: v1.ObjectReference{
+			APIVersion: "v1",
+			Kind:       "Namespace",
+			Name:       e.controllerNamespace,
+		},
+		Source: v1.EventSource{
+			Component: "Pipelines As Code",
+		},
+	}
+
+	if _, err := e.client.CoreV1().Events(e.controllerNamespace).Create(context.Background(), event, metav1.CreateOptions{}); err != nil {
+		if e.logger != nil {
+			e.logger.Infof("Cannot create controller event: %s", err.Error())
+		}
+	}
 }
 
 func (e *EventEmitter) EmitMessage(repo *v1alpha1.Repository, loggerLevel zapcore.Level, reason, message string) {
