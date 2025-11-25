@@ -53,7 +53,25 @@ func (p *PacRun) verifyRepoAndUser(ctx context.Context) (*v1alpha1.Repository, e
 
 	if repo == nil {
 		msg := fmt.Sprintf("cannot find a repository match for %s", p.event.URL)
-		p.eventEmitter.EmitMessage(nil, zap.WarnLevel, "RepositoryNamespaceMatch", msg)
+
+		// Try to post status to Git provider if we have a token and SHA
+		// This gives users visibility even when no Repository CR is configured
+		if p.event.Provider != nil && p.event.Provider.Token != "" && p.event.SHA != "" {
+			status := provider.StatusOpts{
+				Status:     "completed",
+				Conclusion: "failure",
+				Title:      "Repository Not Configured",
+				Text:       fmt.Sprintf("No Pipelines-as-Code Repository CR found matching URL: %s. Please create a Repository CR to enable CI.", p.event.URL),
+			}
+			if err := p.vcx.CreateStatus(ctx, p.event, status); err != nil {
+				p.logger.Warnf("failed to create status for no repo match: %v", err)
+			} else {
+				p.logger.Info("posted error status to Git provider for no repository match")
+			}
+		}
+
+		// Also emit to controller namespace for cluster-level visibility
+		p.eventEmitter.EmitControllerEvent("RepositoryNamespaceMatch", msg, p.event.URL, p.event.SHA)
 		return nil, nil
 	}
 

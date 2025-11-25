@@ -49,9 +49,13 @@ type PacRun struct {
 }
 
 func NewPacs(event *info.Event, vcx provider.Interface, run *params.Run, pacInfo *info.PacOpts, k8int kubeinteraction.Interface, logger *zap.SugaredLogger, globalRepo *v1alpha1.Repository) PacRun {
+	emitter := events.NewEventEmitter(run.Clients.Kube, logger)
+	if run.Info.Kube != nil && run.Info.Kube.Namespace != "" {
+		emitter.SetControllerNamespace(run.Info.Kube.Namespace)
+	}
 	return PacRun{
 		event: event, run: run, vcx: vcx, k8int: k8int, pacInfo: pacInfo, logger: logger, globalRepo: globalRepo,
-		eventEmitter: events.NewEventEmitter(run.Clients.Kube, logger),
+		eventEmitter: emitter,
 		manager:      NewConcurrencyManager(),
 	}
 }

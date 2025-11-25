@@ -192,15 +192,19 @@ func (l listener) handleEvent(ctx context.Context) http.HandlerFunc {
 		}
 		gitProvider.SetPacInfo(&pacInfo)
 
+		// Extract minimal info early for error reporting before full parsing
+		minimalInfo := l.extractMinimalInfo(ctx, request, payload, gitProvider)
+
 		s := sinker{
-			run:        l.run,
-			vcx:        gitProvider,
-			kint:       l.kint,
-			event:      l.event,
-			logger:     logger,
-			payload:    payload,
-			pacInfo:    &pacInfo,
-			globalRepo: globalRepo,
+			run:         l.run,
+			vcx:         gitProvider,
+			kint:        l.kint,
+			event:       l.event,
+			logger:      logger,
+			payload:     payload,
+			pacInfo:     &pacInfo,
+			globalRepo:  globalRepo,
+			minimalInfo: minimalInfo,
 		}
 
 		// clone the request to use it further
@@ -288,4 +292,56 @@ func (l listener) writeResponse(response http.ResponseWriter, statusCode int, me
 	if err := json.NewEncoder(response).Encode(body); err != nil {
 		l.logger.Errorf("failed to write back sink response: %v", err)
 	}
+}
+
+// extractMinimalInfo extracts minimal event info from the raw payload for error reporting.
+// This is done before full payload parsing so that errors during parsing can still be
+// reported back to the user via the Git provider or controller namespace events.
+// For GitHub Apps, it also generates a token early so we can post status on errors.
+func (l listener) extractMinimalInfo(ctx context.Context, request *http.Request, payload []byte, gitProvider provider.Interface) *provider.MinimalEventInfo {
+	var minimalInfo *provider.MinimalEventInfo
+
+	// Try to extract based on provider type
+	switch request.Header.Get("X-GitHub-Event") {
+	case "":
+		// Not a GitHub event, try other providers
+		if eventType := request.Header.Get("X-Gitea-Event-Type"); eventType != "" {
+			minimalInfo = provider.ExtractMinimalInfoFromGitea(eventType, payload)
+		} else if eventType := request.Header.Get("X-Gitlab-Event"); eventType != "" {
+			minimalInfo = provider.ExtractMinimalInfoFromGitLab(eventType, payload)
+		} else {
+			// Fallback to generic extraction (just URL)
+			minimalInfo = provider.ExtractMinimalInfoGeneric(payload)
+		}
+	default:
+		// GitHub event
+		eventType := request.Header.Get("X-GitHub-Event")
+		gheURL := request.Header.Get("X-GitHub-Enterprise-Host")
+		minimalInfo = provider.ExtractMinimalInfoFromGitHub(eventType, payload, gheURL)
+	}
+
+	if minimalInfo == nil {
+		return nil
+	}
+
+	// For GitHub Apps with installation ID, try to generate token early
+	// This allows us to post status even if full parsing fails later
+	if minimalInfo.InstallationID > 0 {
+		if ghProvider, ok := gitProvider.(*github.Provider); ok {
+			token, err := ghProvider.GetAppToken(
+				ctx,
+				l.run.Clients.Kube,
+				minimalInfo.GHEURL,
+				minimalInfo.InstallationID,
+				l.run.Info.Kube.Namespace,
+			)
+			if err != nil {
+				l.logger.Warnf("failed to get GitHub App token for early error reporting: %v", err)
+			} else {
+				minimalInfo.Token = token
+			}
+		}
+	}
+
+	return minimalInfo
 }

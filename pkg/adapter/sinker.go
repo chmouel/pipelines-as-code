@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/matcher"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
@@ -17,14 +18,15 @@ import (
 )
 
 type sinker struct {
-	run        *params.Run
-	vcx        provider.Interface
-	kint       kubeinteraction.Interface
-	event      *info.Event
-	logger     *zap.SugaredLogger
-	payload    []byte
-	pacInfo    *info.PacOpts
-	globalRepo *v1alpha1.Repository
+	run         *params.Run
+	vcx         provider.Interface
+	kint        kubeinteraction.Interface
+	event       *info.Event
+	logger      *zap.SugaredLogger
+	payload     []byte
+	pacInfo     *info.PacOpts
+	globalRepo  *v1alpha1.Repository
+	minimalInfo *provider.MinimalEventInfo
 }
 
 func (s *sinker) processEventPayload(ctx context.Context, request *http.Request) error {
@@ -32,6 +34,8 @@ func (s *sinker) processEventPayload(ctx context.Context, request *http.Request)
 	s.event, err = s.vcx.ParsePayload(ctx, s.run, request, string(s.payload))
 	if err != nil {
 		s.logger.Errorf("failed to parse event: %v", err)
+		// Report the parse error to the user via Git provider or controller events
+		s.reportParseError(ctx, err)
 		return err
 	}
 	// If ParsePayload returned nil event (intentional skip), exit early
@@ -172,4 +176,54 @@ func (s *sinker) createSkipCIStatus(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// reportParseError reports a payload parsing error to the user.
+// It attempts to post a status to the Git provider if we have enough info (token, SHA, org, repo).
+// It also emits a Kubernetes event to the controller namespace for visibility.
+func (s *sinker) reportParseError(ctx context.Context, parseErr error) {
+	if s.minimalInfo == nil {
+		// No minimal info available, just emit to controller namespace
+		emitter := events.NewEventEmitter(s.run.Clients.Kube, s.logger)
+		emitter.SetControllerNamespace(s.run.Info.Kube.Namespace)
+		emitter.EmitControllerEvent("PayloadParseError", parseErr.Error(), "", "")
+		return
+	}
+
+	// Try to post status to Git provider if we have a token and SHA
+	// Note: For GitLab, Organization contains the full path (org/repo) and Repository is empty
+	// For other providers, both Organization and Repository are populated
+	if s.minimalInfo.Token != "" && s.minimalInfo.SHA != "" &&
+		(s.minimalInfo.Organization != "" || s.minimalInfo.Repository != "") {
+		// Create a minimal event for CreateStatus
+		event := &info.Event{
+			Organization: s.minimalInfo.Organization,
+			Repository:   s.minimalInfo.Repository,
+			SHA:          s.minimalInfo.SHA,
+			URL:          s.minimalInfo.URL,
+			EventType:    s.minimalInfo.EventType,
+			Provider: &info.Provider{
+				Token: s.minimalInfo.Token,
+				URL:   s.minimalInfo.GHEURL,
+			},
+		}
+
+		status := provider.StatusOpts{
+			Status:     "completed",
+			Conclusion: "failure",
+			Title:      "Webhook Processing Error",
+			Text:       fmt.Sprintf("Failed to process webhook payload: %v", parseErr),
+		}
+
+		if err := s.vcx.CreateStatus(ctx, event, status); err != nil {
+			s.logger.Warnf("failed to create status for parse error: %v", err)
+		} else {
+			s.logger.Info("posted error status to Git provider for payload parse error")
+		}
+	}
+
+	// Also emit to controller namespace for visibility
+	emitter := events.NewEventEmitter(s.run.Clients.Kube, s.logger)
+	emitter.SetControllerNamespace(s.run.Info.Kube.Namespace)
+	emitter.EmitControllerEvent("PayloadParseError", parseErr.Error(), s.minimalInfo.URL, s.minimalInfo.SHA)
 }
