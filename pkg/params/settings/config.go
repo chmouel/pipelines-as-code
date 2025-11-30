@@ -38,6 +38,7 @@ type HubCatalog struct {
 	Index string
 	Name  string
 	URL   string
+	Type  string
 }
 
 // if there is a change performed on the default value,

@@ -58,10 +58,15 @@ func getHubCatalogs(logger *zap.SugaredLogger, catalogs *sync.Map, config map[st
 					break
 				}
 				catalogName := config[fmt.Sprintf("%s-name", cPrefix)]
+				catalogType := config[fmt.Sprintf("%s-type", cPrefix)]
+				if catalogType == "" {
+					catalogType = "tekton"
+				}
+
 				value, ok := catalogs.Load(catalogID)
 				if ok {
 					catalogValues, ok := value.(HubCatalog)
-					if ok && (catalogValues.Name == catalogName) && (catalogValues.URL == catalogURL) && (catalogValues.Index == index) {
+					if ok && (catalogValues.Name == catalogName) && (catalogValues.URL == catalogURL) && (catalogValues.Index == index) && (catalogValues.Type == catalogType) {
 						continue
 					}
 				}
@@ -70,6 +75,7 @@ func getHubCatalogs(logger *zap.SugaredLogger, catalogs *sync.Map, config map[st
 					Index: index,
 					Name:  catalogName,
 					URL:   catalogURL,
+					Type:  catalogType,
 				})
 			}
 		}

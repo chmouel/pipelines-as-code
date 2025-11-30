@@ -4,6 +4,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/hub"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
@@ -115,6 +116,22 @@ func TestGetCatalogHub(t *testing.T) {
 			numCatalogs: 1,
 			hubCatalogs: &sync.Map{},
 			wantLog:     "catalog url /u1!@1!@#$afoo.com is not valid, skipping catalog configuration",
+		},
+		{
+			name: "multiple catalogs with different types",
+			config: map[string]string{
+				"catalog-1-id":   "tektonhub",
+				"catalog-1-url":  "https://tektonhub.com",
+				"catalog-1-name": "tekton",
+				"catalog-1-type": hub.TektonHubType,
+				"catalog-2-id":   "artifact",
+				"catalog-2-url":  "https://artifacthub.com",
+				"catalog-2-name": "artifacthub",
+				"catalog-2-type": hub.ArtifactHubType,
+			},
+			numCatalogs: 3, // default + 2 custom
+			hubCatalogs: &sync.Map{},
+			wantLog:     "CONFIG: setting custom hub tektonhub, catalog https://tektonhub.com",
 		},
 	}
 	for _, tt := range tests {
