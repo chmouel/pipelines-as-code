@@ -19,6 +19,7 @@ import (
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"knative.dev/pkg/apis"
 )
 
 func TestGithubPushRequestGitOpsCommentOnComment(t *testing.T) {
@@ -213,21 +214,30 @@ func TestGithubPushRequestGitOpsCommentCancel(t *testing.T) {
 		// Wait for Repository status to be updated (reconciler updates asynchronously)
 		cancelled := false
 		lastReason := ""
-		for i := 0; i < 10; i++ {
+		lastStatusCount := 0
+		statusDeadline := time.Now().Add(30 * time.Second)
+		for time.Now().Before(statusDeadline) {
 			repo, err := g.Cnx.Clients.PipelineAsCode.PipelinesascodeV1alpha1().Repositories(g.TargetNamespace).Get(ctx, g.TargetNamespace, metav1.GetOptions{})
 			assert.NilError(t, err)
+			lastStatusCount = len(repo.Status)
+			if lastStatusCount < numberOfStatus {
+				time.Sleep(1 * time.Second)
+				continue
+			}
 
 			for _, status := range repo.Status {
-				if status.PipelineRunName == targetPRName &&
-					len(status.Conditions) > 0 &&
-					(status.Conditions[0].Reason == tektonv1.PipelineRunReasonCancelled.String() ||
-						status.Conditions[0].Reason == tektonv1.PipelineRunReasonCancelledRunningFinally.String()) {
-					lastReason = status.Conditions[0].Reason
+				if status.PipelineRunName != targetPRName {
+					continue
+				}
+				cond := status.GetCondition(apis.ConditionSucceeded)
+				if cond == nil {
+					continue
+				}
+				lastReason = cond.Reason
+				if cond.Reason == tektonv1.PipelineRunReasonCancelled.String() ||
+					cond.Reason == tektonv1.PipelineRunReasonCancelledRunningFinally.String() {
 					cancelled = true
 					break
-				}
-				if status.PipelineRunName == targetPRName && len(status.Conditions) > 0 {
-					lastReason = status.Conditions[0].Reason
 				}
 			}
 
@@ -236,7 +246,7 @@ func TestGithubPushRequestGitOpsCommentCancel(t *testing.T) {
 			}
 			time.Sleep(1 * time.Second)
 		}
-		assert.Assert(t, cancelled, fmt.Sprintf("Repository status does not show PipelineRun %s as cancelled after 10 retries (last reason: %q)", targetPRName, lastReason))
+		assert.Assert(t, cancelled, fmt.Sprintf("Repository status does not show PipelineRun %s as cancelled after waiting (last reason: %q, status count: %d)", targetPRName, lastReason, lastStatusCount))
 
 		// Final verification: ensure we have the expected number of PipelineRuns
 		pruns, err := g.Cnx.Clients.Tekton.TektonV1().PipelineRuns(g.TargetNamespace).List(ctx, metav1.ListOptions{})

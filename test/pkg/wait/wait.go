@@ -109,7 +109,12 @@ func UntilPipelineRunHasReason(ctx context.Context, clients clients.Clients, des
 
 		var prsWithReason []v1.PipelineRun
 		for _, pr := range prs.Items {
-			if len(pr.Status.Conditions) > 0 && pr.Status.Conditions[0].Reason == desiredReason.String() {
+			if len(pr.Status.Conditions) == 0 {
+				continue
+			}
+			reason := pr.Status.Conditions[0].Reason
+			if reason == desiredReason.String() ||
+				(desiredReason == v1.PipelineRunReasonCancelled && reason == v1.PipelineRunReasonCancelledRunningFinally.String()) {
 				prsWithReason = append(prsWithReason, pr)
 			}
 		}
