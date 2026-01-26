@@ -118,6 +118,11 @@ func (v *Provider) logAPICall(operation string, duration time.Duration, resp *gi
 			"url_path", resp.Request.URL.Path,
 			"rate_limit_remaining", remaining,
 		)
+		if resp.Request != nil {
+			if requestID := resp.Request.Header.Get(commentRequestIDHeader); requestID != "" {
+				logFields = append(logFields, "comment_request_id", requestID)
+			}
+		}
 		if resp.StatusCode > 0 {
 			logFields = append(logFields, "status_code", resp.StatusCode)
 		}

@@ -1429,6 +1429,7 @@ func TestIsHeadCommitOfBranch(t *testing.T) {
 }
 
 func TestCreateComment(t *testing.T) {
+	oldMarkerID := "pac-old-marker"
 	tests := []struct {
 		name          string
 		event         *info.Event
@@ -1466,12 +1467,19 @@ func TestCreateComment(t *testing.T) {
 			mockResponses: map[string]func(rw http.ResponseWriter, _ *http.Request){
 				"/repos/org/repo/issues/123/comments": func(rw http.ResponseWriter, r *http.Request) {
 					if r.Method == http.MethodGet {
-						fmt.Fprint(rw, `[{"id": 555, "body": "MARKER"}]`)
+						body := fmt.Sprintf("MARKER\n%s", commentRequestMarker(oldMarkerID))
+						fmt.Fprintf(rw, `[{"id": 555, "body": %q}]`, body)
 						return
 					}
 				},
 				"/repos/org/repo/issues/comments/555": func(rw http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, r.Method, http.MethodPatch)
+					var payload github.IssueComment
+					err := json.NewDecoder(r.Body).Decode(&payload)
+					assert.NilError(t, err)
+					markerID := extractCommentRequestID(payload.GetBody())
+					assert.Assert(t, markerID != "", "expected updated comment to include a request marker")
+					assert.Assert(t, markerID != oldMarkerID, "expected updated request marker to change")
 					rw.WriteHeader(http.StatusOK)
 				},
 			},

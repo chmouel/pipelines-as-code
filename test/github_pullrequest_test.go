@@ -185,7 +185,9 @@ func TestGithubSecondPullRequestBadYaml(t *testing.T) {
 
 		if len(comments) > 0 {
 			assert.Assert(t, len(comments) == 1, "Should have only one comment created we got way too many: %+v", comments)
-			golden.Assert(t, comments[0].GetBody(), strings.ReplaceAll(fmt.Sprintf("%s.golden", t.Name()), "/", "-"))
+			commentBody := comments[0].GetBody()
+			commentBody = regexp.MustCompile(`\n?<!-- pac-comment-request-id: [^>]+ -->`).ReplaceAllString(commentBody, "")
+			golden.Assert(t, commentBody, strings.ReplaceAll(fmt.Sprintf("%s.golden", t.Name()), "/", "-"))
 			return
 		}
 

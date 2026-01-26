@@ -209,6 +209,7 @@ func MakeClient(ctx context.Context, apiURL, token string) (*github.Client, stri
 	)
 
 	tc := oauth2.NewClient(ctx, ts)
+	tc.Transport = newCommentTraceTransport(tc.Transport)
 	if apiURL != "" {
 		if !strings.HasPrefix(apiURL, "https") && !strings.HasPrefix(apiURL, "http") {
 			apiURL = "https://" + apiURL
@@ -776,9 +777,11 @@ func (v *Provider) CreateComment(ctx context.Context, event *info.Event, commit,
 		re := regexp.MustCompile(regexp.QuoteMeta(updateMarker))
 		for _, comment := range comments {
 			if re.MatchString(comment.GetBody()) {
+				requestID := newCommentRequestID()
+				commentBody := appendCommentRequestMarker(commit, requestID)
 				if _, _, err := wrapAPI(v, "edit_comment", func() (*github.IssueComment, *github.Response, error) {
-					return v.Client().Issues.EditComment(ctx, event.Organization, event.Repository, comment.GetID(), &github.IssueComment{
-						Body: &commit,
+					return v.Client().Issues.EditComment(withCommentRequestID(ctx, requestID), event.Organization, event.Repository, comment.GetID(), &github.IssueComment{
+						Body: &commentBody,
 					})
 				}); err != nil {
 					return err
@@ -788,9 +791,11 @@ func (v *Provider) CreateComment(ctx context.Context, event *info.Event, commit,
 		}
 	}
 
+	requestID := newCommentRequestID()
+	commentBody := appendCommentRequestMarker(commit, requestID)
 	_, _, err := wrapAPI(v, "create_comment", func() (*github.IssueComment, *github.Response, error) {
-		return v.Client().Issues.CreateComment(ctx, event.Organization, event.Repository, event.PullRequestNumber, &github.IssueComment{
-			Body: &commit,
+		return v.Client().Issues.CreateComment(withCommentRequestID(ctx, requestID), event.Organization, event.Repository, event.PullRequestNumber, &github.IssueComment{
+			Body: &commentBody,
 		})
 	})
 	return err

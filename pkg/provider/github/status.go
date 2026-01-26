@@ -365,11 +365,13 @@ func (v *Provider) createStatusCommit(ctx context.Context, runevent *info.Event,
 	default:
 		if (status.Status == "completed" || (status.Status == "queued" && status.Title == pendingApproval)) &&
 			status.Text != "" && eventType == triggertype.PullRequest {
+			requestID := newCommentRequestID()
+			commentBody := appendCommentRequestMarker(fmt.Sprintf("%s<br>%s", status.Summary, status.Text), requestID)
 			_, _, err = wrapAPI(v, "create_issue_comment", func() (*github.IssueComment, *github.Response, error) {
-				return v.Client().Issues.CreateComment(ctx, runevent.Organization, runevent.Repository,
+				return v.Client().Issues.CreateComment(withCommentRequestID(ctx, requestID), runevent.Organization, runevent.Repository,
 					runevent.PullRequestNumber,
 					&github.IssueComment{
-						Body: github.Ptr(fmt.Sprintf("%s<br>%s", status.Summary, status.Text)),
+						Body: github.Ptr(commentBody),
 					},
 				)
 			})

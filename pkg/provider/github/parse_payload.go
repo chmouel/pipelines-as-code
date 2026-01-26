@@ -81,10 +81,10 @@ func (v *Provider) GetAppToken(ctx context.Context, kube kubernetes.Interface, g
 			gheURL = "https://" + gheURL
 		}
 		uploadURL := gheURL + "/api/uploads"
-		v.ghClient, _ = github.NewClient(&http.Client{Transport: itr}).WithEnterpriseURLs(gheURL, uploadURL)
+		v.ghClient, _ = github.NewClient(&http.Client{Transport: newCommentTraceTransport(itr)}).WithEnterpriseURLs(gheURL, uploadURL)
 		itr.BaseURL = strings.TrimSuffix(v.Client().BaseURL.String(), "/")
 	} else {
-		v.ghClient = github.NewClient(&http.Client{Transport: itr})
+		v.ghClient = github.NewClient(&http.Client{Transport: newCommentTraceTransport(itr)})
 	}
 
 	// Get a token ASAP because we need it for setting private repos

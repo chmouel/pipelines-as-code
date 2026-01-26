@@ -599,7 +599,12 @@ func TestGithubProvidercreateStatusCommit(t *testing.T) {
 				mux.HandleFunc(fmt.Sprintf("/repos/%s/%s/issues/%d/comments",
 					tt.event.Organization, tt.event.Repository, issuenumber), func(_ http.ResponseWriter, r *http.Request) {
 					body, _ := io.ReadAll(r.Body)
-					assert.Equal(t, fmt.Sprintf(`{"body":"%s<br>%s"}`, tt.status.Summary, tt.status.Text)+"\n", string(body))
+					var payload struct {
+						Body string `json:"body"`
+					}
+					assert.NilError(t, json.Unmarshal(body, &payload))
+					cleanBody := removeCommentRequestMarkers(payload.Body)
+					assert.Equal(t, fmt.Sprintf("%s<br>%s", tt.status.Summary, tt.status.Text), cleanBody)
 				})
 			}
 
