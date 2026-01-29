@@ -1700,6 +1700,7 @@ func runTest(ctx context.Context, t *testing.T, tt annotationTest, vcx provider.
 	matches, err := MatchPipelinerunByAnnotation(ctx, logger,
 		tt.args.pruns,
 		client, &tt.args.runevent, vcx, eventEmitter, repo,
+		nil,
 	)
 
 	if tt.wantLog != "" {
@@ -2261,7 +2262,7 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 			}
 
 			eventEmitter := events.NewEventEmitter(cs.Clients.Kube, logger)
-			matches, err := MatchPipelinerunByAnnotation(ctx, logger, tt.args.pruns, cs, &tt.args.runevent, &ghprovider.Provider{}, eventEmitter, nil)
+			matches, err := MatchPipelinerunByAnnotation(ctx, logger, tt.args.pruns, cs, &tt.args.runevent, &ghprovider.Provider{}, eventEmitter, nil, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("MatchPipelinerunByAnnotation() error = %v, wantErr %v", err, tt.wantErr)
 				return

@@ -340,6 +340,15 @@ jobs:
           cd startpaac
           ./startpaac --ci -a
 
+      - name: Enable debug logging for e2e
+        run: |
+          set -euo pipefail
+          kubectl -n pipelines-as-code patch configmap pac-config-logging --type merge -p '{"data":{"loglevel.pipelinesascode":"debug","loglevel.pac-watcher":"debug","loglevel.pipelines-as-code-webhook":"debug"}}'
+          kubectl -n pipelines-as-code rollout restart deployment/pipelines-as-code-controller deployment/pipelines-as-code-webhook deployment/pipelines-as-code-watcher
+          kubectl -n pipelines-as-code rollout status deployment/pipelines-as-code-controller --timeout=120s
+          kubectl -n pipelines-as-code rollout status deployment/pipelines-as-code-webhook --timeout=120s
+          kubectl -n pipelines-as-code rollout status deployment/pipelines-as-code-watcher --timeout=120s
+
       - name: Install minica CA certificate to system trust store
         run: |
           set -x

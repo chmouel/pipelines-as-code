@@ -758,6 +758,14 @@ func (v *Provider) CreateComment(ctx context.Context, event *info.Event, commit,
 	if event.PullRequestNumber == 0 {
 		return fmt.Errorf("create comment only works on pull requests")
 	}
+	if v.Logger != nil {
+		v.Logger.Debugf("CreateComment called for pr=%d repo=%s/%s updateMarker=%t",
+			event.PullRequestNumber,
+			event.Organization,
+			event.Repository,
+			updateMarker != "",
+		)
+	}
 
 	// List last page of the comments of the PR
 	if updateMarker != "" {
@@ -772,26 +780,55 @@ func (v *Provider) CreateComment(ctx context.Context, event *info.Event, commit,
 		if err != nil {
 			return err
 		}
+		if v.Logger != nil {
+			v.Logger.Debugf("CreateComment fetched %d comment(s) for pr=%d repo=%s/%s", len(comments), event.PullRequestNumber, event.Organization, event.Repository)
+		}
 
 		re := regexp.MustCompile(regexp.QuoteMeta(updateMarker))
+		matched := make([]*github.IssueComment, 0, 1)
 		for _, comment := range comments {
 			if re.MatchString(comment.GetBody()) {
-				if _, _, err := wrapAPI(v, "edit_comment", func() (*github.IssueComment, *github.Response, error) {
-					return v.Client().Issues.EditComment(ctx, event.Organization, event.Repository, comment.GetID(), &github.IssueComment{
-						Body: &commit,
-					})
-				}); err != nil {
-					return err
-				}
-				return nil
+				matched = append(matched, comment)
 			}
+		}
+
+		if v.Logger != nil {
+			if len(matched) == 0 {
+				v.Logger.Debugf("CreateComment found no existing comment matching update marker for pr=%d repo=%s/%s", event.PullRequestNumber, event.Organization, event.Repository)
+			} else {
+				v.Logger.Debugf("CreateComment found %d matching comment(s) for update marker", len(matched))
+			}
+		}
+		if len(matched) > 1 && v.Logger != nil {
+			v.Logger.Warnf("CreateComment found multiple matching comments for update marker (count=%d)", len(matched))
+		}
+
+		if len(matched) > 0 {
+			updated, _, err := wrapAPI(v, "edit_comment", func() (*github.IssueComment, *github.Response, error) {
+				return v.Client().Issues.EditComment(ctx, event.Organization, event.Repository, matched[0].GetID(), &github.IssueComment{
+					Body: &commit,
+				})
+			})
+			if err != nil {
+				return err
+			}
+			if v.Logger != nil {
+				v.Logger.Debugf("CreateComment updated comment id=%d url=%s", updated.GetID(), updated.GetHTMLURL())
+			}
+			return nil
 		}
 	}
 
-	_, _, err := wrapAPI(v, "create_comment", func() (*github.IssueComment, *github.Response, error) {
+	created, _, err := wrapAPI(v, "create_comment", func() (*github.IssueComment, *github.Response, error) {
 		return v.Client().Issues.CreateComment(ctx, event.Organization, event.Repository, event.PullRequestNumber, &github.IssueComment{
 			Body: &commit,
 		})
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	if v.Logger != nil {
+		v.Logger.Debugf("CreateComment created comment id=%d url=%s", created.GetID(), created.GetHTMLURL())
+	}
+	return nil
 }

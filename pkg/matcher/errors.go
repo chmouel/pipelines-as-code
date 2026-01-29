@@ -38,12 +38,25 @@ func checkIfCELEvaluateError(err error) bool {
 	return false
 }
 
-func reportCELValidationErrors(ctx context.Context, repo *apipac.Repository, validationErrors []*pacerrors.PacYamlValidations, eventEmitter *events.EventEmitter, vcx provider.Interface, event *info.Event) {
+func reportCELValidationErrors(ctx context.Context, repo *apipac.Repository, validationErrors []*pacerrors.PacYamlValidations, eventEmitter *events.EventEmitter, vcx provider.Interface, event *info.Event, logger *zap.SugaredLogger) {
+	if logger != nil {
+		logger.Debugf("preparing CEL validation error report with %d error(s) for event-type=%s trigger=%s pr=%d repo=%s/%s",
+			len(validationErrors),
+			event.EventType,
+			event.TriggerTarget,
+			event.PullRequestNumber,
+			event.Organization,
+			event.Repository,
+		)
+	}
 	errorRows := make([]string, 0, len(validationErrors))
 	for _, err := range validationErrors {
 		errorRows = append(errorRows, fmt.Sprintf("| %s | `%s` |", err.Name, err.Err.Error()))
 	}
 	if len(errorRows) == 0 {
+		if logger != nil {
+			logger.Debug("no CEL validation errors to report after formatting")
+		}
 		return
 	}
 	markdownErrMessage := fmt.Sprintf(`%s
@@ -51,6 +64,13 @@ func reportCELValidationErrors(ctx context.Context, repo *apipac.Repository, val
 	if err := vcx.CreateComment(ctx, event, markdownErrMessage, provider.ValidationErrorTemplate); err != nil {
 		eventEmitter.EmitMessage(repo, zap.ErrorLevel, "PipelineRunCommentCreationError",
 			fmt.Sprintf("failed to create comment: %s", err.Error()))
+		if logger != nil {
+			logger.Debugf("failed to create CEL validation error comment: %v", err)
+		}
+		return
+	}
+	if logger != nil {
+		logger.Debugf("submitted CEL validation error comment with %d row(s)", len(errorRows))
 	}
 }
 

@@ -192,7 +192,11 @@ func checkPipelineRunAnnotation(prun *tektonv1.PipelineRun, eventEmitter *events
 	}
 }
 
-func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger, pruns []*tektonv1.PipelineRun, cs *params.Run, event *info.Event, vcx provider.Interface, eventEmitter *events.EventEmitter, repo *apipac.Repository) ([]Match, error) {
+type MatchOptions struct {
+	SkipCELValidationErrorReport bool
+}
+
+func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger, pruns []*tektonv1.PipelineRun, cs *params.Run, event *info.Event, vcx provider.Interface, eventEmitter *events.EventEmitter, repo *apipac.Repository, opts *MatchOptions) ([]Match, error) {
 	matchedPRs := []Match{}
 	infomsg := fmt.Sprintf("matching pipelineruns to event: URL=%s, target-branch=%s, source-branch=%s, target-event=%s",
 		event.URL,
@@ -288,10 +292,12 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 		if celExpr, ok := prun.GetObjectMeta().GetAnnotations()[keys.OnCelExpression]; ok {
 			checkPipelineRunAnnotation(prun, eventEmitter, repo)
 
+			logger.Debugf("evaluating CEL expression for PipelineRun %s: %q", prName, celExpr)
 			out, err := celEvaluate(ctx, celExpr, event, vcx, customParams, eventEmitter, repo)
 			if err != nil {
 				logger.Errorf("there was an error evaluating the CEL expression, skipping: %v", err)
 				if checkIfCELEvaluateError(err) {
+					logger.Debugf("collecting CEL validation error for PipelineRun %s: %v", prName, err)
 					celValidationErrors = append(celValidationErrors, &pacerrors.PacYamlValidations{
 						Name: prName,
 						Err:  fmt.Errorf("CEL expression evaluation error: %s", sanitizeErrorAsMarkdown(err)),
@@ -382,7 +388,19 @@ func MatchPipelinerunByAnnotation(ctx context.Context, logger *zap.SugaredLogger
 	}
 
 	if len(celValidationErrors) > 0 {
-		reportCELValidationErrors(ctx, repo, celValidationErrors, eventEmitter, vcx, event)
+		if opts != nil && opts.SkipCELValidationErrorReport {
+			logger.Debugf("skipping CEL validation error reporting for %d error(s) on event-type=%s trigger=%s pr=%d repo=%s/%s url=%s",
+				len(celValidationErrors),
+				event.EventType,
+				event.TriggerTarget,
+				event.PullRequestNumber,
+				event.Organization,
+				event.Repository,
+				event.URL,
+			)
+		} else {
+			reportCELValidationErrors(ctx, repo, celValidationErrors, eventEmitter, vcx, event, logger)
+		}
 	}
 
 	if len(matchedPRs) > 0 {
