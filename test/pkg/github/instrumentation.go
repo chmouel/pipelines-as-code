@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	tlogs "github.com/openshift-pipelines/pipelines-as-code/test/pkg/podlogs"
 )
@@ -54,7 +55,13 @@ func (g *PRTest) collectGitHubAPICalls(ctx context.Context, _ *testing.T) {
 	if g.SecondController {
 		controllerName = "ghe-controller"
 	}
-	ns := info.GetNS(ctx)
+	ns := g.resolveControllerNamespace(ctx)
+	if ns == "" {
+		if g.Logger != nil {
+			g.Logger.Warn("Skipping GitHub API call collection: controller namespace could not be resolved")
+		}
+		return
+	}
 
 	g.Logger.Infof(
 		"Attempting to collect GitHub API calls from controller: %s in namespace: %s",
@@ -117,6 +124,26 @@ func (g *PRTest) collectGitHubAPICalls(ctx context.Context, _ *testing.T) {
 	if outputDir != "" {
 		g.outputTestResultToFile(outputDir, apiCalls, lastOAuth2Index, len(logLines))
 	}
+}
+
+func (g *PRTest) resolveControllerNamespace(ctx context.Context) string {
+	if ns := info.GetNS(ctx); ns != "" {
+		return ns
+	}
+
+	if g.Cnx == nil {
+		return ""
+	}
+
+	ns, _, err := params.GetInstallLocation(ctx, g.Cnx)
+	if err != nil {
+		if g.Logger != nil {
+			g.Logger.Warnf("Failed to resolve controller namespace from installation: %v", err)
+		}
+		return ""
+	}
+
+	return ns
 }
 
 // sanitizeFilename converts a test name to a safe filename.

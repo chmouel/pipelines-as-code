@@ -1,7 +1,16 @@
 package github
 
 import (
+	"context"
 	"testing"
+
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	"gotest.tools/v3/assert"
+	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestParseAPICallLog(t *testing.T) {
@@ -54,38 +63,54 @@ func TestParseAPICallLog(t *testing.T) {
 			result := parseAPICallLog(tc.logLine)
 
 			if tc.expected == nil {
-				if result != nil {
-					t.Errorf("Expected nil result, got %+v", result)
-				}
+				assert.Assert(t, result == nil, "Expected nil result, got %+v", result)
 				return
 			}
 
-			if result == nil {
-				t.Errorf("Expected result, got nil")
-				return
-			}
-
-			if result.Operation != tc.expected.Operation {
-				t.Errorf("Expected operation %s, got %s", tc.expected.Operation, result.Operation)
-			}
-			if result.DurationMs != tc.expected.DurationMs {
-				t.Errorf("Expected duration_ms %d, got %d", tc.expected.DurationMs, result.DurationMs)
-			}
-			if result.URLPath != tc.expected.URLPath {
-				t.Errorf("Expected url_path %s, got %s", tc.expected.URLPath, result.URLPath)
-			}
-			if result.RateLimitRemaining != tc.expected.RateLimitRemaining {
-				t.Errorf("Expected rate_limit_remaining %s, got %s", tc.expected.RateLimitRemaining, result.RateLimitRemaining)
-			}
-			if result.StatusCode != tc.expected.StatusCode {
-				t.Errorf("Expected status_code %d, got %d", tc.expected.StatusCode, result.StatusCode)
-			}
-			if result.Provider != tc.expected.Provider {
-				t.Errorf("Expected provider %s, got %s", tc.expected.Provider, result.Provider)
-			}
-			if result.Repo != tc.expected.Repo {
-				t.Errorf("Expected repo %s, got %s", tc.expected.Repo, result.Repo)
-			}
+			assert.Assert(t, result != nil, "Expected result, got nil")
+			assert.Equal(t, tc.expected.Operation, result.Operation)
+			assert.Equal(t, tc.expected.DurationMs, result.DurationMs)
+			assert.Equal(t, tc.expected.URLPath, result.URLPath)
+			assert.Equal(t, tc.expected.RateLimitRemaining, result.RateLimitRemaining)
+			assert.Equal(t, tc.expected.StatusCode, result.StatusCode)
+			assert.Equal(t, tc.expected.Provider, result.Provider)
+			assert.Equal(t, tc.expected.Repo, result.Repo)
 		})
 	}
+}
+
+func TestResolveControllerNamespace(t *testing.T) {
+	t.Run("uses namespace from context when available", func(t *testing.T) {
+		g := &PRTest{}
+		ctx := info.StoreNS(context.Background(), "from-context")
+
+		got := g.resolveControllerNamespace(ctx)
+		assert.Equal(t, "from-context", got)
+	})
+
+	t.Run("falls back to install location when context has no namespace", func(t *testing.T) {
+		kube := fake.NewSimpleClientset(&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pipelines-as-code-controller",
+				Namespace: "openshift-pipelines",
+			},
+		})
+		g := &PRTest{
+			Cnx: &params.Run{
+				Clients: clients.Clients{
+					Kube: kube,
+				},
+			},
+		}
+
+		got := g.resolveControllerNamespace(context.Background())
+		assert.Equal(t, "openshift-pipelines", got)
+	})
+
+	t.Run("returns empty when namespace cannot be resolved", func(t *testing.T) {
+		g := &PRTest{}
+
+		got := g.resolveControllerNamespace(context.Background())
+		assert.Equal(t, "", got)
+	})
 }
