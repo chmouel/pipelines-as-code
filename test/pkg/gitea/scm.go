@@ -143,7 +143,7 @@ func CreateGiteaRepo(giteaClient *forgejo.Client, user, name, defaultBranch, hoo
 	}
 	logger.Infof("Creating webhook to smee url on gitea repository %s", name)
 	_, _, err = giteaClient.CreateRepoHook(user, repo.Name, forgejo.CreateHookOption{
-		Type:   "gitea",
+		Type:   "forgejo",
 		Active: true,
 		Config: map[string]string{
 			"name":         "hook to smee url",
