@@ -838,7 +838,7 @@ func (v *Provider) CreateComment(ctx context.Context, event *info.Event, commit,
 		}
 
 		//nolint:gosec // No need for crypto/rand here, just reducing timing window
-		jitter := time.Duration(rand.Intn(500)) * time.Millisecond
+		jitter := time.Duration(rand.Intn(2000)) * time.Millisecond
 		timer := time.NewTimer(jitter)
 		defer timer.Stop()
 
