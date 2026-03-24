@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/pprofserver"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/reconciler"
 	"k8s.io/client-go/rest"
 	"knative.dev/pkg/injection"
@@ -62,6 +63,7 @@ func main() {
 	cfg.QPS = 5 * cfg.QPS
 	cfg.Burst = 5 * cfg.Burst
 	ctx := signals.NewContext()
+	pprofserver.Start(ctx, "pac-watcher")
 	if val, ok := os.LookupEnv("PAC_DISABLE_HA"); ok {
 		if strings.ToLower(val) == "true" {
 			ctx = sharedmain.WithHADisabled(ctx)

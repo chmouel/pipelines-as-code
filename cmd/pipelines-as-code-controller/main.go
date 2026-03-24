@@ -10,6 +10,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/pprofserver"
 	evadapter "knative.dev/eventing/pkg/adapter/v2"
 	"knative.dev/pkg/client/injection/kube/client"
 	"knative.dev/pkg/injection/sharedmain"
@@ -24,6 +25,7 @@ const (
 
 func main() {
 	ctx := signals.NewContext()
+	pprofserver.Start(ctx, "pac-controller")
 	run := params.New()
 
 	err := run.Clients.NewClients(ctx, &run.Info)
