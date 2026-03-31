@@ -190,23 +190,17 @@ func TestHandleEvent(t *testing.T) {
 			defer ts.Close()
 
 			req, err := http.NewRequestWithContext(context.Background(), tn.requestType, ts.URL, bytes.NewReader(tn.event))
-			if err != nil {
-				t.Fatalf("error creating request: %s", err)
-			}
+			assert.NilError(t, err)
 			req.Header.Set("X-Github-Event", tn.eventType)
 
 			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				t.Fatalf("error sending request: %s", err)
-			}
+			assert.NilError(t, err)
 			defer resp.Body.Close()
 
 			if tn.wantLogSnippet != "" {
 				assert.Assert(t, logCatcher.FilterMessageSnippet(tn.wantLogSnippet).Len() > 0, logCatcher.All())
 			}
-			if resp.StatusCode != tn.statusCode {
-				t.Fatalf("expected status code : %v but got %v ", tn.statusCode, resp.StatusCode)
-			}
+			assert.Equal(t, resp.StatusCode, tn.statusCode)
 		})
 	}
 }

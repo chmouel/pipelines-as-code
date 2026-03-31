@@ -288,7 +288,7 @@ func TestAnalyzePromptBuildError(t *testing.T) {
 	assert.Assert(t, response == nil)
 }
 
-func TestAnalyze_Errors(t *testing.T) {
+func TestAnalyzeErrors(t *testing.T) {
 	tests := []struct {
 		name            string
 		httpResponse    *http.Response
@@ -339,7 +339,7 @@ func TestAnalyze_Errors(t *testing.T) {
 	}
 }
 
-func TestAnalyze_APIError(t *testing.T) {
+func TestAnalyzeAPIError(t *testing.T) {
 	tests := []struct {
 		name            string
 		mockResponse    openaiResponse

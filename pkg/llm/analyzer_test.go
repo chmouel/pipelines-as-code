@@ -16,7 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestAnalyzer_Analyze(t *testing.T) {
+func TestAnalyzerAnalyze(t *testing.T) {
 	logger, _ := logger.GetLogger()
 
 	// Create fake Kubernetes client
@@ -113,7 +113,7 @@ func TestAnalyzer_Analyze(t *testing.T) {
 	}
 }
 
-func TestAnalyzer_ValidateConfig(t *testing.T) {
+func TestAnalyzerValidateConfig(t *testing.T) {
 	logger, _ := logger.GetLogger()
 	run := &params.Run{}
 	kinteract := &kubeinteraction.Interaction{}
@@ -252,7 +252,7 @@ func TestAnalyzer_ValidateConfig(t *testing.T) {
 	}
 }
 
-func TestAnalyzer_ValidateConfig_WithModels(t *testing.T) {
+func TestAnalyzerValidateConfigWithModels(t *testing.T) {
 	logger, _ := logger.GetLogger()
 	run := &params.Run{}
 	kinteract := &kubeinteraction.Interaction{}
@@ -387,7 +387,7 @@ func TestGetContextCacheKey(t *testing.T) {
 	}
 }
 
-func TestAnalyzer_ShouldTriggerRoleEvaluations(t *testing.T) {
+func TestAnalyzerShouldTriggerRoleEvaluations(t *testing.T) {
 	logger, _ := logger.GetLogger()
 	run := &params.Run{}
 	kinteract := &kubeinteraction.Interaction{}
@@ -453,7 +453,7 @@ func TestAnalyzer_ShouldTriggerRoleEvaluations(t *testing.T) {
 	}
 }
 
-func TestAnalyzer_ShouldTriggerRole(t *testing.T) {
+func TestAnalyzerShouldTriggerRole(t *testing.T) {
 	logger, _ := logger.GetLogger()
 	run := &params.Run{}
 	kinteract := &kubeinteraction.Interaction{}

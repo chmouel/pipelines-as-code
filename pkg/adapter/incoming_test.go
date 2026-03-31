@@ -50,7 +50,7 @@ Q1QWaigUQdpFfNCrqwJBANLgWaJV722PhQXOCmR+INvZ7ksIhJVcq/x1l2BYOLw2
 QsncVExbMiPa9Oclo5qLuTosS8qwHm1MJEytp3/SkB8=
 -----END RSA PRIVATE KEY-----`
 
-func Test_compareSecret(t *testing.T) {
+func TestCompareSecret(t *testing.T) {
 	type args struct {
 		incomingSecret string
 		secretValue    string
@@ -79,14 +79,12 @@ func Test_compareSecret(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := compareSecret(tt.args.incomingSecret, tt.args.secretValue); got != tt.want {
-				t.Errorf("compareSecret() = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, compareSecret(tt.args.incomingSecret, tt.args.secretValue), tt.want)
 		})
 	}
 }
 
-func Test_listener_detectIncoming(t *testing.T) {
+func TestListenerDetectIncoming(t *testing.T) {
 	const goodURL = "https://matched/by/incoming"
 	envRemove := env.PatchAll(t, map[string]string{"SYSTEM_NAMESPACE": "pipelinesascode"})
 	defer envRemove()
@@ -855,7 +853,7 @@ func Test_listener_detectIncoming(t *testing.T) {
 	}
 }
 
-func Test_listener_processIncoming(t *testing.T) {
+func TestListenerProcessIncoming(t *testing.T) {
 	tests := []struct {
 		name       string
 		want       provider.Interface
@@ -1081,7 +1079,7 @@ func TestApplyIncomingParams(t *testing.T) {
 	}
 }
 
-func Test_detectIncoming_legacy_warning(t *testing.T) {
+func TestDetectIncomingLegacyWarning(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
 	testNamespace := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1180,7 +1178,7 @@ func Test_detectIncoming_legacy_warning(t *testing.T) {
 	}
 }
 
-func Test_detectIncoming_body_params_are_parsed(t *testing.T) {
+func TestDetectIncomingBodyParamsAreParsed(t *testing.T) {
 	ctx, _ := rtesting.SetupFakeContext(t)
 	testNamespace := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1237,7 +1235,7 @@ func Test_detectIncoming_body_params_are_parsed(t *testing.T) {
 	assert.Assert(t, got)
 }
 
-func Test_parseIncomingPayload(t *testing.T) {
+func TestParseIncomingPayload(t *testing.T) {
 	tests := []struct {
 		name          string
 		method        string

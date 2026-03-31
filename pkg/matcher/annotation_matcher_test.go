@@ -2372,7 +2372,7 @@ func TestMatchPipelinerunByAnnotation(t *testing.T) {
 	}
 }
 
-func Test_getAnnotationValues(t *testing.T) {
+func TestGetAnnotationValues(t *testing.T) {
 	type args struct {
 		annotation string
 	}

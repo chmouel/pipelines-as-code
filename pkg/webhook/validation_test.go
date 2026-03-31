@@ -14,7 +14,7 @@ import (
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
-func TestReconciler_Admit(t *testing.T) {
+func TestReconcilerAdmit(t *testing.T) {
 	globalNamespace := "globalNamespace"
 	envRemove := env.PatchAll(t, map[string]string{"SYSTEM_NAMESPACE": globalNamespace})
 	defer envRemove()

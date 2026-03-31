@@ -135,9 +135,12 @@ func TestCountPipelineRun(t *testing.T) {
 				},
 			}
 
-			if err = r.countPipelineRun(ctx, pr); (err != nil) != tt.wantErr {
-				t.Errorf("countPipelineRun() error = %v, wantErr %v. error: %v", err != nil, tt.wantErr, err)
+			err = r.countPipelineRun(ctx, pr)
+			if tt.wantErr {
+				assert.Assert(t, err != nil)
+				return
 			}
+			assert.NilError(t, err)
 
 			var rm metricdata.ResourceMetrics
 			err = reader.Collect(ctx, &rm)
@@ -298,9 +301,8 @@ func TestCalculatePipelineRunDuration(t *testing.T) {
 				},
 			}
 
-			if err = r.calculatePRDuration(ctx, pr); err != nil {
-				t.Errorf("calculatePRDuration() error = %v", err)
-			}
+			err = r.calculatePRDuration(ctx, pr)
+			assert.NilError(t, err)
 
 			duration := tt.completionTime.Sub(startTime.Time)
 

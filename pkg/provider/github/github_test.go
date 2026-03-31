@@ -1113,7 +1113,7 @@ func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
 }
 
-func TestProvider_checkWebhookSecretValidity(t *testing.T) {
+func TestProviderCheckWebhookSecretValidity(t *testing.T) {
 	t1 := time.Date(1999, time.February, 3, 4, 5, 6, 7, time.UTC)
 	cw := clockwork.NewFakeClockAt(t1)
 	tests := []struct {

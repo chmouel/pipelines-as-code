@@ -36,7 +36,7 @@ import (
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
-func TestPacRun_checkNeedUpdate(t *testing.T) {
+func TestPacRunCheckNeedUpdate(t *testing.T) {
 	tests := []struct {
 		name                 string
 		tmpl                 string

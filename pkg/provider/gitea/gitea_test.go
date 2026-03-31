@@ -36,7 +36,7 @@ import (
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
-func TestProvider_CreateStatus(t *testing.T) {
+func TestProviderCreateStatus(t *testing.T) {
 	type args struct {
 		event      *info.Event
 		statusOpts status.StatusOpts
@@ -178,7 +178,7 @@ func computeHMACSHA256(payload, secret []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func TestProvider_Validate(t *testing.T) {
+func TestProviderValidate(t *testing.T) {
 	testPayload := []byte(`{"ref":"refs/heads/main"}`)
 	testSecret := "mysecret"
 	validSignature := computeHMACSHA256(testPayload, []byte(testSecret))
@@ -446,7 +446,7 @@ func TestProviderGetFiles(t *testing.T) {
 	}
 }
 
-func TestProvider_CreateStatusCommit(t *testing.T) {
+func TestProviderCreateStatusCommit(t *testing.T) {
 	type args struct {
 		event   *info.Event
 		pacopts *info.PacOpts

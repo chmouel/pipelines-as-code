@@ -11,7 +11,7 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-func TestProvider_Detect(t *testing.T) {
+func TestProviderDetect(t *testing.T) {
 	idd := int64(123)
 	tests := []struct {
 		name          string
