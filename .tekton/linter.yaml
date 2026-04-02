@@ -40,14 +40,14 @@ spec:
                 - name: depth
                   value: 1000
             - name: generate-release-yaml
-              image: registry.access.redhat.com/ubi9/python-312
+              image: registry.access.redhat.com/ubi10/python-312-minimal
               workingDir: $(workspaces.source.path)
               script: |
                 set -euxo pipefail
                 mkdir -p bin/ # ignored in .gitignore
                 ./hack/generate-releaseyaml.sh  > bin/release.yaml
             - name: codespell
-              image: registry.access.redhat.com/ubi9/python-312
+              image: registry.access.redhat.com/ubi10/python-312-minimal
               workingDir: $(workspaces.source.path)
               script: |
                 pip3 install codespell
@@ -60,7 +60,7 @@ spec:
                 shellcheck $(find hack/ -type f -regex ".*sh" -print)
             - name: commit-validation
               displayName: "Git commit validation (gitlint + conventional commits)"
-              image: registry.access.redhat.com/ubi9/python-312
+              image: registry.access.redhat.com/ubi10/python-312-minimal
               workingDir: $(workspaces.source.path)
               script: |
                 set -euxo pipefail
@@ -265,7 +265,7 @@ spec:
 
             - name: ruff-lint
               displayName: "Python Linter (ruff)"
-              image: registry.access.redhat.com/ubi9/python-312
+              image: registry.access.redhat.com/ubi10/python-312-minimal
               workingDir: $(workspaces.source.path)
               script: |
                 set -euxo pipefail
@@ -274,7 +274,7 @@ spec:
 
             - name: ruff-format
               displayName: "Python Formatter (ruff)"
-              image: registry.access.redhat.com/ubi9/python-312
+              image: registry.access.redhat.com/ubi10/python-312-minimal
               workingDir: $(workspaces.source.path)
               script: |
                 set -euxo pipefail
@@ -290,7 +290,7 @@ spec:
 
             - name: vale
               displayName: "Spelling and Grammar"
-              image: registry.access.redhat.com/ubi9/python-312
+              image: registry.access.redhat.com/ubi10/python-312-minimal
               workingDir: $(workspaces.source.path)
               env:
                 - name: HUB_TOKEN
@@ -306,7 +306,7 @@ spec:
 
             - name: goreleaser-check
               displayName: "Goreleaser Check"
-              image: registry.access.redhat.com/ubi9/python-312
+              image: registry.access.redhat.com/ubi10/python-312-minimal
               workingDir: $(workspaces.source.path)
               env:
                 - name: HUB_TOKEN
