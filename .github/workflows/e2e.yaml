@@ -26,8 +26,16 @@ on:
       - "test/testdata/**"
       - "vendor/**"
 
+permissions:
+  contents: read
+
 jobs:
   e2e-tests:
+    # ok-to-test removes the label (issues: write) and reads PR metadata (pull-requests: read)
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
     # Run on schedule, unconditional workflow_dispatch,
     # or pull_request_target if the actor has write/admin permissions.
     if: >
@@ -57,7 +65,7 @@ jobs:
             concurrency,
           ]
 
-    env:
+    env: # zizmor: ignore[secrets-outside-env]
       # Common/Infra
       CONTROLLER_DOMAIN_URL: paac.paac-127-0-0-1.nip.io
       KOCACHE: /tmp/ko-cache
@@ -122,15 +130,16 @@ jobs:
       TESTRR_BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       TESTRR_RUN_LABEL: gha-e2e-${{ matrix.provider }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          ref: ${{ inputs.target_ref || github.event.pull_request.head.sha || github.sha }}
-
       - name: Check user permissions on PRs
         if: github.event_name == 'pull_request_target'
         uses: pipelines-as-code/ok-to-test@25881c6245695bd81a22df9f2ebdd9569b420581 # v1
         with:
           team-slugs: ${{ env.TARGET_TEAM_SLUGS }}
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ inputs.target_ref || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
@@ -164,7 +173,7 @@ jobs:
           repo: chmouel/snazy
 
       - name: Install minica
-        run: |
+        run: | # zizmor: ignore[github-env]
           go install github.com/jsha/minica@latest
           echo "${HOME}/go/bin" >> "$GITHUB_PATH"
 
@@ -173,6 +182,7 @@ jobs:
         with:
           repository: openshift-pipelines/startpaac
           path: startpaac
+          persist-credentials: false
 
       - name: Run gosmee for main controller
         run: |
@@ -181,7 +191,7 @@ jobs:
       - name: Generate unique gosmee URL for Gitea tests
         if: startsWith(matrix.provider, 'gitea') || matrix.provider == 'concurrency'
         id: gosmee-url
-        run: |
+        run: | # zizmor: ignore[github-env]
           SMEE_URL=$(curl -s https://hook.pipelinesascode.com -o /dev/null -w '%{redirect_url}')
           echo "Generated unique smee URL: ${SMEE_URL}"
           echo "url=${SMEE_URL}" >> "$GITHUB_OUTPUT"
@@ -195,7 +205,7 @@ jobs:
       - name: Generate unique gosmee URL for GitLab tests
         if: matrix.provider == 'gitlab_bitbucket'
         id: gosmee-gitlab-url
-        run: |
+        run: | # zizmor: ignore[github-env]
           SMEE_URL=$(curl -s https://hook.pipelinesascode.com -o /dev/null -w '%{redirect_url}')
           echo "Generated unique GitLab smee URL: ${SMEE_URL}"
           echo "url=${SMEE_URL}" >> "$GITHUB_OUTPUT"
@@ -214,7 +224,7 @@ jobs:
       - name: Generate unique gosmee URL for GHE webhook tests
         if: startsWith(matrix.provider, 'github_ghe') || matrix.provider == 'concurrency'
         id: gosmee-ghe-webhook-url
-        run: |
+        run: | # zizmor: ignore[github-env]
           SMEE_URL=$(curl -s https://hook.pipelinesascode.com -o /dev/null -w '%{redirect_url}')
           echo "Generated unique GHE webhook smee URL: ${SMEE_URL}"
           echo "url=${SMEE_URL}" >> "$GITHUB_OUTPUT"
@@ -298,16 +308,18 @@ jobs:
       - name: Start installing cluster with startpaac
         env:
           PAC_DIR: ${{ github.workspace }}
+          APPLICATION_ID: ${{ vars.APPLICATION_ID }}
+          TEST_GITHUB_SECOND_APPLICATION_ID: ${{ vars.TEST_GITHUB_SECOND_APPLICATION_ID }}
         run: |
           mkdir -p ~/secrets
-          echo "${{ vars.APPLICATION_ID }}" > ~/secrets/github-application-id
+          echo "$APPLICATION_ID" > ~/secrets/github-application-id
           echo "${{ secrets.APP_PRIVATE_KEY }}" > ~/secrets/github-private-key
           echo "${{ secrets.WEBHOOK_SECRET }}" > ~/secrets/webhook.secret
           echo "${{ secrets.PYSMEE_URL }}" > ~/secrets/smee
 
 
           mkdir -p ~/secrets-second
-          echo "${{ vars.TEST_GITHUB_SECOND_APPLICATION_ID }}" > ~/secrets-second/github-application-id
+          echo "$TEST_GITHUB_SECOND_APPLICATION_ID" > ~/secrets-second/github-application-id
           echo "${{ secrets.TEST_GITHUB_SECOND_PRIVATE_KEY }}" > ~/secrets-second/github-private-key
           echo "${{ secrets.TEST_GITHUB_SECOND_WEBHOOK_SECRET }}" > ~/secrets-second/webhook.secret
           echo "${{ secrets.TEST_GITHUB_SECOND_SMEE_URL }}" > ~/secrets-second/smee
@@ -397,6 +409,8 @@ jobs:
     if: ${{ always() && github.ref_name == 'main' && github.event_name == 'schedule' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
