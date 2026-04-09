@@ -386,6 +386,13 @@ jobs:
         run: |
           ./hack/gh-workflow-ci.sh run_e2e_tests
 
+      - name: Generate GitHub Step Summary
+        if: ${{ always() }}
+        env:
+          TEST_PROVIDER: ${{ matrix.provider }}
+        run: |
+          ./hack/gh-workflow-ci.sh generate_github_summary
+
       - name: Collect logs
         if: ${{ always() }}
         env:
