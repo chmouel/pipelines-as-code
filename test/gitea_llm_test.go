@@ -5,11 +5,15 @@ package test
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
+	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	tgitea "github.com/openshift-pipelines/pipelines-as-code/test/pkg/gitea"
+	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
+	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -57,10 +61,53 @@ func TestGiteaLLM(t *testing.T) {
 			},
 		},
 	}
-	_, f := tgitea.TestPR(t, topts)
+	ctx, f := tgitea.TestPR(t, topts)
 	defer f()
 	topts.Regexp = regexp.MustCompile(fmt.Sprintf(".*%s.*", llmRoleName))
 	tgitea.WaitForPullRequestCommentGoldenMatch(t, topts, "gitea-llm-comment.golden")
+
+	// Wait for the first PipelineRun to be fully reconciled (repo status updated).
+	_, err := twait.UntilRepositoryUpdated(ctx, topts.ParamsRun.Clients, twait.Opts{
+		RepoName:            topts.TargetNS,
+		Namespace:           topts.TargetNS,
+		MinNumberStatus:     1,
+		PollTimeout:         twait.DefaultTimeout,
+		TargetSHA:           topts.SHA,
+		FailOnRepoCondition: "no-match",
+	})
+	assert.NilError(t, err)
+
+	// Trigger a second PipelineRun via /retest.
+	tgitea.PostCommentOnPullRequest(t, topts, "/retest")
+
+	// Wait for the second PipelineRun to complete (repo gets 2 status entries).
+	_, err = twait.UntilRepositoryUpdated(ctx, topts.ParamsRun.Clients, twait.Opts{
+		RepoName:            topts.TargetNS,
+		Namespace:           topts.TargetNS,
+		MinNumberStatus:     2,
+		PollTimeout:         twait.DefaultTimeout,
+		TargetSHA:           topts.SHA,
+		FailOnRepoCondition: "no-match",
+	})
+	assert.NilError(t, err)
+
+	// The second LLM analysis should have updated the existing comment, not
+	// created a duplicate. Verify exactly one comment carries the marker.
+	comments, _, err := topts.GiteaCNX.Client().ListRepoIssueComments(
+		topts.PullRequest.Base.Repository.Owner.UserName,
+		topts.PullRequest.Base.Repository.Name,
+		forgejo.ListIssueCommentOptions{})
+	assert.NilError(t, err)
+
+	llmMarker := fmt.Sprintf("<!-- llm-analysis-%s -->", llmRoleName)
+	llmCommentCount := 0
+	for _, c := range comments {
+		if strings.Contains(c.Body, llmMarker) {
+			llmCommentCount++
+		}
+	}
+	assert.Equal(t, llmCommentCount, 1,
+		"expected exactly 1 LLM analysis comment after retest, but found %d", llmCommentCount)
 }
 
 // Local Variables:
