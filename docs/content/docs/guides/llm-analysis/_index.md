@@ -93,7 +93,7 @@ Each role defines a specific analysis scenario. You can configure multiple roles
 | `name` | string | Yes | Unique identifier for this role |
 | `prompt` | string | Yes | Prompt template for the LLM |
 | `model` | string | No | Model name (consult provider documentation for available models). Uses provider default if not specified. |
-| `on_cel` | string | No | CEL expression for conditional triggering. If not specified, the role will always run. |
+| `on_cel` | string | No | CEL expression for conditional triggering. If not specified, the role runs only for failed PipelineRuns. |
 | `output` | string | Yes | Output destination (currently only `pr-comment` is supported) |
 | `context_items` | object | No | Configuration for context inclusion |
 
