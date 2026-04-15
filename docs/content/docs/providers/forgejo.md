@@ -93,13 +93,10 @@ kubectl -n target-namespace create secret generic forgejo-webhook-config \
   --from-literal webhook.secret="SECRET_AS_SET_IN_WEBHOOK_CONFIGURATION"
 ```
 
-If you configured an empty webhook secret, use an empty string:
-
-```shell
-kubectl -n target-namespace create secret generic forgejo-webhook-config \
-  --from-literal provider.token="TOKEN_AS_GENERATED_PREVIOUSLY" \
-  --from-literal webhook.secret=""
-```
+{{< callout type="warning" >}}
+Forgejo and Gitea webhook validation requires a non-empty shared secret.
+Do not set `webhook.secret` to an empty string.
+{{< /callout >}}
 
 ### Create the Repository CR
 
