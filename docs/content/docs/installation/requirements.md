@@ -55,21 +55,25 @@ You need the following tools to interact with your cluster and manage Pipelines-
 
 ### Required Tools
 
-1
+1. `kubectl`
 
-kubectl
+The Kubernetes command-line tool for cluster access.
 
-The Kubernetes command-line tool for cluster access.**Installation**: [kubectl installation guide](https://kubernetes.io/docs/tasks/tools/)**Verify**:
+**Installation**: [kubectl installation guide](https://kubernetes.io/docs/tasks/tools/)
+
+**Verify**:
 
 ```bash
 kubectl version --client
 ```
 
-2
+1. `oc` (OpenShift only)
 
-oc (OpenShift only)
+The OpenShift command-line tool.
 
-The OpenShift command-line tool.**Installation**: [OpenShift CLI tools](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html)**Verify**:
+**Installation**: [OpenShift CLI tools](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html)
+
+**Verify**:
 
 ```bash
 oc version
@@ -104,7 +108,7 @@ The Pipelines-as-Code CLI plugin for `tkn`.
 **Install via Homebrew**:
 
 ```bash
-brew install openshift-pipelines/pipelines-as-code/tkn-pac
+brew install --cask openshift-pipelines/pipelines-as-code/tektoncd-pac
 ```
 
 **Install via Direct Download** (Linux):
