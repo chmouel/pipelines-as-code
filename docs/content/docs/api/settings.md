@@ -270,6 +270,8 @@ Specifies the LLM model for this role. If omitted, Pipelines-as-Code uses provid
 
 {{< param name="roles[].on_cel" type="string" id="param-roles-on-cel" >}}
 Defines a CEL expression that determines when Pipelines-as-Code triggers this role.
+Use the structured LLM CEL context, such as `body.event.*`,
+`body.pipelineRun.*`, and `body.repository.*`.
 {{< /param >}}
 
 {{< param name="roles[].output" type="string" id="param-roles-output" >}}
@@ -321,7 +323,7 @@ settings:
       - name: "failure-analysis"
         prompt: "Analyze the following CI/CD failure and suggest fixes"
         model: "gpt-4"
-        on_cel: "event_type == 'pull_request' && status == 'failed'"
+        on_cel: 'body.event.event_type == "pull_request" && body.pipelineRun.status.conditions[0].status == "False"'
         context_items:
           commit_content: true
           error_content: true
@@ -385,7 +387,7 @@ spec:
             2. Specific fix recommendations
             3. Prevention strategies
           model: "gpt-4"
-          on_cel: 'event_type == "pull_request" && status == "failed"'
+          on_cel: 'body.event.event_type == "pull_request" && body.pipelineRun.status.conditions[0].status == "False"'
           output: "pr-comment"
           context_items:
             commit_content: true
@@ -397,7 +399,7 @@ spec:
         - name: "security-review"
           prompt: "Review this change for potential security issues"
           model: "gpt-4"
-          on_cel: 'event_type == "pull_request" && has_label("security-review")'
+          on_cel: '"security-review" in body.event.pull_request_labels'
           context_items:
             commit_content: true
             pr_content: true
