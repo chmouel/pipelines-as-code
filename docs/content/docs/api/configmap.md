@@ -163,6 +163,16 @@ custom-console-url-pr-tasklog: "https://url/ns/{{ namespace }}/{{ pr }}/logs/{{ 
 
 {{< /param >}}
 
+{{< param name="custom-console-url-namespace" type="string" id="param-custom-console-url-namespace" >}}
+Defines the template URL for namespace-level views in your custom console.
+Supports the `{{ namespace }}` variable.
+
+```yaml
+custom-console-url-namespace: "https://url/ns/{{ namespace }}"
+```
+
+{{< /param >}}
+
 ### Error Detection and Logging
 
 {{< param name="error-log-snippet" type="boolean" default="true" id="param-error-log-snippet" >}}
