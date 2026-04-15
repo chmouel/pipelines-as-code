@@ -32,6 +32,19 @@ settings:
 
 {{< /param >}}
 
+{{< param name="gitops_command_prefix" type="string" id="param-gitops-command-prefix" >}}
+Sets a custom prefix for GitOps commands such as `/test`, `/retest`, and `/cancel`.
+Use a plain word such as `pac`; Pipelines-as-Code adds the leading slash
+automatically. For command behavior and examples, see the
+[GitOps commands guide]({{< relref "/docs/guides/gitops-commands/advanced" >}}).
+
+```yaml
+settings:
+  gitops_command_prefix: "pac"
+```
+
+{{< /param >}}
+
 {{< param name="policy" type="Policy" >}}
 Defines authorization policies for the repository. These policies control which users can trigger PipelineRuns under different conditions.
 
