@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/generated/clientset/versioned"
@@ -12,13 +13,14 @@ import (
 
 type ManagerInterface interface {
 	InitQueues(ctx context.Context, tekton tektonVersionedClient.Interface, pac versioned.Interface) error
+	RecoveryInterval() time.Duration
 	RemoveRepository(repo *v1alpha1.Repository)
 	QueuedPipelineRuns(repo *v1alpha1.Repository) []string
 	RunningPipelineRuns(repo *v1alpha1.Repository) []string
-	AddListToRunningQueue(repo *v1alpha1.Repository, list []string) ([]string, error)
+	AddListToRunningQueue(ctx context.Context, repo *v1alpha1.Repository, list []string) ([]string, error)
 	AddToPendingQueue(repo *v1alpha1.Repository, list []string) error
-	RemoveFromQueue(repoKey, prKey string) bool
-	RemoveAndTakeItemFromQueue(repo *v1alpha1.Repository, run *tektonv1.PipelineRun) string
+	RemoveFromQueue(ctx context.Context, repo *v1alpha1.Repository, prKey string) bool
+	RemoveAndTakeItemFromQueue(ctx context.Context, repo *v1alpha1.Repository, run *tektonv1.PipelineRun) string
 }
 
 func RepoKey(repo *v1alpha1.Repository) string {

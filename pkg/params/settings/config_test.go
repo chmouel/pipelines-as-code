@@ -49,6 +49,7 @@ func TestSyncConfig(t *testing.T) {
 				CustomConsolePRTaskLog:               "",
 				CustomConsoleNamespaceURL:            "",
 				RememberOKToTest:                     false,
+				ConcurrencyBackend:                   ConcurrencyBackendMemory,
 			},
 		},
 		{
@@ -79,6 +80,7 @@ func TestSyncConfig(t *testing.T) {
 				"remember-ok-to-test":                     "false",
 				"skip-push-event-for-pr-commits":          "true",
 				"require-ok-to-test-sha":                  "true",
+				"concurrency-backend":                     "lease",
 			},
 			expectedStruct: Settings{
 				ApplicationName:                      "pac-pac",
@@ -110,6 +112,7 @@ func TestSyncConfig(t *testing.T) {
 				CustomConsoleNamespaceURL:            "https://custom-console-namespace",
 				RememberOKToTest:                     false,
 				RequireOkToTestSHA:                   true,
+				ConcurrencyBackend:                   ConcurrencyBackendLease,
 			},
 		},
 		{
@@ -146,6 +149,13 @@ func TestSyncConfig(t *testing.T) {
 				"custom-console-url-pr-tasklog": "invalid-url",
 			},
 			expectedError: "custom validation failed for field CustomConsolePRTaskLog: invalid value, must start with http:// or https://",
+		},
+		{
+			name: "invalid concurrency backend",
+			configMap: map[string]string{
+				"concurrency-backend": "sqlite",
+			},
+			expectedError: `custom validation failed for field ConcurrencyBackend: invalid concurrency backend "sqlite", must be one of "memory" or "lease"`,
 		},
 	}
 

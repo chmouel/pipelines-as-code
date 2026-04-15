@@ -340,9 +340,15 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 
 	// remove pipelineRun from Queue and start the next one
 	for {
-		next := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
+		next := r.qm.RemoveAndTakeItemFromQueue(ctx, repo, pr)
 		if next == "" {
+			logger.Debugf("no next queued pipelinerun available for repository %s after completing %s/%s", repo.GetName(), pr.Namespace, pr.Name)
 			break
+		}
+		logger.Debugf("attempting to promote next queued pipelinerun %s for repository %s after completing %s/%s", next, repo.GetName(), pr.Namespace, pr.Name)
+		if r.eventEmitter != nil {
+			r.eventEmitter.EmitMessage(repo, zap.InfoLevel, "QueueClaimedForPromotion",
+				"claimed queued PipelineRun "+next+" for promotion in repository "+queuepkg.RepoKey(repo))
 		}
 		key := strings.Split(next, "/")
 		pr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
@@ -353,9 +359,15 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 
 		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
 			logger.Errorf("failed to update status: %w", err)
-			_ = r.qm.RemoveFromQueue(queuepkg.RepoKey(repo), queuepkg.PrKey(pr))
+			logger.Debugf("clearing queue claim for pipelinerun %s after failed promotion from finalizer path", queuepkg.PrKey(pr))
+			_ = r.qm.RemoveFromQueue(ctx, repo, queuepkg.PrKey(pr))
+			if r.eventEmitter != nil {
+				r.eventEmitter.EmitMessage(repo, zap.WarnLevel, "QueuePromotionFailed",
+					"failed to promote queued PipelineRun "+queuepkg.PrKey(pr)+": "+err.Error())
+			}
 			continue
 		}
+		logger.Debugf("successfully promoted queued pipelinerun %s after completion of %s/%s", queuepkg.PrKey(pr), key[0], key[1])
 		break
 	}
 
@@ -458,8 +470,14 @@ func (r *Reconciler) initGitProviderClient(ctx context.Context, logger *zap.Suga
 func (r *Reconciler) updatePipelineRunState(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun, state string) (*tektonv1.PipelineRun, error) {
 	currentState := pr.GetAnnotations()[keys.State]
 	logger.Infof("updating pipelineRun %v/%v state from %s to %s", pr.GetNamespace(), pr.GetName(), currentState, state)
-	annotations := map[string]string{
+	annotations := map[string]any{
 		keys.State: state,
+	}
+	if state != kubeinteraction.StateQueued {
+		for key, value := range queuepkg.LeaseQueueCleanupAnnotations() {
+			annotations[key] = value
+		}
+		logger.Debugf("clearing queue-only annotations for pipelinerun %s/%s while transitioning to %s", pr.GetNamespace(), pr.GetName(), state)
 	}
 	if state == kubeinteraction.StateStarted {
 		annotations[keys.SCMReportingPLRStarted] = "true"

@@ -259,7 +259,14 @@ func TestUpdatePipelineRunState(t *testing.T) {
 					Namespace: "test",
 					Name:      "test",
 					Annotations: map[string]string{
-						keys.State: kubeinteraction.StateQueued,
+						keys.State:                 kubeinteraction.StateQueued,
+						keys.QueueClaimedBy:        "watcher-a",
+						keys.QueueClaimedAt:        "2026-04-15T10:00:00Z",
+						keys.QueueDecision:         "claim_active",
+						keys.QueueDebugSummary:     "backend=lease",
+						keys.QueuePromotionRetries: "3",
+						keys.QueuePromotionBlocked: "true",
+						keys.QueuePromotionLastErr: "boom",
 					},
 				},
 				Spec: tektonv1.PipelineRunSpec{
@@ -276,7 +283,14 @@ func TestUpdatePipelineRunState(t *testing.T) {
 					Namespace: "test",
 					Name:      "test",
 					Annotations: map[string]string{
-						keys.State: kubeinteraction.StateStarted,
+						keys.State:                 kubeinteraction.StateStarted,
+						keys.QueueClaimedBy:        "watcher-a",
+						keys.QueueClaimedAt:        "2026-04-15T10:00:00Z",
+						keys.QueueDecision:         "claim_active",
+						keys.QueueDebugSummary:     "backend=lease",
+						keys.QueuePromotionRetries: "3",
+						keys.QueuePromotionBlocked: "true",
+						keys.QueuePromotionLastErr: "boom",
 					},
 				},
 				Spec:   tektonv1.PipelineRunSpec{},
@@ -314,6 +328,18 @@ func TestUpdatePipelineRunState(t *testing.T) {
 			} else {
 				_, exists := updatedPR.GetAnnotations()[keys.SCMReportingPLRStarted]
 				assert.Assert(t, !exists, "SCMReportingPLRStarted annotation should not exist for non-started states")
+			}
+			for _, key := range []string{
+				keys.QueueClaimedBy,
+				keys.QueueClaimedAt,
+				keys.QueueDecision,
+				keys.QueueDebugSummary,
+				keys.QueuePromotionRetries,
+				keys.QueuePromotionBlocked,
+				keys.QueuePromotionLastErr,
+			} {
+				_, exists := updatedPR.GetAnnotations()[key]
+				assert.Assert(t, !exists, "%s annotation should be removed when state is %s", key, tt.state)
 			}
 		})
 	}

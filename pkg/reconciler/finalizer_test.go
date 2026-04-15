@@ -166,7 +166,7 @@ func TestReconcilerFinalizeKind(t *testing.T) {
 
 			if len(tt.addToQueue) != 0 {
 				for _, pr := range tt.addToQueue {
-					_, err := r.qm.AddListToRunningQueue(finalizeTestRepo, []string{pr.GetNamespace() + "/" + pr.GetName()})
+					_, err := r.qm.AddListToRunningQueue(ctx, finalizeTestRepo, []string{pr.GetNamespace() + "/" + pr.GetName()})
 					assert.NilError(t, err)
 				}
 			}

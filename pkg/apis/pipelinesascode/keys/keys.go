@@ -61,6 +61,13 @@ const (
 	LogURL                 = pipelinesascode.GroupName + "/log-url"
 	ExecutionOrder         = pipelinesascode.GroupName + "/execution-order"
 	SCMReportingPLRStarted = pipelinesascode.GroupName + "/scm-reporting-plr-started"
+	QueueClaimedBy         = pipelinesascode.GroupName + "/queue-claimed-by"
+	QueueClaimedAt         = pipelinesascode.GroupName + "/queue-claimed-at"
+	QueueDecision          = pipelinesascode.GroupName + "/queue-decision"
+	QueueDebugSummary      = pipelinesascode.GroupName + "/queue-debug-summary"
+	QueuePromotionRetries  = pipelinesascode.GroupName + "/queue-promotion-retries"
+	QueuePromotionBlocked  = pipelinesascode.GroupName + "/queue-promotion-blocked"
+	QueuePromotionLastErr  = pipelinesascode.GroupName + "/queue-promotion-last-error"
 	SecretCreated          = pipelinesascode.GroupName + "/secret-created"
 	CloneURL               = pipelinesascode.GroupName + "/clone-url"
 	// PublicGithubAPIURL default is "https://api.github.com" but it can be overridden by X-GitHub-Enterprise-Host header.

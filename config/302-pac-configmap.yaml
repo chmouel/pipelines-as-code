@@ -173,6 +173,13 @@ data:
   # Default: true
   skip-push-event-for-pr-commits: "true"
 
+  # Selects the concurrency queue backend used by the watcher.
+  # "memory" keeps the existing in-process queue state.
+  # "lease" uses Kubernetes Leases plus PipelineRun claims to recover more safely
+  # from watcher restarts and cluster/API timing issues.
+  # Restart the watcher after changing this setting.
+  concurrency-backend: "memory"
+
   # Configure a custom console here, the driver support custom parameters from
   # Repo CR along a few other template variable, see documentation for more
   # details

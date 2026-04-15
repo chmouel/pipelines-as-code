@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -40,9 +41,20 @@ func TestSomeoneElseSetPendingWithNoConcurrencyLimit(t *testing.T) {
 			Reason: v1beta1.PipelineRunReasonPending.String(),
 		},
 	}
-	started, err := qm.AddListToRunningQueue(repo, []string{PrKey(pr)})
+	started, err := qm.AddListToRunningQueue(context.Background(), repo, []string{PrKey(pr)})
 	assert.NilError(t, err)
 	assert.Equal(t, len(started), 1)
+}
+
+func TestManagerRecoveryInterval(t *testing.T) {
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+
+	memoryManager := NewManager(logger)
+	assert.Equal(t, memoryManager.RecoveryInterval(), time.Duration(0))
+
+	leaseManager := NewLeaseManager(logger, nil, nil, "pac")
+	assert.Equal(t, leaseManager.RecoveryInterval(), defaultLeaseClaimTTL)
 }
 
 func TestAddToPendingQueueDirectly(t *testing.T) {
@@ -82,19 +94,19 @@ func TestNewManagerForList(t *testing.T) {
 	prFirst := newTestPR("first", time.Now(), nil, nil, tektonv1.PipelineRunSpec{})
 
 	// added to queue, as there is only one should start
-	started, err := qm.AddListToRunningQueue(repo, []string{PrKey(prFirst)})
+	started, err := qm.AddListToRunningQueue(context.Background(), repo, []string{PrKey(prFirst)})
 	assert.NilError(t, err)
 	assert.Equal(t, len(started), 1)
 
 	// removing the running from queue
-	assert.Equal(t, qm.RemoveAndTakeItemFromQueue(repo, prFirst), "")
+	assert.Equal(t, qm.RemoveAndTakeItemFromQueue(context.Background(), repo, prFirst), "")
 
 	// adding another 2 pipelineRun, limit is 1 so this will be added to pending queue and
 	// then one will be started
 	prSecond := newTestPR("second", time.Now().Add(1*time.Second), nil, nil, tektonv1.PipelineRunSpec{})
 	prThird := newTestPR("third", time.Now().Add(7*time.Second), nil, nil, tektonv1.PipelineRunSpec{})
 
-	started, err = qm.AddListToRunningQueue(repo, []string{PrKey(prSecond), PrKey(prThird)})
+	started, err = qm.AddListToRunningQueue(context.Background(), repo, []string{PrKey(prSecond), PrKey(prThird)})
 	assert.NilError(t, err)
 	assert.Equal(t, len(started), 1)
 	// as per the list, 2nd must be started
@@ -104,12 +116,12 @@ func TestNewManagerForList(t *testing.T) {
 	prFourth := newTestPR("fourth", time.Now().Add(5*time.Second), nil, nil, tektonv1.PipelineRunSpec{})
 	prFifth := newTestPR("fifth", time.Now().Add(4*time.Second), nil, nil, tektonv1.PipelineRunSpec{})
 
-	started, err = qm.AddListToRunningQueue(repo, []string{PrKey(prFourth), PrKey(prFifth)})
+	started, err = qm.AddListToRunningQueue(context.Background(), repo, []string{PrKey(prFourth), PrKey(prFifth)})
 	assert.NilError(t, err)
 	assert.Equal(t, len(started), 0)
 
 	// removing 2nd from queue, which means it should start 3rd
-	assert.Equal(t, qm.RemoveAndTakeItemFromQueue(repo, prSecond), PrKey(prThird))
+	assert.Equal(t, qm.RemoveAndTakeItemFromQueue(context.Background(), repo, prSecond), PrKey(prThird))
 
 	// changing the concurrency limit to 2
 	repo.Spec.ConcurrencyLimit = intPtr(2)
@@ -118,7 +130,7 @@ func TestNewManagerForList(t *testing.T) {
 	prSeventh := newTestPR("seventh", time.Now().Add(5*time.Second), nil, nil, tektonv1.PipelineRunSpec{})
 	prEight := newTestPR("eight", time.Now().Add(4*time.Second), nil, nil, tektonv1.PipelineRunSpec{})
 
-	started, err = qm.AddListToRunningQueue(repo, []string{PrKey(prSixth), PrKey(prSeventh), PrKey(prEight)})
+	started, err = qm.AddListToRunningQueue(context.Background(), repo, []string{PrKey(prSixth), PrKey(prSeventh), PrKey(prEight)})
 	assert.NilError(t, err)
 	// third is running, but limit is changed now, so one more should be moved to running
 	assert.Equal(t, len(started), 1)
@@ -139,18 +151,18 @@ func TestNewManagerReListing(t *testing.T) {
 	prThird := newTestPR("third", time.Now().Add(7*time.Second), nil, nil, tektonv1.PipelineRunSpec{})
 
 	// added to queue, as there is only one should start
-	started, err := qm.AddListToRunningQueue(repo, []string{PrKey(prFirst), PrKey(prSecond), PrKey(prThird)})
+	started, err := qm.AddListToRunningQueue(context.Background(), repo, []string{PrKey(prFirst), PrKey(prSecond), PrKey(prThird)})
 	assert.NilError(t, err)
 	assert.Equal(t, len(started), 2)
 
 	// if first is running and other pipelineRuns are reconciling
 	// then adding again shouldn't have any effect
-	started, err = qm.AddListToRunningQueue(repo, []string{PrKey(prFirst), PrKey(prSecond), PrKey(prThird)})
+	started, err = qm.AddListToRunningQueue(context.Background(), repo, []string{PrKey(prFirst), PrKey(prSecond), PrKey(prThird)})
 	assert.NilError(t, err)
 	assert.Equal(t, len(started), 0)
 
 	// again
-	started, err = qm.AddListToRunningQueue(repo, []string{PrKey(prFirst), PrKey(prSecond), PrKey(prThird)})
+	started, err = qm.AddListToRunningQueue(context.Background(), repo, []string{PrKey(prFirst), PrKey(prSecond), PrKey(prThird)})
 	assert.NilError(t, err)
 	assert.Equal(t, len(started), 0)
 
@@ -164,7 +176,7 @@ func TestNewManagerReListing(t *testing.T) {
 	prFifth := newTestPR("fifth", time.Now().Add(1*time.Second), nil, nil, tektonv1.PipelineRunSpec{})
 	prSixths := newTestPR("sixth", time.Now().Add(7*time.Second), nil, nil, tektonv1.PipelineRunSpec{})
 
-	started, err = qm.AddListToRunningQueue(repo, []string{PrKey(prFourth), PrKey(prFifth), PrKey(prSixths)})
+	started, err = qm.AddListToRunningQueue(context.Background(), repo, []string{PrKey(prFourth), PrKey(prFifth), PrKey(prSixths)})
 	assert.NilError(t, err)
 	assert.Equal(t, len(started), 0)
 
@@ -250,7 +262,7 @@ func TestQueueManagerInitQueues(t *testing.T) {
 
 	// now if first is completed and removed from running queue
 	// then second must start as per execution order
-	qm.RemoveAndTakeItemFromQueue(repo, firstPR)
+	qm.RemoveAndTakeItemFromQueue(context.Background(), repo, firstPR)
 	assert.Equal(t, sema.getCurrentRunning()[0], PrKey(secondPR))
 	assert.Equal(t, sema.getCurrentPending()[0], PrKey(thirdPR))
 

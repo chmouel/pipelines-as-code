@@ -200,6 +200,13 @@ get_tests() {
 
 run_e2e_tests() {
   set +x
+
+  # Enable lease-based concurrency backend for all E2E providers
+  kubectl -n pipelines-as-code patch configmap pipelines-as-code --type merge \
+    -p '{"data":{"concurrency-backend":"lease"}}'
+  kubectl -n pipelines-as-code rollout restart deployment/pipelines-as-code-watcher
+  kubectl -n pipelines-as-code rollout status deployment/pipelines-as-code-watcher --timeout=120s
+
   target="${TEST_PROVIDER}"
   export PAC_E2E_KEEP_NS=true
 

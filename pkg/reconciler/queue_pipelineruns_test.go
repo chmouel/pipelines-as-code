@@ -1,14 +1,18 @@
 package reconciler
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	pacv1alpha1 "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	queuepkg "github.com/openshift-pipelines/pipelines-as-code/pkg/queue"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	testconcurrency "github.com/openshift-pipelines/pipelines-as-code/pkg/test/concurrency"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
@@ -16,6 +20,8 @@ import (
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8stesting "k8s.io/client-go/testing"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
@@ -207,4 +213,153 @@ func TestQueuePipelineRun(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRecordQueuePromotionFailure(t *testing.T) {
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	fakelogger := zap.New(observer).Sugar()
+
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		wantRetries string
+	}{
+		{
+			name:        "first failure records retry metadata",
+			annotations: map[string]string{},
+			wantRetries: "1",
+		},
+		{
+			name: "later failures keep incrementing retries without blocking promotion",
+			annotations: map[string]string{
+				keys.QueuePromotionRetries: "4",
+			},
+			wantRetries: "5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			repo := &pacv1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-repo",
+					Namespace: "test",
+				},
+				Spec: pacv1alpha1.RepositorySpec{
+					ConcurrencyLimit: func() *int { limit := 2; return &limit }(),
+				},
+			}
+			pipelineRun := &tektonv1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace:   "test",
+					Name:        "test-pr",
+					Annotations: tt.annotations,
+				},
+			}
+			testData := testclient.Data{
+				PipelineRuns: []*tektonv1.PipelineRun{pipelineRun},
+			}
+			stdata, _ := testclient.SeedTestData(t, ctx, testData)
+
+			r := &Reconciler{
+				run: &params.Run{
+					Clients: clients.Clients{
+						Tekton: stdata.Pipeline,
+					},
+				},
+			}
+
+			err := r.recordQueuePromotionFailure(ctx, fakelogger, repo, pipelineRun, errors.New("cannot patch"))
+			assert.NilError(t, err)
+
+			updatedPR, err := stdata.Pipeline.TektonV1().PipelineRuns("test").Get(ctx, "test-pr", metav1.GetOptions{})
+			assert.NilError(t, err)
+			assert.Equal(t, updatedPR.GetAnnotations()[keys.QueuePromotionRetries], tt.wantRetries)
+			assert.Equal(t, updatedPR.GetAnnotations()[keys.QueuePromotionLastErr], "cannot patch")
+			assert.Equal(t, updatedPR.GetAnnotations()[keys.QueueDecision], queuepkg.QueueDecisionPromotionFailed)
+			assert.Assert(t, strings.Contains(updatedPR.GetAnnotations()[keys.QueueDebugSummary], "lastDecision="+queuepkg.QueueDecisionPromotionFailed))
+			_, exists := updatedPR.GetAnnotations()[keys.QueuePromotionBlocked]
+			assert.Assert(t, !exists, "QueuePromotionBlocked should not be set when promotion fails")
+		})
+	}
+}
+
+func TestQueuePipelineRunStopsAfterSinglePromotionFailure(t *testing.T) {
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	fakelogger := zap.New(observer).Sugar()
+	ctx, _ := rtesting.SetupFakeContext(t)
+
+	pipelineRun := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "queued",
+			Namespace: "test",
+			Annotations: map[string]string{
+				keys.ExecutionOrder: "test/queued",
+				keys.Repository:     "test",
+				keys.State:          kubeinteraction.StateQueued,
+			},
+		},
+		Spec: tektonv1.PipelineRunSpec{
+			Status: tektonv1.PipelineRunSpecStatusPending,
+		},
+	}
+	testRepo := &pacv1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test",
+			Namespace: "test",
+		},
+		Spec: pacv1alpha1.RepositorySpec{
+			URL: randomURL,
+		},
+	}
+
+	testData := testclient.Data{
+		Repositories: []*pacv1alpha1.Repository{testRepo},
+		PipelineRuns: []*tektonv1.PipelineRun{pipelineRun},
+	}
+	stdata, informers := testclient.SeedTestData(t, ctx, testData)
+	patchCalls := 0
+	stdata.Pipeline.PrependReactor("patch", "pipelineruns", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		patchCalls++
+		if patchCalls == 1 {
+			return true, nil, errors.New("boom")
+		}
+		return false, nil, nil
+	})
+
+	r := &Reconciler{
+		qm: testconcurrency.TestQMI{
+			RunningQueue: []string{"test/queued"},
+		},
+		repoLister: informers.Repository.Lister(),
+		run: &params.Run{
+			Info: info.Info{
+				Kube: &info.KubeOpts{
+					Namespace: "global",
+				},
+				Controller: &info.ControllerInfo{},
+			},
+			Clients: clients.Clients{
+				PipelineAsCode: stdata.PipelineAsCode,
+				Tekton:         stdata.Pipeline,
+				Kube:           stdata.Kube,
+				Log:            fakelogger,
+			},
+		},
+	}
+
+	err := r.queuePipelineRun(ctx, fakelogger, pipelineRun)
+	assert.ErrorContains(t, err, "failed to update pipelineRun to in_progress")
+
+	updatedPR, getErr := stdata.Pipeline.TektonV1().PipelineRuns("test").Get(ctx, "queued", metav1.GetOptions{})
+	assert.NilError(t, getErr)
+	assert.Equal(t, updatedPR.GetAnnotations()[keys.QueuePromotionRetries], "1")
+	assert.Assert(t, updatedPR.GetAnnotations()[keys.QueuePromotionLastErr] != "")
+	assert.Equal(t, updatedPR.GetAnnotations()[keys.QueueDecision], queuepkg.QueueDecisionPromotionFailed)
+	assert.Assert(t, strings.Contains(updatedPR.GetAnnotations()[keys.QueueDebugSummary], "lastDecision="+queuepkg.QueueDecisionPromotionFailed))
+	assert.Assert(t, strings.Contains(updatedPR.GetAnnotations()[keys.QueuePromotionLastErr], "cannot update state"))
+	assert.Assert(t, strings.Contains(updatedPR.GetAnnotations()[keys.QueuePromotionLastErr], "boom"))
+	_, exists := updatedPR.GetAnnotations()[keys.QueuePromotionBlocked]
+	assert.Assert(t, !exists, "QueuePromotionBlocked should not be set when queuePipelineRun returns after a failed promotion")
 }

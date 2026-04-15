@@ -15,6 +15,8 @@ import (
 
 const (
 	PACApplicationNameDefaultValue = "Pipelines as Code CI"
+	ConcurrencyBackendMemory       = "memory"
+	ConcurrencyBackendLease        = "lease"
 
 	HubURLKey                          = "hub-url"
 	HubCatalogNameKey                  = "hub-catalog-name"
@@ -80,8 +82,9 @@ type Settings struct {
 	CustomConsolePRTaskLog    string `json:"custom-console-url-pr-tasklog"`
 	CustomConsoleNamespaceURL string `json:"custom-console-url-namespace"`
 
-	RememberOKToTest   bool `json:"remember-ok-to-test"`
-	RequireOkToTestSHA bool `json:"require-ok-to-test-sha"`
+	RememberOKToTest   bool   `json:"remember-ok-to-test"`
+	RequireOkToTestSHA bool   `json:"require-ok-to-test-sha"`
+	ConcurrencyBackend string `default:"memory"              json:"concurrency-backend"`
 }
 
 func (s *Settings) DeepCopy(out *Settings) {
@@ -110,6 +113,7 @@ func DefaultValidators() map[string]func(string) error {
 		"CustomConsoleURL":           isValidURL,
 		"CustomConsolePRTaskLog":     startWithHTTPorHTTPS,
 		"CustomConsolePRDetail":      startWithHTTPorHTTPS,
+		"ConcurrencyBackend":         isValidConcurrencyBackend,
 	}
 }
 
@@ -158,4 +162,13 @@ func startWithHTTPorHTTPS(url string) error {
 		return fmt.Errorf("invalid value, must start with http:// or https://")
 	}
 	return nil
+}
+
+func isValidConcurrencyBackend(backend string) error {
+	switch backend {
+	case "", ConcurrencyBackendMemory, ConcurrencyBackendLease:
+		return nil
+	default:
+		return fmt.Errorf("invalid concurrency backend %q, must be one of %q or %q", backend, ConcurrencyBackendMemory, ConcurrencyBackendLease)
+	}
 }

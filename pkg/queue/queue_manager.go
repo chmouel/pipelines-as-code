@@ -37,6 +37,10 @@ func NewManager(logger *zap.SugaredLogger) *Manager {
 	}
 }
 
+func (*Manager) RecoveryInterval() time.Duration {
+	return 0
+}
+
 // getSemaphore returns existing semaphore created for repository or create
 // a new one with limit provided in repository
 // Semaphore: nothing but a waiting and a running queue for a repository
@@ -76,7 +80,7 @@ func (qm *Manager) checkAndUpdateSemaphoreSize(repo *v1alpha1.Repository, semaph
 // and if it is at the top and ready to run which means currently running pipelineRun < limit
 // then move it to running queue
 // This adds the pipelineRuns in the same order as in the list.
-func (qm *Manager) AddListToRunningQueue(repo *v1alpha1.Repository, list []string) ([]string, error) {
+func (qm *Manager) AddListToRunningQueue(_ context.Context, repo *v1alpha1.Repository, list []string) ([]string, error) {
 	qm.lock.Lock()
 	defer qm.lock.Unlock()
 
@@ -127,10 +131,11 @@ func (qm *Manager) AddToPendingQueue(repo *v1alpha1.Repository, list []string) e
 	return nil
 }
 
-func (qm *Manager) RemoveFromQueue(repoKey, prKey string) bool {
+func (qm *Manager) RemoveFromQueue(_ context.Context, repo *v1alpha1.Repository, prKey string) bool {
 	qm.lock.Lock()
 	defer qm.lock.Unlock()
 
+	repoKey := RepoKey(repo)
 	sema, found := qm.queueMap[repoKey]
 	if !found {
 		return false
@@ -142,10 +147,10 @@ func (qm *Manager) RemoveFromQueue(repoKey, prKey string) bool {
 	return true
 }
 
-func (qm *Manager) RemoveAndTakeItemFromQueue(repo *v1alpha1.Repository, run *tektonv1.PipelineRun) string {
+func (qm *Manager) RemoveAndTakeItemFromQueue(ctx context.Context, repo *v1alpha1.Repository, run *tektonv1.PipelineRun) string {
 	repoKey := RepoKey(repo)
 	prKey := PrKey(run)
-	if !qm.RemoveFromQueue(repoKey, prKey) {
+	if !qm.RemoveFromQueue(ctx, repo, prKey) {
 		return ""
 	}
 	sema, found := qm.queueMap[repoKey]
@@ -225,7 +230,7 @@ func (qm *Manager) InitQueues(ctx context.Context, tekton versioned2.Interface, 
 			}
 			orderedList := FilterPipelineRunByState(ctx, tekton, strings.Split(order, ","), "", kubeinteraction.StateStarted)
 
-			_, err = qm.AddListToRunningQueue(&repo, orderedList)
+			_, err = qm.AddListToRunningQueue(ctx, &repo, orderedList)
 			if err != nil {
 				qm.logger.Error("failed to init queue for repo: ", repo.GetName())
 			}

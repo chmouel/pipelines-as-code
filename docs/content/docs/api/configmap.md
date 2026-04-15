@@ -345,6 +345,20 @@ skip-push-event-for-pr-commits: "true"
 
 {{< /param >}}
 
+{{< param name="concurrency-backend" type="string" default="memory" id="param-concurrency-backend" >}}
+Selects the queue coordination backend used by the watcher. Supported values:
+
+- `memory`: in-process queue tracking. This is the default and matches the historical behavior.
+- `lease`: Kubernetes-backed coordination using `Lease` objects and short-lived PipelineRun claims for improved recovery during watcher restarts or API instability. This backend is Technology Preview.
+
+Restart the watcher after changing this setting.
+
+```yaml
+concurrency-backend: "memory"
+```
+
+{{< /param >}}
+
 ## Complete Example
 
 ```yaml
@@ -381,6 +395,7 @@ data:
   remember-ok-to-test: "true"
   require-ok-to-test-sha: "false"
   skip-push-event-for-pr-commits: "true"
+  concurrency-backend: "memory"
 ```
 
 ## Updating configuration
