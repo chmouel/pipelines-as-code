@@ -129,4 +129,3 @@ When you set `commit_content: true`, Pipelines-as-Code includes the following fi
 - Pipelines-as-Code **intentionally excludes email addresses** from the commit context to protect personally identifiable information (PII) when sending data to external LLM providers.
 - Fields appear only if your Git provider makes them available. Some providers supply limited information (for example, Bitbucket Cloud provides only the author name).
 - Author and committer may be the same person or different (for example, when using `git commit --amend` or rebasing).
-asing).

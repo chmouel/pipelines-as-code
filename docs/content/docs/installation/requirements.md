@@ -79,11 +79,13 @@ oc version
 
 These tools enhance the Pipelines-as-Code experience:
 
-1
+1. `tkn`
 
-tkn
+The Tekton CLI for managing Tekton resources.
 
-The Tekton CLI for managing Tekton resources.**Installation**: [Tekton CLI installation](https://tekton.dev/docs/cli/)**Install via Homebrew**:
+**Installation**: [Tekton CLI installation](https://tekton.dev/docs/cli/)
+
+**Install via Homebrew**:
 
 ```bash
 brew install tektoncd-cli
@@ -95,11 +97,11 @@ brew install tektoncd-cli
 tkn version
 ```
 
-2
+1. `tkn-pac`
 
-tkn-pac
+The Pipelines-as-Code CLI plugin for `tkn`.
 
-The Pipelines-as-Code CLI plugin for tkn.**Install via Homebrew**:
+**Install via Homebrew**:
 
 ```bash
 brew install openshift-pipelines/pipelines-as-code/tkn-pac
