@@ -78,7 +78,7 @@ Install the CLI and bootstrap your first repository:
 
 ```shell
 brew install tektoncd/pipelines-as-code/tkn-pac
-tkn pac bootstrap github
+tkn pac bootstrap
 ```
 
 Then follow the [getting started tutorial](https://pipelinesascode.com/docs/getting-started/).
