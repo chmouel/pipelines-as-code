@@ -304,6 +304,20 @@ func TestQueuePipelineRunStopsAfterSinglePromotionFailure(t *testing.T) {
 			Status: tektonv1.PipelineRunSpecStatusPending,
 		},
 	}
+	laterPipelineRun := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "later",
+			Namespace: "test",
+			Annotations: map[string]string{
+				keys.ExecutionOrder: "test/later",
+				keys.Repository:     "test",
+				keys.State:          kubeinteraction.StateQueued,
+			},
+		},
+		Spec: tektonv1.PipelineRunSpec{
+			Status: tektonv1.PipelineRunSpecStatusPending,
+		},
+	}
 	testRepo := &pacv1alpha1.Repository{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test",
@@ -316,7 +330,7 @@ func TestQueuePipelineRunStopsAfterSinglePromotionFailure(t *testing.T) {
 
 	testData := testclient.Data{
 		Repositories: []*pacv1alpha1.Repository{testRepo},
-		PipelineRuns: []*tektonv1.PipelineRun{pipelineRun},
+		PipelineRuns: []*tektonv1.PipelineRun{pipelineRun, laterPipelineRun},
 	}
 	stdata, informers := testclient.SeedTestData(t, ctx, testData)
 	patchCalls := 0
@@ -327,10 +341,13 @@ func TestQueuePipelineRunStopsAfterSinglePromotionFailure(t *testing.T) {
 		}
 		return false, nil, nil
 	})
+	removedClaims := []string{}
 
 	r := &Reconciler{
 		qm: testconcurrency.TestQMI{
-			RunningQueue: []string{"test/queued"},
+			RunningQueue:          []string{"test/queued", "test/later"},
+			RemoveFromQueueResult: true,
+			RemovedFromQueue:      &removedClaims,
 		},
 		repoLister: informers.Repository.Lister(),
 		run: &params.Run{
@@ -362,4 +379,5 @@ func TestQueuePipelineRunStopsAfterSinglePromotionFailure(t *testing.T) {
 	assert.Assert(t, strings.Contains(updatedPR.GetAnnotations()[keys.QueuePromotionLastErr], "boom"))
 	_, exists := updatedPR.GetAnnotations()[keys.QueuePromotionBlocked]
 	assert.Assert(t, !exists, "QueuePromotionBlocked should not be set when queuePipelineRun returns after a failed promotion")
+	assert.DeepEqual(t, removedClaims, []string{"test/queued", "test/later"})
 }

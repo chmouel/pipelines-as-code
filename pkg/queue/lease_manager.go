@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"sort"
@@ -19,10 +20,12 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	tektonclient "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
+	tektonv1lister "github.com/tektoncd/pipeline/pkg/client/listers/pipeline/v1"
 	"go.uber.org/zap"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 )
@@ -38,14 +41,19 @@ type LeaseManager struct {
 	logger         *zap.SugaredLogger
 	kube           kubernetes.Interface
 	tekton         tektonclient.Interface
+	pipelineLister tektonv1lister.PipelineRunLister
 	leaseNamespace string
 	identity       string
 	claimTTL       time.Duration
 	leaseDuration  int32
 	now            func() time.Time
+	wait           func(context.Context, time.Duration) error
 }
 
-var _ ManagerInterface = (*LeaseManager)(nil)
+var (
+	_ ManagerInterface       = (*LeaseManager)(nil)
+	_ PipelineRunListerAware = (*LeaseManager)(nil)
+)
 
 func NewManagerForBackend(
 	logger *zap.SugaredLogger,
@@ -81,6 +89,7 @@ func NewLeaseManager(
 		claimTTL:       defaultLeaseClaimTTL,
 		leaseDuration:  defaultLeaseDuration,
 		now:            time.Now,
+		wait:           waitForLeaseRetry,
 	}
 }
 
@@ -94,6 +103,10 @@ func (m *LeaseManager) RecoveryInterval() time.Duration {
 
 func DefaultLeaseClaimTTL() time.Duration {
 	return defaultLeaseClaimTTL
+}
+
+func (m *LeaseManager) SetPipelineRunLister(lister tektonv1lister.PipelineRunLister) {
+	m.pipelineLister = lister
 }
 
 func (m *LeaseManager) RemoveRepository(repo *v1alpha1.Repository) {
@@ -153,7 +166,7 @@ func (m *LeaseManager) AddListToRunningQueue(ctx context.Context, repo *v1alpha1
 		"attempting to claim queued pipelineruns for repository %s with concurrency limit %d and preferred order %v",
 		RepoKey(repo), *repo.Spec.ConcurrencyLimit, orderedList,
 	)
-	return m.claimNextQueued(ctx, repo, orderedList, "")
+	return m.claimNextQueued(ctx, repo, orderedList, "", 0)
 }
 
 func (m *LeaseManager) AddToPendingQueue(*v1alpha1.Repository, []string) error {
@@ -180,7 +193,7 @@ func (m *LeaseManager) RemoveAndTakeItemFromQueue(ctx context.Context, repo *v1a
 		"removing pipelinerun %s from repository %s and attempting to claim next queued item from order %v",
 		PrKey(run), RepoKey(repo), orderedList,
 	)
-	claimed, err := m.claimNextQueued(ctx, repo, orderedList, PrKey(run))
+	claimed, err := m.claimNextQueued(ctx, repo, orderedList, PrKey(run), 1)
 	if err != nil {
 		m.logger.Warnf("failed to claim next queued pipelinerun for repository %s: %v", RepoKey(repo), err)
 		return ""
@@ -204,7 +217,13 @@ type pipelineOrderMeta struct {
 	position  int
 }
 
-func (m *LeaseManager) claimNextQueued(ctx context.Context, repo *v1alpha1.Repository, preferredOrder []string, excludeKey string) ([]string, error) {
+func (m *LeaseManager) claimNextQueued(
+	ctx context.Context,
+	repo *v1alpha1.Repository,
+	preferredOrder []string,
+	excludeKey string,
+	maxClaims int,
+) ([]string, error) {
 	claimed := []string{}
 	var debugState *repoQueueState
 	var debugNewlyClaimed map[string]struct{}
@@ -221,6 +240,9 @@ func (m *LeaseManager) claimNextQueued(ctx context.Context, repo *v1alpha1.Repos
 			"lease queue state for repository %s: running=%d claimed=%d queued=%d occupied=%d available=%d exclude=%q preferred=%v",
 			RepoKey(repo), len(state.running), len(state.claimed), len(state.queued), occupied, available, excludeKey, preferredOrder,
 		)
+		if maxClaims > 0 && available > maxClaims {
+			available = maxClaims
+		}
 		remainingQueued := make([]tektonv1.PipelineRun, 0, len(state.queued))
 		newlyClaimed := map[string]struct{}{}
 		for _, pr := range state.queued {
@@ -279,9 +301,7 @@ func (m *LeaseManager) claimNextQueued(ctx context.Context, repo *v1alpha1.Repos
 }
 
 func (m *LeaseManager) getRepoQueueState(ctx context.Context, repo *v1alpha1.Repository, preferredOrder []string, excludeKey string) (*repoQueueState, error) {
-	prs, err := m.tekton.TektonV1().PipelineRuns(repo.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", keys.Repository, formatting.CleanValueKubernetes(repo.Name)),
-	})
+	prs, err := m.listRepositoryPipelineRuns(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -294,8 +314,8 @@ func (m *LeaseManager) getRepoQueueState(ctx context.Context, repo *v1alpha1.Rep
 		preferredIndex[key] = i
 	}
 
-	for i := range prs.Items {
-		pr := prs.Items[i]
+	for i := range prs {
+		pr := prs[i]
 		if pr.GetAnnotations()[keys.Repository] != repo.Name {
 			continue
 		}
@@ -310,8 +330,8 @@ func (m *LeaseManager) getRepoQueueState(ctx context.Context, repo *v1alpha1.Rep
 
 	orderMeta := map[string]pipelineOrderMeta{}
 
-	for i := range prs.Items {
-		pr := prs.Items[i]
+	for i := range prs {
+		pr := prs[i]
 		if pr.GetAnnotations()[keys.Repository] != repo.Name {
 			continue
 		}
@@ -501,11 +521,17 @@ func (m *LeaseManager) clearClaim(ctx context.Context, repo *v1alpha1.Repository
 
 func (m *LeaseManager) withRepoLease(ctx context.Context, repo *v1alpha1.Repository, fn func(context.Context) error) error {
 	leaseName := repoLeaseName(RepoKey(repo))
+	leaseWaitBudget := time.Duration(m.leaseDuration)*time.Second + defaultLeaseRetryDelay
+	if leaseWaitBudget <= 0 {
+		leaseWaitBudget = defaultLeaseRetryDelay
+	}
+	deadline := m.now().Add(leaseWaitBudget)
+	maxAttempts := int(leaseWaitBudget/defaultLeaseRetryDelay) + 1
 
-	for attempt := 0; attempt < defaultLeaseAcquireRetries; attempt++ {
+	for attempt := 1; ; attempt++ {
 		m.logger.Debugf(
 			"attempting to acquire concurrency lease %s for repository %s (attempt %d/%d)",
-			leaseName, RepoKey(repo), attempt+1, defaultLeaseAcquireRetries,
+			leaseName, RepoKey(repo), attempt, maxAttempts,
 		)
 		acquired, err := m.tryAcquireLease(ctx, leaseName)
 		if err != nil {
@@ -513,19 +539,162 @@ func (m *LeaseManager) withRepoLease(ctx context.Context, repo *v1alpha1.Reposit
 		}
 		if acquired {
 			m.logger.Debugf("acquired concurrency lease %s for repository %s", leaseName, RepoKey(repo))
-			defer m.releaseLease(leaseName)
-			return fn(ctx)
+			leaseCtx, cancel := context.WithCancel(ctx)
+			renewErrCh := make(chan error, 1)
+			renewDone := make(chan struct{})
+
+			go func() {
+				defer close(renewDone)
+				if err := m.keepLeaseRenewed(leaseCtx, leaseName); err != nil {
+					select {
+					case renewErrCh <- err:
+					default:
+					}
+					cancel()
+				}
+			}()
+
+			callbackErr := fn(leaseCtx)
+			cancel()
+			<-renewDone
+			m.releaseLease(leaseName)
+
+			var renewErr error
+			select {
+			case renewErr = <-renewErrCh:
+			default:
+			}
+
+			if callbackErr != nil {
+				if renewErr != nil && stderrors.Is(callbackErr, context.Canceled) {
+					return renewErr
+				}
+				return callbackErr
+			}
+			if renewErr != nil {
+				return renewErr
+			}
+			return nil
 		}
 		m.logger.Debugf("concurrency lease %s for repository %s is currently held by another watcher", leaseName, RepoKey(repo))
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(defaultLeaseRetryDelay):
+		if !m.now().Before(deadline) {
+			break
+		}
+		if err := m.wait(ctx, defaultLeaseRetryDelay); err != nil {
+			return err
 		}
 	}
 
-	return fmt.Errorf("timed out acquiring concurrency lease %s", leaseName)
+	return fmt.Errorf("timed out acquiring concurrency lease %s after waiting %s", leaseName, leaseWaitBudget)
+}
+
+func (m *LeaseManager) listRepositoryPipelineRuns(ctx context.Context, repo *v1alpha1.Repository) ([]tektonv1.PipelineRun, error) {
+	selector := labels.SelectorFromSet(map[string]string{
+		keys.Repository: formatting.CleanValueKubernetes(repo.Name),
+	})
+
+	if m.pipelineLister != nil {
+		prs, err := m.pipelineLister.PipelineRuns(repo.Namespace).List(selector)
+		if err != nil {
+			return nil, err
+		}
+
+		items := make([]tektonv1.PipelineRun, 0, len(prs))
+		for _, pr := range prs {
+			if pr == nil {
+				continue
+			}
+			items = append(items, *pr)
+		}
+		return items, nil
+	}
+
+	prs, err := m.tekton.TektonV1().PipelineRuns(repo.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: selector.String(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return prs.Items, nil
+}
+
+func waitForLeaseRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (m *LeaseManager) leaseRenewInterval() time.Duration {
+	interval := time.Duration(m.leaseDuration) * time.Second / 3
+	if interval < time.Second {
+		return time.Second
+	}
+	return interval
+}
+
+func (m *LeaseManager) keepLeaseRenewed(ctx context.Context, leaseName string) error {
+	interval := m.leaseRenewInterval()
+	for {
+		if err := m.wait(ctx, interval); err != nil {
+			if stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded) {
+				return nil
+			}
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		if err := m.renewLease(ctx, leaseName); err != nil {
+			return err
+		}
+	}
+}
+
+func (m *LeaseManager) renewLease(ctx context.Context, leaseName string) error {
+	leases := m.kube.CoordinationV1().Leases(m.leaseNamespace)
+	now := metav1.MicroTime{Time: m.now()}
+	var holderErr error
+
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		lease, err := leases.Get(ctx, leaseName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		holder := ""
+		if lease.Spec.HolderIdentity != nil {
+			holder = *lease.Spec.HolderIdentity
+		}
+		if holder != m.identity {
+			holderErr = fmt.Errorf("cannot renew concurrency lease %s because it is held by %q", leaseName, holder)
+			return holderErr
+		}
+
+		updated := lease.DeepCopy()
+		updated.Spec.RenewTime = &now
+		updated.Spec.LeaseDurationSeconds = &m.leaseDuration
+
+		_, err = leases.Update(ctx, updated, metav1.UpdateOptions{})
+		return err
+	})
+	if holderErr != nil {
+		return holderErr
+	}
+	if err != nil {
+		return err
+	}
+
+	m.logger.Debugf("renewed concurrency lease %s for holder %s", leaseName, m.identity)
+	return nil
 }
 
 func (m *LeaseManager) tryAcquireLease(ctx context.Context, leaseName string) (bool, error) {

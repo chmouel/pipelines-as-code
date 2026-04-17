@@ -9,6 +9,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/generated/clientset/versioned"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	tektonVersionedClient "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
+	tektonv1lister "github.com/tektoncd/pipeline/pkg/client/listers/pipeline/v1"
 )
 
 type ManagerInterface interface {
@@ -21,6 +22,10 @@ type ManagerInterface interface {
 	AddToPendingQueue(repo *v1alpha1.Repository, list []string) error
 	RemoveFromQueue(ctx context.Context, repo *v1alpha1.Repository, prKey string) bool
 	RemoveAndTakeItemFromQueue(ctx context.Context, repo *v1alpha1.Repository, run *tektonv1.PipelineRun) string
+}
+
+type PipelineRunListerAware interface {
+	SetPipelineRunLister(tektonv1lister.PipelineRunLister)
 }
 
 func RepoKey(repo *v1alpha1.Repository) string {

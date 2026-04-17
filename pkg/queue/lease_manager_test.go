@@ -11,12 +11,15 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
+	tektonv1lister "github.com/tektoncd/pipeline/pkg/client/listers/pipeline/v1"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
 	"gotest.tools/v3/assert"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	ktesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/tools/cache"
 	rtesting "knative.dev/pkg/reconciler/testing"
 )
 
@@ -102,6 +105,36 @@ func TestLeaseManagerPromotesNextAfterCompletion(t *testing.T) {
 	updated, err := stdata.Pipeline.TektonV1().PipelineRuns(queued.Namespace).Get(ctx, queued.Name, metav1.GetOptions{})
 	assert.NilError(t, err)
 	assert.Equal(t, updated.GetAnnotations()[keys.QueueClaimedBy], manager.identity)
+}
+
+func TestLeaseManagerRemoveAndTakeClaimsOnlyOneQueuedRun(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+	now := time.Unix(1_700_000_205, 0)
+	repo := newTestRepo(3)
+
+	completed := newLeaseStartedPR("completed", now, repo)
+	stillRunning := newLeaseStartedPR("running", now.Add(time.Second), repo)
+	firstQueued := newLeaseTestPR("first-queued", now.Add(2*time.Second), repo, nil)
+	secondQueued := newLeaseTestPR("second-queued", now.Add(3*time.Second), repo, nil)
+	stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{
+		PipelineRuns: []*tektonv1.PipelineRun{completed, stillRunning, firstQueued, secondQueued},
+	})
+
+	manager := NewLeaseManager(logger, stdata.Kube, stdata.Pipeline, "pac")
+	manager.now = func() time.Time { return now }
+
+	next := manager.RemoveAndTakeItemFromQueue(ctx, repo, completed)
+	assert.Equal(t, next, PrKey(firstQueued))
+
+	firstUpdated, err := stdata.Pipeline.TektonV1().PipelineRuns(firstQueued.Namespace).Get(ctx, firstQueued.Name, metav1.GetOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, firstUpdated.GetAnnotations()[keys.QueueClaimedBy], manager.identity)
+
+	secondUpdated, err := stdata.Pipeline.TektonV1().PipelineRuns(secondQueued.Namespace).Get(ctx, secondQueued.Name, metav1.GetOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, secondUpdated.GetAnnotations()[keys.QueueClaimedBy], "")
 }
 
 func TestRepoLeaseNameIsDeterministic(t *testing.T) {
@@ -236,6 +269,62 @@ func TestLeaseManagerFiltersBySanitizedRepositoryLabel(t *testing.T) {
 	}
 
 	assert.Equal(t, listSelector, keys.Repository+"="+repositoryLabel)
+}
+
+func TestLeaseManagerUsesPipelineRunListerWhenAvailable(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+	now := time.Unix(1_700_000_296, 0)
+	repo := &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "org/repo",
+			Namespace: "test-ns",
+		},
+		Spec: v1alpha1.RepositorySpec{
+			ConcurrencyLimit: intPtr(1),
+		},
+	}
+	repositoryLabel := formatting.CleanValueKubernetes(repo.Name)
+
+	matching := newTestPR("matching", now, map[string]string{
+		keys.Repository: repositoryLabel,
+		keys.State:      kubeinteraction.StateQueued,
+	}, map[string]string{
+		keys.Repository:     repo.Name,
+		keys.State:          kubeinteraction.StateQueued,
+		keys.ExecutionOrder: "test-ns/matching",
+	}, tektonv1.PipelineRunSpec{
+		Status: tektonv1.PipelineRunSpecStatusPending,
+	})
+	collision := newTestPR("collision", now.Add(-time.Second), map[string]string{
+		keys.Repository: repositoryLabel,
+		keys.State:      kubeinteraction.StateStarted,
+	}, map[string]string{
+		keys.Repository: "org:repo",
+		keys.State:      kubeinteraction.StateStarted,
+	}, tektonv1.PipelineRunSpec{})
+
+	stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{
+		PipelineRuns: []*tektonv1.PipelineRun{matching, collision},
+	})
+	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	assert.NilError(t, indexer.Add(matching))
+	assert.NilError(t, indexer.Add(collision))
+
+	manager := NewLeaseManager(logger, stdata.Kube, stdata.Pipeline, "pac")
+	manager.now = func() time.Time { return now }
+	manager.SetPipelineRunLister(tektonv1lister.NewPipelineRunLister(indexer))
+
+	state, err := manager.getRepoQueueState(ctx, repo, nil, "")
+	assert.NilError(t, err)
+	assert.Equal(t, len(state.running), 0)
+	assert.Equal(t, len(state.queued), 1)
+	assert.Equal(t, PrKey(&state.queued[0]), PrKey(matching))
+
+	for _, action := range stdata.Pipeline.Actions() {
+		assert.Assert(t, !(action.GetVerb() == "list" && action.GetResource().Resource == "pipelineruns"))
+	}
 }
 
 func TestLeaseManagerReleaseKeepsLeaseAndClearsHolder(t *testing.T) {
@@ -901,4 +990,225 @@ func TestWithRepoLeaseContextCancellation(t *testing.T) {
 		return nil
 	})
 	assert.ErrorContains(t, err, "context canceled") //nolint:misspell
+}
+
+func TestWithRepoLeaseRenewsLeaseDuringLongCallback(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+	now := time.Unix(1_700_000_001, 0)
+	repo := newTestRepo(1)
+
+	stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
+	manager := NewLeaseManager(logger, stdata.Kube, stdata.Pipeline, "pac")
+	manager.leaseDuration = 2
+	manager.now = func() time.Time { return now }
+
+	allowWait := make(chan struct{}, 4)
+	renewed := make(chan struct{}, 4)
+	manager.wait = func(ctx context.Context, delay time.Duration) error {
+		now = now.Add(delay)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-allowWait:
+			return nil
+		}
+	}
+	stdata.Kube.PrependReactor("update", "leases", func(action ktesting.Action) (bool, runtime.Object, error) {
+		updateAction, ok := action.(ktesting.UpdateAction)
+		assert.Assert(t, ok)
+		lease, ok := updateAction.GetObject().(*coordinationv1.Lease)
+		assert.Assert(t, ok)
+		if lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity == manager.identity {
+			select {
+			case renewed <- struct{}{}:
+			default:
+			}
+		}
+		return false, nil, nil
+	})
+
+	err := manager.withRepoLease(ctx, repo, func(context.Context) error {
+		for i := 0; i < 2; i++ {
+			allowWait <- struct{}{}
+			<-renewed
+		}
+
+		leaseName := repoLeaseName(RepoKey(repo))
+		lease, err := stdata.Kube.CoordinationV1().Leases("pac").Get(ctx, leaseName, metav1.GetOptions{})
+		assert.NilError(t, err)
+		assert.Assert(t, lease.Spec.RenewTime != nil)
+		assert.Assert(t, !lease.Spec.RenewTime.Time.Before(now.Add(-manager.leaseRenewInterval())))
+		assert.Assert(t, !isLeaseExpired(lease, now))
+		return nil
+	})
+	assert.NilError(t, err)
+}
+
+func TestWithRepoLeaseRenewalPreventsConcurrentAcquirePastOriginalExpiry(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+	now := time.Unix(1_700_000_005, 0)
+	repo := newTestRepo(1)
+
+	stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
+	first := NewLeaseManager(logger, stdata.Kube, stdata.Pipeline, "pac")
+	second := NewLeaseManager(logger, stdata.Kube, stdata.Pipeline, "pac")
+	first.leaseDuration = 2
+	second.leaseDuration = 2
+	first.now = func() time.Time { return now }
+	second.now = func() time.Time { return now }
+
+	allowWait := make(chan struct{}, 4)
+	renewed := make(chan struct{}, 4)
+	first.wait = func(ctx context.Context, delay time.Duration) error {
+		now = now.Add(delay)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-allowWait:
+			return nil
+		}
+	}
+	stdata.Kube.PrependReactor("update", "leases", func(action ktesting.Action) (bool, runtime.Object, error) {
+		updateAction, ok := action.(ktesting.UpdateAction)
+		assert.Assert(t, ok)
+		lease, ok := updateAction.GetObject().(*coordinationv1.Lease)
+		assert.Assert(t, ok)
+		if lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity == first.identity {
+			select {
+			case renewed <- struct{}{}:
+			default:
+			}
+		}
+		return false, nil, nil
+	})
+
+	err := first.withRepoLease(ctx, repo, func(context.Context) error {
+		for i := 0; i < 2; i++ {
+			allowWait <- struct{}{}
+			<-renewed
+		}
+
+		acquired, err := second.tryAcquireLease(ctx, repoLeaseName(RepoKey(repo)))
+		assert.NilError(t, err)
+		assert.Assert(t, !acquired)
+		return nil
+	})
+	assert.NilError(t, err)
+}
+
+func TestWithRepoLeaseCancelsCallbackWhenRenewalFails(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+	now := time.Unix(1_700_000_020, 0)
+	repo := newTestRepo(1)
+
+	stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
+	manager := NewLeaseManager(logger, stdata.Kube, stdata.Pipeline, "pac")
+	manager.leaseDuration = 2
+	manager.now = func() time.Time { return now }
+
+	mutatedHolder := false
+	manager.wait = func(ctx context.Context, delay time.Duration) error {
+		now = now.Add(delay)
+		if !mutatedHolder {
+			mutatedHolder = true
+			leaseName := repoLeaseName(RepoKey(repo))
+			lease, err := stdata.Kube.CoordinationV1().Leases("pac").Get(ctx, leaseName, metav1.GetOptions{})
+			assert.NilError(t, err)
+			foreignHolder := "other-watcher"
+			lease.Spec.HolderIdentity = &foreignHolder
+			_, err = stdata.Kube.CoordinationV1().Leases("pac").Update(ctx, lease, metav1.UpdateOptions{})
+			assert.NilError(t, err)
+		}
+		return nil
+	}
+
+	err := manager.withRepoLease(ctx, repo, func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	assert.ErrorContains(t, err, "cannot renew concurrency lease")
+}
+
+func TestWithRepoLeaseAcquiresAfterLeaseExpires(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+	now := time.Unix(1_700_000_001, 0)
+	repo := newTestRepo(1)
+
+	stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
+	manager := NewLeaseManager(logger, stdata.Kube, stdata.Pipeline, "pac")
+	manager.leaseDuration = 1
+	manager.now = func() time.Time { return now }
+	manager.wait = func(context.Context, time.Duration) error {
+		now = now.Add(defaultLeaseRetryDelay)
+		return nil
+	}
+
+	foreignHolder := "other-watcher"
+	leaseName := repoLeaseName(RepoKey(repo))
+	duration := int32(1)
+	_, err := stdata.Kube.CoordinationV1().Leases("pac").Create(ctx, &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: leaseName, Namespace: "pac"},
+		Spec: coordinationv1.LeaseSpec{
+			HolderIdentity:       &foreignHolder,
+			LeaseDurationSeconds: &duration,
+			RenewTime:            &metav1.MicroTime{Time: now},
+		},
+	}, metav1.CreateOptions{})
+	assert.NilError(t, err)
+
+	called := false
+	err = manager.withRepoLease(ctx, repo, func(context.Context) error {
+		called = true
+		return nil
+	})
+	assert.NilError(t, err)
+	assert.Assert(t, called)
+	assert.Assert(t, now.After(time.Unix(1_700_000_002, 0)))
+}
+
+func TestWithRepoLeaseUsesLeaseDurationRetryBudget(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+	now := time.Unix(1_700_000_010, 0)
+	repo := newTestRepo(1)
+
+	stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{})
+	manager := NewLeaseManager(logger, stdata.Kube, stdata.Pipeline, "pac")
+	manager.leaseDuration = 3
+	manager.now = func() time.Time { return now }
+	waitCalls := 0
+	manager.wait = func(context.Context, time.Duration) error {
+		waitCalls++
+		now = now.Add(defaultLeaseRetryDelay)
+		return nil
+	}
+
+	foreignHolder := "other-watcher"
+	leaseName := repoLeaseName(RepoKey(repo))
+	holderDuration := int32(10)
+	_, err := stdata.Kube.CoordinationV1().Leases("pac").Create(ctx, &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: leaseName, Namespace: "pac"},
+		Spec: coordinationv1.LeaseSpec{
+			HolderIdentity:       &foreignHolder,
+			LeaseDurationSeconds: &holderDuration,
+			RenewTime:            &metav1.MicroTime{Time: now},
+		},
+	}, metav1.CreateOptions{})
+	assert.NilError(t, err)
+
+	err = manager.withRepoLease(ctx, repo, func(context.Context) error {
+		t.Fatal("callback should not be invoked")
+		return nil
+	})
+	assert.ErrorContains(t, err, "timed out acquiring concurrency lease")
+	assert.Assert(t, waitCalls > defaultLeaseAcquireRetries)
 }

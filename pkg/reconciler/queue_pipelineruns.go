@@ -92,7 +92,7 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 			break
 		}
 
-		for _, prKeys := range acquired {
+		for i, prKeys := range acquired {
 			logger.Debugf("attempting to promote queued pipelinerun %s for repository %s", prKeys, repo.GetName())
 			if r.eventEmitter != nil {
 				r.eventEmitter.EmitMessage(repo, zap.InfoLevel, "QueueClaimedForPromotion",
@@ -117,16 +117,16 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 					}
 					logger.Errorf("failed to update pipelineRun to in_progress: %w", err)
 					logger.Debugf("recording queue promotion failure for pipelinerun %s after promotion error", queuepkg.PrKey(pr))
+					cleanupKeys := append([]string{prKeys}, acquired[i+1:]...)
 					retryErr := r.recordQueuePromotionFailure(ctx, logger, repo, pr, err)
-					if retryErr != nil {
-						return fmt.Errorf("failed to record queue promotion failure for %s after promotion error: %w", pr.GetName(), retryErr)
-					}
 					if r.eventEmitter != nil {
 						r.eventEmitter.EmitMessage(repo, zap.WarnLevel, "QueuePromotionFailed",
 							"failed to promote queued PipelineRun "+queuepkg.PrKey(pr)+": "+err.Error())
 					}
-					logger.Debugf("removing queue claim for pipelinerun %s after promotion failure", prKeys)
-					_ = r.qm.RemoveFromQueue(ctx, repo, prKeys)
+					r.clearQueueClaims(ctx, logger, repo, cleanupKeys, "promotion failure")
+					if retryErr != nil {
+						return fmt.Errorf("failed to record queue promotion failure for %s after promotion error: %w", pr.GetName(), retryErr)
+					}
 					return fmt.Errorf("failed to update pipelineRun to in_progress: %w", err)
 				}
 				logger.Debugf("successfully promoted queued pipelinerun %s for repository %s", queuepkg.PrKey(pr), repo.GetName())
@@ -142,6 +142,22 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 		itered++
 	}
 	return nil
+}
+
+func (r *Reconciler) clearQueueClaims(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	repo *pacAPIv1alpha1.Repository,
+	prKeys []string,
+	reason string,
+) {
+	for _, prKey := range prKeys {
+		if prKey == "" {
+			continue
+		}
+		logger.Debugf("removing queue claim for pipelinerun %s after %s", prKey, reason)
+		_ = r.qm.RemoveFromQueue(ctx, repo, prKey)
+	}
 }
 
 func (r *Reconciler) pipelineRunReachedStartedState(ctx context.Context, pr *tektonv1.PipelineRun) (bool, error) {

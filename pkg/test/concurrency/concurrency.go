@@ -11,8 +11,10 @@ import (
 )
 
 type TestQMI struct {
-	QueuedPrs    []string
-	RunningQueue []string
+	QueuedPrs             []string
+	RunningQueue          []string
+	RemoveFromQueueResult bool
+	RemovedFromQueue      *[]string
 }
 
 func (TestQMI) InitQueues(_ context.Context, _ tektonVersionedClient.Interface, _ pacVersionedClient.Interface) error {
@@ -42,8 +44,11 @@ func (TestQMI) AddToPendingQueue(_ *pacv1alpha1.Repository, _ []string) error {
 	return nil
 }
 
-func (t TestQMI) RemoveFromQueue(_ context.Context, _ *pacv1alpha1.Repository, _ string) bool {
-	return false
+func (t TestQMI) RemoveFromQueue(_ context.Context, _ *pacv1alpha1.Repository, prKey string) bool {
+	if t.RemovedFromQueue != nil {
+		*t.RemovedFromQueue = append(*t.RemovedFromQueue, prKey)
+	}
+	return t.RemoveFromQueueResult
 }
 
 func (TestQMI) RemoveAndTakeItemFromQueue(_ context.Context, _ *pacv1alpha1.Repository, _ *tektonv1.PipelineRun) string {

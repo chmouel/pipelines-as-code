@@ -72,6 +72,9 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 			metrics:           metrics,
 			eventEmitter:      events.NewEventEmitter(run.Clients.Kube, run.Clients.Log),
 		}
+		if listerAware, ok := r.qm.(queuepkg.PipelineRunListerAware); ok {
+			listerAware.SetPipelineRunLister(r.pipelineRunLister)
+		}
 		impl := tektonPipelineRunReconcilerv1.NewImpl(ctx, r, ctrlOpts())
 
 		if err := r.qm.InitQueues(ctx, run.Clients.Tekton, run.Clients.PipelineAsCode); err != nil {
