@@ -21,9 +21,9 @@ type Interface interface {
 	IsAllowed(context.Context, *info.Event) (bool, error)
 	IsAllowedOwnersFile(context.Context, *info.Event) (bool, error)
 	CreateStatus(context.Context, *info.Event, status.StatusOpts) error
-	GetTektonDir(context.Context, *info.Event, string, string) (string, error)         // ctx, event, path, provenance
-	GetFileInsideRepo(context.Context, *info.Event, string, string) (string, error)   // ctx, event, path, branch
-	ListDirFilesInsideRepo(context.Context, *info.Event, string) ([]string, error)    // ctx, event, path
+	GetTektonDir(context.Context, *info.Event, string, string) (string, error)      // ctx, event, path, provenance
+	GetFileInsideRepo(context.Context, *info.Event, string, string) (string, error) // ctx, event, path, branch
+	ListDirFilesInsideRepo(context.Context, *info.Event, string) ([]string, error)  // ctx, event, path
 	SetClient(context.Context, *params.Run, *info.Event, *v1alpha1.Repository, *events.EventEmitter) error
 	SetPacInfo(*info.PacOpts)
 	GetCommitInfo(context.Context, *info.Event) error
