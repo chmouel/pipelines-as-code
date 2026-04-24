@@ -11,6 +11,10 @@ const (
 
 	// DefaultMaxTokens is the default maximum tokens for LLM responses.
 	DefaultMaxTokens = 1000
+
+	// MaxCheckRunOutputSize is the safe upper bound for GitHub check-run text fields.
+	// GitHub's hard limit is 65,535; we leave 535 bytes of margin.
+	MaxCheckRunOutputSize = 65000
 )
 
 // AnalysisExecutionMode represents how an LLM analysis is executed.
@@ -91,6 +95,10 @@ type AnalysisSummary struct {
 	DurationMS      int64          `json:"duration_ms,omitempty"`
 	CollectedAt     time.Time      `json:"collected_at"`
 	Error           *AnalysisError `json:"error,omitempty"`
+	PatchAvailable  bool           `json:"patch_available,omitempty"`
+	PatchBaseSHA    string         `json:"patch_base_sha,omitempty"`
+	PatchFormat     string         `json:"patch_format,omitempty"`
+	PatchVersion    int            `json:"patch_version,omitempty"`
 }
 
 // AIProvider represents a supported LLM provider.

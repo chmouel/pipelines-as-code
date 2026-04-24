@@ -208,6 +208,26 @@ Benefits of PR comments:
 - Pipelines-as-Code can update the comment with new analysis on subsequent runs.
 - Easy to discuss and follow up on directly in the PR conversation.
 
-{{< callout type="info" >}}
-Additional output destinations including `check-run` (GitHub check runs) and `annotation` (PipelineRun annotations) are planned for future releases.
+#### Check Run
+
+Posts analysis as a GitHub check-run on the pull request:
+
+```yaml
+output: "check-run"
+```
+
+{{< callout type="warning" >}}
+Check-run output requires a GitHub App installation. It is not available when using a personal access token.
 {{< /callout >}}
+
+Benefits of check-runs:
+
+- Analysis appears in the **Checks** tab alongside your CI results.
+- The check-run title shows the role name, making it easy to distinguish multiple analysis roles.
+- When the backend produces a concrete fix, a **"Fix it"** action button appears on the check-run. Clicking it triggers PAC to apply the AI-generated patch and push it to the PR branch. See [Fix it Action]({{< relref "/docs/guides/llm-analysis#fix-it-action" >}}) for details.
+
+When to choose `check-run` over `pr-comment`:
+
+- You want the analysis result separated from the PR conversation thread.
+- You want to offer the one-click "Fix it" capability to contributors.
+- You are running multiple analysis roles and want each result to be independently re-runnable.

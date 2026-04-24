@@ -87,6 +87,11 @@ type Settings struct {
 	RememberOKToTest   bool `json:"remember-ok-to-test"`
 	RequireOkToTestSHA bool `json:"require-ok-to-test-sha"`
 
+	// Tracing label names. Defaults in config/302-pac-configmap.yaml.
+	TracingLabelAction      string `json:"tracing-label-action"`
+	TracingLabelApplication string `json:"tracing-label-application"`
+	TracingLabelComponent   string `json:"tracing-label-component"`
+
 	AIAnalysisGitImage string `default:"alpine/git:latest" json:"ai-analysis-git-image"`
 }
 

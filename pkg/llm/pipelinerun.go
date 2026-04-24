@@ -138,7 +138,7 @@ func buildAnalysisPipelineRun(
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      prName,
 			Namespace: parent.Namespace,
-				Labels: map[string]string{
+			Labels: map[string]string{
 				keys.LLMAnalysis:          formatting.CleanValueKubernetes("true"),
 				keys.LLMParentPipelineRun: formatting.CleanValueKubernetes(parent.Name),
 				keys.LLMBackend:           formatting.CleanValueKubernetes(backend),

@@ -350,13 +350,17 @@ func (v *Provider) processEvent(ctx context.Context, event *info.Event, eventInt
 	switch gitEvent := eventInt.(type) {
 	case *github.CheckRunEvent:
 		if v.ghClient == nil {
-			return nil, fmt.Errorf("check run rerequest is only supported with github apps integration")
+			return nil, fmt.Errorf("check run events are only supported with github apps integration")
 		}
 
-		if *gitEvent.Action != "rerequested" {
-			return nil, fmt.Errorf("only issue recheck is supported in checkrunevent")
+		switch gitEvent.GetAction() {
+		case "rerequested":
+			return v.handleReRequestEvent(ctx, gitEvent)
+		case "requested_action":
+			return v.handleRequestedActionEvent(ctx, gitEvent)
+		default:
+			return nil, fmt.Errorf("unsupported check_run action: %s", gitEvent.GetAction())
 		}
-		return v.handleReRequestEvent(ctx, gitEvent)
 	case *github.CheckSuiteEvent:
 		if v.ghClient == nil {
 			return nil, fmt.Errorf("check suite rerequest is only supported with github apps integration")
@@ -543,6 +547,61 @@ func (v *Provider) handleReRequestEvent(ctx context.Context, event *github.Check
 	runevent.TriggerTarget = triggertype.PullRequest
 	v.Logger.Infof("Recheck of PR %s/%s#%d has been requested", runevent.Organization, runevent.Repository, runevent.PullRequestNumber)
 	return v.getPullRequest(ctx, runevent)
+}
+
+func (v *Provider) handleRequestedActionEvent(ctx context.Context, event *github.CheckRunEvent) (*info.Event, error) {
+	runevent := info.NewEvent()
+	if event.GetRepo() == nil {
+		return nil, errors.New("error parsing payload the repository should not be nil")
+	}
+	runevent.Organization = event.GetRepo().GetOwner().GetLogin()
+	runevent.Repository = event.GetRepo().GetName()
+	runevent.URL = event.GetRepo().GetHTMLURL()
+	runevent.DefaultBranch = event.GetRepo().GetDefaultBranch()
+	runevent.SHA = event.GetCheckRun().GetCheckSuite().GetHeadSHA()
+	runevent.HeadBranch = event.GetCheckRun().GetCheckSuite().GetHeadBranch()
+	runevent.HeadURL = event.GetCheckRun().GetCheckSuite().GetRepository().GetHTMLURL()
+	runevent.Sender = event.GetSender().GetLogin()
+	runevent.TriggerTarget = triggertype.CheckRunRequestedAction
+
+	if ra := event.GetRequestedAction(); ra != nil {
+		runevent.CheckRunRequestedActionID = ra.Identifier
+	}
+	if cr := event.GetCheckRun(); cr != nil {
+		runevent.CheckRunExternalID = cr.GetExternalID()
+	}
+
+	if len(event.GetCheckRun().GetCheckSuite().PullRequests) == 0 {
+		if runevent.HeadBranch == "" && runevent.SHA != "" {
+			pr, err := v.resolveReRequestPullRequest(ctx, runevent)
+			if err != nil {
+				return nil, fmt.Errorf("cannot determine pull request for check_run requested_action and SHA %s: %w", runevent.SHA, err)
+			}
+			if pr != nil {
+				runevent.PullRequestNumber = pr.GetNumber()
+				runevent.TriggerTarget = triggertype.CheckRunRequestedAction
+				return copyRequestedActionFields(v.populateRunEventFromPullRequest(runevent, pr), runevent), nil
+			}
+		}
+		return nil, fmt.Errorf("requested_action on check_run requires an associated pull request")
+	}
+	runevent.PullRequestNumber = event.GetCheckRun().GetCheckSuite().PullRequests[0].GetNumber()
+
+	v.Logger.Infof("Requested action %q on check run for PR %s/%s#%d", runevent.CheckRunRequestedActionID, runevent.Organization, runevent.Repository, runevent.PullRequestNumber)
+	processedEvent, err := v.getPullRequest(ctx, runevent)
+	if err != nil {
+		return nil, err
+	}
+	return copyRequestedActionFields(processedEvent, runevent), nil
+}
+
+func copyRequestedActionFields(dst, src *info.Event) *info.Event {
+	if dst == nil || src == nil {
+		return dst
+	}
+	dst.CheckRunRequestedActionID = src.CheckRunRequestedActionID
+	dst.CheckRunExternalID = src.CheckRunExternalID
+	return dst
 }
 
 func (v *Provider) handleCheckSuites(ctx context.Context, event *github.CheckSuiteEvent) (*info.Event, error) {

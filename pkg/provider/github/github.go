@@ -327,6 +327,9 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 	v.repo = repo
 	v.eventEmitter = eventsEmitter
 	v.triggerEvent = event.EventType
+	if v.Logger == nil && run != nil && run.Clients.Log != nil {
+		v.Logger = run.Clients.Log
+	}
 
 	// check that the Client is not already set, so we don't override our fakeclient
 	// from unittesting.
@@ -355,7 +358,9 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 
 	// Handle GitHub App token scoping for both global and repo-level configuration
 	if event.InstallationID > 0 {
-		v.Logger.Debugf("setupAuthenticatedClient: scoping github app token")
+		if v.Logger != nil {
+			v.Logger.Debugf("setupAuthenticatedClient: scoping github app token")
+		}
 		token, err := ScopeTokenToListOfRepos(ctx, v, v.pacInfo, repo, run, event, v.eventEmitter, v.Logger)
 		if err != nil {
 			return fmt.Errorf("failed to scope token: %w", err)
@@ -594,7 +599,7 @@ func (v *Provider) concatAllYamlFiles(ctx context.Context, objects []*github.Tre
 // getPullRequest get a pull request details, caching the result for the lifetime of the event.
 func (v *Provider) getPullRequest(ctx context.Context, runevent *info.Event) (*info.Event, error) {
 	if v.cachedPullRequest != nil {
-		return runevent, nil
+		return v.populateRunEventFromPullRequest(runevent, v.cachedPullRequest), nil
 	}
 	pr, _, err := wrapAPI(v, "get_pull_request", func() (*github.PullRequest, *github.Response, error) {
 		return v.Client().PullRequests.Get(ctx, runevent.Organization, runevent.Repository, runevent.PullRequestNumber)
