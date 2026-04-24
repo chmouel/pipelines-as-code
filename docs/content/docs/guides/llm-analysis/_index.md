@@ -18,7 +18,7 @@ LLM-powered analysis lets you:
 - **Post insights as PR comments or check-run annotations** so your team sees them immediately
 - **Configure custom analysis scenarios** using different prompts and triggers
 - **Define roles inside your repository** so contributors can ship their own repo roles alongside pipeline code
-- **Apply AI-generated fixes** with one click using the "Fix it" action on GitHub check-runs
+- **Apply AI-generated fixes** with one click using the "Apply Suggestions" action on GitHub check-runs
 
 ## Supported Backends
 
@@ -225,20 +225,20 @@ Pipelines-as-Code validates each repo role file before running it:
 - The `on_cel` expression is type-checked at load time — syntax errors are caught before the PipelineRun is submitted.
 - If a file is invalid or missing, Pipelines-as-Code logs a warning and skips that role; other repo roles and CR roles continue to run.
 
-## Fix it Action
+## Apply Suggestions Action
 
-When a role uses `output: check-run`, Pipelines-as-Code posts the analysis result as a GitHub check-run. If the AI backend produced a concrete code fix while analysing the repository, PAC also attaches a **"Fix it"** action button to that check-run.
+When a role uses `output: check-run`, Pipelines-as-Code posts the analysis result as a GitHub check-run. If the AI backend produced a concrete code fix while analysing the repository, PAC also attaches an **"Apply Suggestions"** action button to that check-run.
 
 {{< callout type="warning" >}}
-The Fix it action requires a GitHub App installation. Personal access tokens do not support check-run request actions.
+The Apply Suggestions action requires a GitHub App installation. Personal access tokens do not support check-run request actions.
 {{< /callout >}}
 
 ### How It Works
 
 1. The analysis PipelineRun completes and the backend has edited files in its checkout.
 2. PAC captures the `git diff` as a gzip+base64 machine patch embedded in the PipelineRun logs.
-3. PAC posts the check-run with the analysis text and a "Fix it" action button.
-4. When a user clicks **Fix it**, GitHub sends a `check_run.requested_action` webhook to PAC.
+3. PAC posts the check-run with the analysis text and an "Apply Suggestions" action button.
+4. When a user clicks **Apply Suggestions**, GitHub sends a `check_run.requested_action` webhook to PAC.
 5. PAC validates the webhook, retrieves the machine patch from the original analysis PipelineRun, and creates a **fix PipelineRun**.
 6. The fix PipelineRun clones the repository, applies the patch with `git apply`, commits the changes, and pushes them to the PR branch.
 7. PAC posts an **"AI Fix"** check-run on the PR reporting the result (success or failure).
@@ -246,7 +246,7 @@ The Fix it action requires a GitHub App installation. Personal access tokens do 
 ### Requirements
 
 - `output: check-run` must be set on the role.
-- The AI backend must have edited files in the repository checkout during analysis. If the backend only produced a prose response without any file edits, no patch is captured and the "Fix it" button does not appear.
+- The AI backend must have edited files in the repository checkout during analysis. If the backend only produced a prose response without any file edits, no patch is captured and the "Apply Suggestions" button does not appear.
 - The repository must be hosted on GitHub and PAC must be installed as a GitHub App.
 
 ### Example Configuration
@@ -269,6 +269,6 @@ roles:
 
 ### Limitations
 
-- Only one fix PipelineRun is created per analysis check-run. Clicking "Fix it" multiple times has no additional effect once the fix PipelineRun exists.
-- The fix PipelineRun pushes directly to the PR head branch. Make sure contributors understand that clicking "Fix it" will add a commit to their branch.
+- Only one fix PipelineRun is created per analysis check-run. Clicking "Apply Suggestions" multiple times has no additional effect once the fix PipelineRun exists.
+- The fix PipelineRun pushes directly to the PR head branch. Make sure contributors understand that clicking "Apply Suggestions" will add a commit to their branch.
 - Large or binary diffs may be skipped if encoding exceeds limits.

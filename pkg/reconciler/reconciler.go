@@ -24,6 +24,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	pacapi "github.com/openshift-pipelines/pipelines-as-code/pkg/generated/listers/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
+	kstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction/status"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm"
 	_ "github.com/openshift-pipelines/pipelines-as-code/pkg/llm/providers/gemini" // register Gemini provider via init
 	_ "github.com/openshift-pipelines/pipelines-as-code/pkg/llm/providers/openai" // register OpenAI provider via init
@@ -337,11 +338,12 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	}
 
 	finalState := kubeinteraction.StateCompleted
-	newPr, trStatus, err := r.postFinalStatus(ctx, logger, pacInfo, provider, event, pr)
+	newPr, err := r.postFinalStatus(ctx, logger, pacInfo, provider, event, pr)
 	if err != nil {
 		logger.Errorf("failed to post final status, moving on: %v", err)
 		finalState = kubeinteraction.StateFailed
 	}
+	trStatus := kstatus.GetStatusFromTaskStatusOrFromAsking(ctx, newPr, r.run)
 
 	// LLM Analysis orchestrator checks if it is enabled and if the CEL condition
 	// is matched for the defined roles, defaults to failed PipelineRuns only if
@@ -364,7 +366,7 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 		logger.Error("failed to emit metrics: ", err)
 	}
 
-	emitTimingSpans(logger, pr, &pacInfo.Settings, trStatus)
+	emitTimingSpans(logger, newPr, &pacInfo.Settings, trStatus)
 
 	// remove pipelineRun from Queue and start the next one
 	for {

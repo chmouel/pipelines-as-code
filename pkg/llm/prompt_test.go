@@ -24,11 +24,15 @@ func TestBuildPrompt(t *testing.T) {
 				"modify the repository files directly",
 				"Do not only\ndescribe",
 				"follow-up automation when\nsupported",
+				"Base every conclusion on the provided evidence",
+				"Prefer the smallest change that preserves the apparent intent",
+				"Do not remove or weaken constraints such as node selectors",
+				"separate proven blockers from secondary or\nspeculative contributors",
 				"Analyze this error",
 			},
 			wantNotContain: []string{
-				"Click **Fix it** above to apply the proposed fix",
-				"Fix it button",
+				"Click **Apply Suggestions** above to apply the proposed fix",
+				"Apply Suggestions button",
 			},
 		},
 		{

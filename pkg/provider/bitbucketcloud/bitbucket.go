@@ -201,7 +201,7 @@ func (v *Provider) getDir(event *info.Event, path string) ([]bitbucket.Repositor
 func (v *Provider) ListDirFilesInsideRepo(_ context.Context, event *info.Event, path string) ([]string, error) {
 	entries, err := v.getDir(event, path)
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 	var files []string
 	for _, entry := range entries {

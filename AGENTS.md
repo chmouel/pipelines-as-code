@@ -126,9 +126,9 @@ Parent PipelineRun completes
     → Create child PipelineRun (fetch-repo + run-analysis)
       → analysis.sh runs CLI tool → outputs AnalysisEnvelope JSON
     → Next reconcile: parse envelope → post PR comment or check-run
-      → check-run includes "Fix it" button (GitHub App only)
+      → check-run includes "Apply Suggestions" button (GitHub App only)
 
-User clicks "Fix it" button on analysis check run
+User clicks "Apply Suggestions" button on analysis check run
   → GitHub sends check_run.requested_action webhook
   → sinker intercepts → validates external ID → creates fix PipelineRun
     → fix.sh runs Claude with tools → commits & pushes changes
