@@ -8,6 +8,15 @@ repo_dir="${REPO_DIR:-/workspace/source}"
 pr_branch="${PR_BRANCH}"
 expected_sha="${EXPECTED_SHA:-}"
 role_name="${ROLE_NAME:-AI analysis}"
+commit_subject="$(printf '%s' "${FIX_COMMIT_SUBJECT_B64:-}" | base64 -d 2>/dev/null || true)"
+commit_body="$(printf '%s' "${FIX_COMMIT_BODY_B64:-}" | base64 -d 2>/dev/null || true)"
+
+if [ -z "${commit_subject}" ]; then
+    commit_subject="fix: address ${role_name} findings"
+fi
+if [ -z "${commit_body}" ]; then
+    commit_body="Apply the AI-generated fix for role \"${role_name}\"."
+fi
 
 emit_envelope() {
     envelope_file="$1"
@@ -83,9 +92,10 @@ if git apply --index --3way /tmp/fix.patch; then
     git add -A
     changed_files="$(git diff --cached --name-only)"
     cat > /tmp/fix-commit-message.txt << EOF
-fix: apply AI fix from ${role_name}
+${commit_subject}
 
-Pipelines-as-Code applied the AI-generated patch for role "${role_name}".
+${commit_body}
+
 Analyzed commit: ${expected_sha:-unknown}
 
 Files changed:
