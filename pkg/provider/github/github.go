@@ -370,7 +370,6 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 			event.Provider.Token = token
 		}
 	}
-
 	return nil
 }
 

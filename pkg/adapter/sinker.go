@@ -9,9 +9,11 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/gitclient"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/matcher"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
@@ -125,6 +127,12 @@ func (s *sinker) processEvent(ctx context.Context, request *http.Request) error 
 	// pre-populated; for webhook events ParsePayload filled them in.
 	setVCSSpanAttributes(ctx, s.event)
 
+	if s.event.TriggerTarget == triggertype.CheckRunRequestedAction &&
+		s.event.CheckRunRequestedActionID == "llm-fix" &&
+		llm.IsAnalysisExternalID(s.event.CheckRunExternalID) {
+		return s.handleLLMFixAction(ctx)
+	}
+
 	p := pipelineascode.NewPacs(s.event, s.vcx, s.run, s.pacInfo, s.kint, s.logger, s.globalRepo)
 	return p.Run(ctx)
 }
@@ -161,6 +169,44 @@ func (s *sinker) setupClient(ctx context.Context, repo *v1alpha1.Repository) err
 		s.pacInfo,
 		s.logger,
 	)
+}
+
+func (s *sinker) handleLLMFixAction(ctx context.Context) error {
+	parsed, ok := llm.ParseExternalID(s.event.CheckRunExternalID)
+	if !ok {
+		s.logger.Warnf("Ignoring requested_action: invalid external ID %q", s.event.CheckRunExternalID)
+		return nil
+	}
+	s.event.CheckRunParentPipelineRun = parsed.Parent
+	s.event.CheckRunAnalysisRole = parsed.Role
+
+	repo, err := s.findMatchingRepository(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot find repository for LLM fix: %w", err)
+	}
+
+	if repo.Spec.Settings == nil || repo.Spec.Settings.AIAnalysis == nil || !repo.Spec.Settings.AIAnalysis.Enabled {
+		s.logger.Warnf("LLM fix requested but AI analysis is not configured for repo %s", repo.Name)
+		return nil
+	}
+
+	if err := s.setupClient(ctx, repo); err != nil {
+		return fmt.Errorf("client setup failed for LLM fix: %w", err)
+	}
+
+	if s.event.HeadURL != "" && s.event.HeadURL != s.event.URL {
+		statusOpts := llm.FixCheckRunStatusOpts(parsed.Parent, parsed.Role, s.event.SHA)
+		statusOpts.Status = "completed"
+		statusOpts.Conclusion = status.ConclusionNeutral
+		statusOpts.Text = "Automated fixes are not supported for fork PRs because PAC cannot push to the contributor's branch."
+		if err := s.vcx.CreateStatus(ctx, s.event, statusOpts); err != nil {
+			s.logger.Warnf("Failed to post fork-rejection fix check run: %v", err)
+		}
+		s.logger.Infof("LLM fix rejected for fork PR %s/%s#%d", s.event.Organization, s.event.Repository, s.event.PullRequestNumber)
+		return nil
+	}
+
+	return llm.CreateFixPipelineRun(ctx, s.run, s.kint, s.logger, repo, s.event, s.vcx)
 }
 
 // createSkipCIStatus creates a neutral status check on the git provider when CI is skipped.

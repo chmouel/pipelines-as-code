@@ -40,10 +40,39 @@ func (p *commentCaptureProvider) CreateComment(_ context.Context, _ *info.Event,
 
 type statusCaptureProvider struct {
 	tprovider.TestProviderImp
+	comment      string
+	updateMarker string
 }
 
 func (p *statusCaptureProvider) CreateStatus(ctx context.Context, event *info.Event, opts providerstatus.StatusOpts) error {
 	return p.TestProviderImp.CreateStatus(ctx, event, opts)
+}
+
+func (p *statusCaptureProvider) CreateComment(_ context.Context, _ *info.Event, comment, updateMarker string) error {
+	p.comment = comment
+	p.updateMarker = updateMarker
+	return nil
+}
+
+func TestAnalysisScriptCapturesPatchFromWorkingTree(t *testing.T) {
+	assert.Assert(t, strings.Contains(analysisScriptContent, "edit files in this checkout"))
+	assert.Assert(t, strings.Contains(analysisScriptContent, "Your task includes producing a reusable patch"))
+	assert.Assert(t, strings.Contains(analysisScriptContent, "git -C \"${repo}\" diff --binary --no-ext-diff"))
+	assert.Assert(t, strings.Contains(analysisScriptContent, "git -C \"${repo}\" add -N ."))
+	assert.Assert(t, strings.Contains(analysisScriptContent, "--add-dir \"${repo_dir}\""))
+	assert.Assert(t, strings.Contains(analysisScriptContent, "git config --global --add safe.directory \"${repo_dir}/\""))
+	assert.Assert(t, !strings.Contains(analysisScriptContent, "git -C \"${repo_dir:-.}\" apply --recount"))
+	assert.Assert(t, !strings.Contains(analysisScriptContent, "--tools \"\""))
+	assert.Assert(t, !strings.Contains(analysisScriptContent, "--max-turns 1"))
+}
+
+func stepEnvValue(step tektonv1.Step, name string) string {
+	for _, env := range step.Env {
+		if env.Name == name {
+			return env.Value
+		}
+	}
+	return ""
 }
 
 func TestValidateAnalysisConfig(t *testing.T) {
@@ -228,11 +257,21 @@ func TestExecuteAnalysisCreatesPipelineRun(t *testing.T) {
 	assert.Equal(t, analysisPRs.Items[0].Annotations[keys.LLMBackend], "codex")
 	assert.Equal(t, analysisPRs.Items[0].Annotations[keys.LLMOutput], "pr-comment")
 	assert.Assert(t, analysisPRs.Items[0].Spec.PipelineSpec != nil, "expected inline PipelineSpec")
-	assert.Equal(t, len(analysisPRs.Items[0].Spec.PipelineSpec.Tasks), 2, "expected fetch-repo and run-analysis tasks")
-	assert.Equal(t, analysisPRs.Items[0].Spec.PipelineSpec.Tasks[0].Name, "fetch-repo")
-	assert.Equal(t, analysisPRs.Items[0].Spec.PipelineSpec.Tasks[1].Name, "run-analysis")
-	assert.Assert(t, analysisPRs.Items[0].Spec.PipelineSpec.Tasks[0].TaskSpec != nil, "expected inline TaskSpec for fetch-repo")
-	assert.Equal(t, analysisPRs.Items[0].Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[0].Image, settings.AIAnalysisGitImageDefault)
+	assert.Equal(t, len(analysisPRs.Items[0].Spec.PipelineSpec.Tasks), 1, "expected run-analysis task")
+	assert.Equal(t, analysisPRs.Items[0].Spec.PipelineSpec.Tasks[0].Name, "run-analysis")
+	assert.Assert(t, analysisPRs.Items[0].Spec.PipelineSpec.Tasks[0].TaskSpec != nil, "expected inline TaskSpec for run-analysis")
+	assert.Equal(t, len(analysisPRs.Items[0].Spec.PipelineSpec.Tasks[0].TaskSpec.Steps), 2, "expected clone and run-analysis steps")
+	cloneStep := analysisPRs.Items[0].Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[0]
+	assert.Equal(t, cloneStep.Name, gitCloneStepName)
+	assert.Assert(t, cloneStep.Ref == nil, "clone step should be inline shell, not a remote ref")
+	assert.Equal(t, cloneStep.Image, settings.AIAnalysisGitImageDefault)
+	assert.Equal(t, stepEnvValue(cloneStep, "OUTPUT_PATH"), sourceMountPath)
+	assert.Equal(t, stepEnvValue(cloneStep, "REPO_URL"), event.URL)
+	assert.Equal(t, stepEnvValue(cloneStep, "REVISION"), event.SHA)
+	assert.Assert(t, strings.Contains(cloneStep.Script, "git init"))
+	assert.Assert(t, strings.Contains(cloneStep.Script, "git fetch"))
+	assert.Equal(t, len(cloneStep.VolumeMounts), 0)
+	assert.Equal(t, analysisPRs.Items[0].Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[1].Name, "run-analysis")
 }
 
 func TestExecuteAnalysisCollectsPipelineRun(t *testing.T) {
@@ -484,22 +523,54 @@ func TestBuildAnalysisPipelineRunWithGitAuthSecret(t *testing.T) {
 
 	pr := buildAnalysisPipelineRun(config, repo, parent, event, exec, settings.AIAnalysisGitImageDefault)
 
-	fetchTask := pr.Spec.PipelineSpec.Tasks[0]
-	assert.Equal(t, fetchTask.Name, "fetch-repo")
-	assert.Assert(t, fetchTask.TaskSpec != nil)
+	runAnalysisTask := pr.Spec.PipelineSpec.Tasks[0]
+	assert.Equal(t, runAnalysisTask.Name, "run-analysis")
+	assert.Assert(t, runAnalysisTask.TaskSpec != nil)
 
-	fetchTaskSpec := fetchTask.TaskSpec.TaskSpec
+	analysisTaskSpec := runAnalysisTask.TaskSpec.TaskSpec
 
-	// Should have basic-auth volume
-	assert.Equal(t, len(fetchTaskSpec.Volumes), 1)
-	assert.Equal(t, fetchTaskSpec.Volumes[0].Name, "basic-auth")
-	assert.Equal(t, fetchTaskSpec.Volumes[0].Secret.SecretName, "pac-gitauth-abc123")
+	assert.Equal(t, len(analysisTaskSpec.Volumes), 0)
 
-	// clone step should have basic-auth volume mount
-	cloneStep := fetchTaskSpec.Steps[0]
-	assert.Equal(t, len(cloneStep.VolumeMounts), 1)
-	assert.Equal(t, cloneStep.VolumeMounts[0].Name, "basic-auth")
-	assert.Equal(t, cloneStep.VolumeMounts[0].MountPath, "/workspace/basic-auth")
+	var hasBasicAuthTaskWorkspace bool
+	for _, workspace := range analysisTaskSpec.Workspaces {
+		if workspace.Name == basicAuthName {
+			hasBasicAuthTaskWorkspace = true
+		}
+	}
+	assert.Assert(t, hasBasicAuthTaskWorkspace, "task should declare basic-auth workspace")
+
+	var hasBasicAuthPipelineWorkspace bool
+	for _, workspace := range pr.Spec.PipelineSpec.Workspaces {
+		if workspace.Name == basicAuthName {
+			hasBasicAuthPipelineWorkspace = true
+		}
+	}
+	assert.Assert(t, hasBasicAuthPipelineWorkspace, "pipeline should declare basic-auth workspace")
+
+	var hasBasicAuthPipelineTaskWorkspace bool
+	for _, workspace := range runAnalysisTask.Workspaces {
+		if workspace.Name == basicAuthName {
+			hasBasicAuthPipelineTaskWorkspace = true
+			assert.Equal(t, workspace.Workspace, basicAuthName)
+		}
+	}
+	assert.Assert(t, hasBasicAuthPipelineTaskWorkspace, "pipeline task should bind basic-auth workspace")
+
+	var hasBasicAuthRunWorkspace bool
+	for _, workspace := range pr.Spec.Workspaces {
+		if workspace.Name == basicAuthName {
+			hasBasicAuthRunWorkspace = true
+			assert.Assert(t, workspace.Secret != nil, "basic-auth workspace should use a secret")
+			assert.Equal(t, workspace.Secret.SecretName, "pac-gitauth-abc123")
+		}
+	}
+	assert.Assert(t, hasBasicAuthRunWorkspace, "pipeline run should bind basic-auth secret workspace")
+
+	cloneStep := analysisTaskSpec.Steps[0]
+	assert.Equal(t, cloneStep.Name, gitCloneStepName)
+	assert.Assert(t, cloneStep.Ref == nil, "clone step should be inline shell, not a remote ref")
+	assert.Assert(t, strings.Contains(cloneStep.Script, "/workspace/basic-auth"))
+	assert.Equal(t, len(cloneStep.VolumeMounts), 0)
 }
 
 func TestBuildAnalysisPipelineRunVertex(t *testing.T) {
@@ -531,7 +602,7 @@ func TestBuildAnalysisPipelineRunVertex(t *testing.T) {
 
 	pr := buildAnalysisPipelineRun(config, repo, parent, event, exec, settings.AIAnalysisGitImageDefault)
 
-	runAnalysisTask := pr.Spec.PipelineSpec.Tasks[1]
+	runAnalysisTask := pr.Spec.PipelineSpec.Tasks[0]
 	assert.Equal(t, runAnalysisTask.Name, "run-analysis")
 	assert.Assert(t, runAnalysisTask.TaskSpec != nil)
 
@@ -543,7 +614,8 @@ func TestBuildAnalysisPipelineRunVertex(t *testing.T) {
 	assert.Equal(t, analysisTaskSpec.Volumes[0].Secret.SecretName, "gcp-sa-key")
 
 	// run-analysis step should have gcp-creds volume mount
-	analysisStep := analysisTaskSpec.Steps[0]
+	analysisStep := analysisTaskSpec.Steps[1]
+	assert.Equal(t, analysisStep.Name, "run-analysis")
 	assert.Equal(t, len(analysisStep.VolumeMounts), 1)
 	assert.Equal(t, analysisStep.VolumeMounts[0].Name, "gcp-creds")
 	assert.Equal(t, analysisStep.VolumeMounts[0].MountPath, "/workspace/gcp-creds")
@@ -589,7 +661,7 @@ func TestBuildAnalysisPipelineRunVertexDefaultRegion(t *testing.T) {
 
 	pr := buildAnalysisPipelineRun(config, repo, parent, event, exec, settings.AIAnalysisGitImageDefault)
 
-	analysisStep := pr.Spec.PipelineSpec.Tasks[1].TaskSpec.Steps[0]
+	analysisStep := pr.Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[1]
 	envMap := map[string]string{}
 	for _, env := range analysisStep.Env {
 		if env.Value != "" {
@@ -971,7 +1043,38 @@ func TestPostQueuedCheckRun(t *testing.T) {
 	assert.Equal(t, prov.LastStatusOpts.OriginalPipelineRunName, analysisCheckRunName("review"))
 	assert.Equal(t, prov.LastStatusOpts.Title, "AI Analysis - review")
 	assert.Equal(t, prov.LastStatusOpts.Summary, "AI analysis has been scheduled.")
-	assert.Equal(t, prov.LastStatusOpts.Text, "")
+	assert.Assert(t, strings.Contains(prov.LastStatusOpts.Text, "running AI analysis for role \"review\""))
+}
+
+func TestPostFixCheckRunPostsPRCommentWithPushedCommit(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	prov := &statusCaptureProvider{}
+	event := testEvent()
+	event.InstallationID = 12345
+	event.PullRequestNumber = 7
+
+	result := AnalysisResult{
+		Role: "review",
+		Response: &AnalysisResponse{
+			Content: "Stored patch applied and pushed.",
+		},
+		Metadata: map[string]string{
+			"commit_sha":       "abc123def456",
+			"commit_short_sha": "abc123d",
+			"branch":           "feature-branch",
+			"changed_files":    "pkg/llm/analyzer.go\npkg/llm/fix.go",
+		},
+	}
+
+	err := postFixCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger)
+	assert.NilError(t, err)
+	assert.Assert(t, prov.LastStatusOpts != nil)
+	assert.Equal(t, prov.LastStatusOpts.Status, "completed")
+	assert.Equal(t, prov.LastStatusOpts.Conclusion, providerstatus.ConclusionSuccess)
+	assert.Assert(t, strings.Contains(prov.comment, "abc123d"))
+	assert.Assert(t, strings.Contains(prov.comment, "feature-branch"))
+	assert.Assert(t, strings.Contains(prov.comment, "`pkg/llm/analyzer.go`"))
+	assert.Equal(t, prov.updateMarker, "llm-fix-review-abc123def456")
 }
 
 func TestPostQueuedCheckRunSkipsWhenNotGitHubApp(t *testing.T) {

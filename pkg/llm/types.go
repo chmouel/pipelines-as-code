@@ -95,10 +95,11 @@ type AnalysisSummary struct {
 	DurationMS      int64          `json:"duration_ms,omitempty"`
 	CollectedAt     time.Time      `json:"collected_at"`
 	Error           *AnalysisError `json:"error,omitempty"`
-	PatchAvailable  bool           `json:"patch_available,omitempty"`
-	PatchBaseSHA    string         `json:"patch_base_sha,omitempty"`
-	PatchFormat     string         `json:"patch_format,omitempty"`
-	PatchVersion    int            `json:"patch_version,omitempty"`
+	// Compact patch eligibility metadata; the full patch body lives only in analysis child logs.
+	PatchAvailable bool   `json:"patch_available,omitempty"`
+	PatchBaseSHA   string `json:"patch_base_sha,omitempty"`
+	PatchFormat    string `json:"patch_format,omitempty"`
+	PatchVersion   int    `json:"patch_version,omitempty"`
 }
 
 // AIProvider represents a supported LLM provider.
