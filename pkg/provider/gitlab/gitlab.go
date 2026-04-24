@@ -637,6 +637,12 @@ func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error 
 }
 
 // GetFiles gets and caches the list of files changed by a given event.
+// GetPullRequestDiff returns the unified diff for a merge request.
+func (v *Provider) GetPullRequestDiff(_ context.Context, _ *info.Event) (string, error) {
+	// TODO: implement using GitLab MergeRequests.GetMergeRequestDiffVersions or similar
+	return "", nil
+}
+
 func (v *Provider) GetFiles(ctx context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
 	if v.cachedChangedFiles == nil {
 		changes, err := v.fetchChangedFiles(ctx, runevent)

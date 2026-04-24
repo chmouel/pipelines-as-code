@@ -7,44 +7,45 @@ This page explains how to choose the right LLM model for each analysis role and 
 
 ## Model Selection
 
-Each analysis role can specify a different model. Choosing the right model lets you balance cost against analysis depth. If you do not specify a model, Pipelines-as-Code uses provider-specific defaults:
+Each analysis role can specify a different model. If you do not set `model`, the backend CLI uses its own default. Choosing the right model lets you balance cost against analysis depth.
 
-- **OpenAI**: `gpt-5.4-mini`
-- **Gemini**: `gemini-3.1-flash-lite-preview`
+Backend model names follow each CLI's own convention:
 
-### Specifying Models
+| Backend | Example models |
+|---------|---------------|
+| `claude` | `claude-opus-4-5`, `claude-sonnet-4-5`, `claude-haiku-4-5` |
+| `codex` | `codex-mini-latest`, `gpt-4.1`, `o4-mini` |
+| `gemini` | `gemini-2.5-pro`, `gemini-2.5-flash` |
 
-You can use any model name that your chosen LLM provider supports. Consult the provider's documentation for available models:
-
-- **OpenAI Models**: <https://platform.openai.com/docs/models>
-- **Gemini Models**: <https://ai.google.dev/gemini-api/docs/models/gemini>
+Consult the documentation for your chosen backend to find current model names.
 
 ### Example: Assigning Different Models per Role
 
-The following example shows how to assign a different model to each analysis role, matching the model's capability to the task's complexity:
+The following example uses the `claude` backend and assigns a different model to each role:
 
 ```yaml
 settings:
   ai:
     enabled: true
-    provider: "openai"
+    backend: "claude"
+    image: "ghcr.io/openshift-pipelines/ai-agents:latest"
     secret_ref:
-      name: "openai-api-key"
+      name: "anthropic-api-key"
       key: "token"
     roles:
-      # Use the most capable model for complex analysis
+      # Use the most capable model for deep security analysis
       - name: "security-analysis"
-        model: "gpt-5"
+        model: "claude-opus-4-5"
         prompt: "Analyze security failures..."
 
-      # Use default model (gpt-5.4-mini) for general analysis
+      # Use default model for general analysis
       - name: "general-failure"
-        # No model specified - uses provider default
+        # No model specified - uses backend default
         prompt: "Analyze this failure..."
 
-      # Use the most economical model for quick checks
+      # Use a fast, economical model for quick checks
       - name: "quick-check"
-        model: "gpt-5-nano"
+        model: "claude-haiku-4-5"
         prompt: "Quick diagnosis..."
 ```
 

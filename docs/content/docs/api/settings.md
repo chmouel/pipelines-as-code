@@ -196,51 +196,72 @@ settings:
 
 {{< /param >}}
 
-{{< param name="ai.provider" type="string" required="true" id="param-ai-provider" >}}
-Sets the LLM provider for analysis. Supported values:
+{{< param name="ai.backend" type="string" required="true" id="param-ai-backend" >}}
+Selects the CLI backend to run for analysis. Supported values:
 
-- `openai` - OpenAI (GPT models)
-- `gemini` - Google Gemini
+- `claude` — Anthropic Claude Code CLI (uses `ANTHROPIC_API_KEY`)
+- `codex` — OpenAI Codex CLI (uses `OPENAI_API_KEY`)
+- `gemini` — Google Gemini CLI (uses `GEMINI_API_KEY`)
+- `claude-vertex` — Anthropic Claude via Google Cloud Vertex AI (uses GCP service account JSON)
+- `opencode` — OpenCode CLI (uses GCP service account JSON)
 
 ```yaml
 settings:
   ai:
-    provider: "openai"
+    backend: "claude"
 ```
 
 {{< /param >}}
 
-{{< param name="ai.api_url" type="string" id="param-ai-api-url" >}}
-Overrides the default API endpoint for the LLM provider. Defaults:
-
-- OpenAI: `https://api.openai.com/v1`
-- Gemini: `https://generativelanguage.googleapis.com/v1beta`
-
-Set this when you use self-hosted LLM instances, proxy services, or alternative endpoints.
+{{< param name="ai.image" type="string" required="true" id="param-ai-image" >}}
+Container image that contains the selected backend CLI binary. The pre-built image
+`ghcr.io/openshift-pipelines/ai-agents:latest` ships all supported backends.
 
 ```yaml
 settings:
   ai:
-    api_url: "https://custom-llm.example.com/v1"
+    image: "ghcr.io/openshift-pipelines/ai-agents:latest"
 ```
 
 {{< /param >}}
 
 {{< param name="ai.secret_ref" type="Secret" required="true" id="param-ai-secret-ref" >}}
-References the Kubernetes Secret containing the LLM provider API token.
+References the Kubernetes Secret containing the backend API token (or GCP service account JSON for Vertex AI backends). See [API Keys and Credentials]({{< relref "/docs/guides/llm-analysis/api-setup" >}}) for backend-specific instructions.
 
 ```yaml
 settings:
   ai:
     secret_ref:
-      name: openai-token
-      key: api-key
+      name: anthropic-api-key
+      key: token
+```
+
+{{< /param >}}
+
+{{< param name="ai.vertex_project_id" type="string" id="param-ai-vertex-project-id" >}}
+GCP project ID. Required when `backend` is `claude-vertex`.
+
+```yaml
+settings:
+  ai:
+    vertex_project_id: "my-gcp-project"
+```
+
+{{< /param >}}
+
+{{< param name="ai.vertex_region" type="string" id="param-ai-vertex-region" >}}
+GCP region for Vertex AI (default: `global`). Only used when `backend` is `claude-vertex`.
+
+```yaml
+settings:
+  ai:
+    vertex_region: "us-east5"
 ```
 
 {{< /param >}}
 
 {{< param name="ai.timeout_seconds" type="integer" id="param-ai-timeout-seconds" >}}
-Sets the maximum time in seconds to wait for LLM analysis (default: 30). Valid range: 1-300.
+Sets the maximum time in seconds for the analysis PipelineRun (default: 30). Valid range: 1-900.
 
 ```yaml
 settings:
@@ -275,10 +296,7 @@ Defines the base prompt template that Pipelines-as-Code sends to the LLM.
 {{< /param >}}
 
 {{< param name="roles[].model" type="string" id="param-roles-model" >}}
-Specifies the LLM model for this role. If omitted, Pipelines-as-Code uses provider-specific defaults:
-
-- OpenAI: `gpt-5.4-mini`
-- Gemini: `gemini-3.1-flash-lite-preview`
+Specifies the model for this role. If omitted, the backend CLI uses its own default model. Consult each backend's documentation for available model names.
 {{< /param >}}
 
 {{< param name="roles[].on_cel" type="string" id="param-roles-on-cel" >}}
@@ -385,13 +403,13 @@ spec:
     # AI analysis configuration
     ai:
       enabled: true
-      provider: "openai"
-      api_url: "https://api.openai.com/v1"
+      backend: "claude"
+      image: "ghcr.io/openshift-pipelines/ai-agents:latest"
       secret_ref:
-        name: openai-credentials
-        key: api-key
-      timeout_seconds: 45
-      max_tokens: 1500
+        name: anthropic-api-key
+        key: token
+      timeout_seconds: 300
+      max_tokens: 2000
       roles:
         - name: "pr-failure-analysis"
           prompt: |
@@ -399,9 +417,8 @@ spec:
             1. Root cause analysis
             2. Specific fix recommendations
             3. Prevention strategies
-          model: "gpt-4"
           on_cel: 'body.event.event_type == "pull_request" && body.pipelineRun.status.conditions[0].status == "False"'
-          output: "pr-comment"
+          output: "check-run"
           context_items:
             commit_content: true
             pr_content: true
@@ -411,7 +428,6 @@ spec:
               max_lines: 100
         - name: "security-review"
           prompt: "Review this change for potential security issues"
-          model: "gpt-4"
           on_cel: '"security-review" in body.event.pull_request_labels'
           context_items:
             commit_content: true

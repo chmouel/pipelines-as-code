@@ -3,8 +3,10 @@ package llm
 import (
 	"context"
 	"fmt"
-	"time"
+	"regexp"
+	"strings"
 
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cel"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
@@ -12,21 +14,28 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	apis "knative.dev/pkg/apis"
 )
 
-// AnalysisResult represents the result of an LLM analysis.
+var (
+	ansiControlPattern   = regexp.MustCompile(`(?:\x1b|␛)\[[0-?]*[ -/]*[@-~]`)
+	ansiOSCPattern       = regexp.MustCompile(`\x1b\][^\x07]*(?:\x07|\x1b\\)`)
+	checklistLinePattern = regexp.MustCompile(`^\[[ xX]\]\s+`)
+)
+
+// AnalysisResult represents the collected result of an LLM analysis role.
 type AnalysisResult struct {
 	Role     string
+	Output   string
 	Response *AnalysisResponse
 	Error    error
 }
 
-// ExecuteAnalysis performs the complete LLM analysis workflow.
-// This is the single entry point called by the reconciler.
+// ExecuteAnalysis performs the async PipelineRun-based LLM analysis workflow.
 func ExecuteAnalysis(
 	ctx context.Context,
 	run *params.Run,
@@ -42,56 +51,84 @@ func ExecuteAnalysis(
 		return nil
 	}
 
-	logger.Infof("Starting LLM analysis for pipeline %s/%s", pr.Namespace, pr.Name)
-
-	results, err := analyze(ctx, run, kinteract, logger, repo, pr, event, prov)
-	if err != nil {
-		return fmt.Errorf("LLM analysis failed: %w", err)
+	config := repo.Spec.Settings.AIAnalysis
+	if err := validateAnalysisConfig(config); err != nil {
+		return fmt.Errorf("invalid AI analysis configuration: %w", err)
 	}
 
-	if len(results) == 0 {
-		logger.Debug("No analysis results generated")
+	logger = logger.With(
+		"pipeline_run", pr.Name,
+		"namespace", pr.Namespace,
+		"repository", repo.Name,
+		"backend", config.Backend,
+		"execution_mode", config.GetExecutionMode(),
+	)
+
+	// Collect completed analysis PipelineRuns first, before re-evaluating role triggers.
+	// This prevents orphaning results when roles no longer match between
+	// child PipelineRun creation and completion.
+	analysisPRs, err := listAnalysisPipelineRuns(ctx, pr.Name, pr.Namespace, run)
+	if err != nil {
+		return fmt.Errorf("failed to list llm pipelineruns: %w", err)
+	}
+	analysisPRsByRole := map[string]*tektonv1.PipelineRun{}
+	for i := range analysisPRs {
+		role := analysisPRs[i].Annotations[keys.LLMRole]
+		if role != "" {
+			analysisPRsByRole[role] = &analysisPRs[i]
+		}
+	}
+
+	for role, analysisPR := range analysisPRsByRole {
+		if !analysisPR.IsDone() || isPipelineRunCollected(analysisPR) {
+			continue
+		}
+
+		if err := markPipelineRunCollected(ctx, run, analysisPR); err != nil {
+			return fmt.Errorf("failed to mark llm PipelineRun %s collected: %w", analysisPR.Name, err)
+		}
+
+		result, summary := parsePipelineRunEnvelope(ctx, run, analysisPR)
+		if err := handleAnalysisResult(ctx, logger, repo, pr, event, prov, result); err != nil {
+			return err
+		}
+
+		updatedPR, err := persistAnalysisSummary(ctx, run, logger, pr, role, summary)
+		if err != nil {
+			return fmt.Errorf("failed to persist llm summary for role %s: %w", role, err)
+		}
+		pr = updatedPR
+		logger.Infof("Collected LLM PipelineRun result for role %s", role)
+	}
+
+	executions, err := buildRoleExecutions(ctx, run, kinteract, logger, repo, pr, event, prov)
+	if err != nil {
+		return fmt.Errorf("failed to prepare llm analysis: %w", err)
+	}
+	if len(executions) == 0 {
+		logger.Debug("No LLM roles matched this PipelineRun")
 		return nil
 	}
 
-	for _, result := range results {
-		if result.Error != nil {
-			logger.Warnf("Analysis failed for role %s: %v", result.Role, result.Error)
+	for _, exec := range executions {
+		if _, ok := analysisPRsByRole[exec.Role.Name]; ok {
 			continue
 		}
-		if result.Response == nil {
-			logger.Warnf("No response for role %s", result.Role)
-			continue
+		if err := createAnalysisPipelineRun(ctx, run, config, repo, pr, event, exec); err != nil {
+			return fmt.Errorf("failed to create llm PipelineRun for role %s: %w", exec.Role.Name, err)
 		}
-
-		logger.Infof("Processing LLM analysis result for role %s, tokens used: %d", result.Role, result.Response.TokensUsed)
-
-		// Find the role config and validate output destination
-		var roleConfig *v1alpha1.AnalysisRole
-		for i := range repo.Spec.Settings.AIAnalysis.Roles {
-			if repo.Spec.Settings.AIAnalysis.Roles[i].Name == result.Role {
-				roleConfig = &repo.Spec.Settings.AIAnalysis.Roles[i]
-				break
+		if exec.Role.GetOutput() == "check-run" {
+			if err := postQueuedCheckRun(ctx, exec.Role.Name, event, prov, logger); err != nil {
+				logger.With("role", exec.Role.Name, "error", err).Warn("Failed to create queued AI analysis check run")
 			}
 		}
-		if roleConfig != nil {
-			output := roleConfig.GetOutput()
-			if output != "pr-comment" {
-				logger.Warnf("Unsupported output destination %q for role %s, skipping (only 'pr-comment' is supported)", output, result.Role)
-				continue
-			}
-		}
-
-		if err := postPRComment(ctx, result, event, prov, logger); err != nil {
-			logger.Warnf("Failed to handle output for role %s: %v", result.Role, err)
-		}
+		logger.Infof("Created LLM PipelineRun for role %s", exec.Role.Name)
 	}
 
 	return nil
 }
 
-// analyze performs LLM analysis based on the repository configuration.
-func analyze(
+func buildRoleExecutions(
 	ctx context.Context,
 	run *params.Run,
 	kinteract kubeinteraction.Interface,
@@ -100,188 +137,110 @@ func analyze(
 	pr *tektonv1.PipelineRun,
 	event *info.Event,
 	prov provider.Interface,
-) ([]AnalysisResult, error) {
-	if repo == nil || repo.Spec.Settings == nil || repo.Spec.Settings.AIAnalysis == nil {
-		return nil, nil
-	}
-
+) ([]roleExecution, error) {
 	config := repo.Spec.Settings.AIAnalysis
-	if !config.Enabled {
-		return nil, nil
-	}
-
-	analysisLogger := logger.With(
-		"provider", config.Provider,
-		"pipeline_run", pr.Name,
-		"namespace", pr.Namespace,
-		"repository", repo.Name,
-		"roles_count", len(config.Roles),
-	)
-
-	analysisLogger.Info("Starting LLM analysis")
-
-	if err := validateAnalysisConfig(config); err != nil {
-		analysisLogger.With("error", err).Error("Invalid AI analysis configuration")
-		return nil, fmt.Errorf("invalid AI analysis configuration: %w", err)
-	}
-
-	namespace := repo.Namespace
 	assembler := llmcontext.NewAssembler(run, kinteract, logger)
 
 	celContext, err := assembler.BuildCELContext(pr, event, repo)
 	if err != nil {
-		analysisLogger.With("error", err).Error("Failed to build CEL context")
 		return nil, fmt.Errorf("failed to build CEL context: %w", err)
 	}
 
-	results := []AnalysisResult{}
 	contextCache := make(map[string]map[string]any)
+	executions := []roleExecution{}
 
 	for _, role := range config.Roles {
-		roleLogger := analysisLogger.With("role", role.Name)
-
 		shouldTrigger, err := shouldTriggerRole(role, celContext, pr)
 		if err != nil {
-			roleLogger.With("error", err, "cel_expression", role.OnCEL).Warn("Failed to evaluate CEL expression")
-			results = append(results, AnalysisResult{
-				Role:  role.Name,
-				Error: fmt.Errorf("CEL evaluation failed: %w", err),
-			})
+			logger.With("role", role.Name, "error", err).Warn("Skipping role because CEL evaluation failed")
 			continue
 		}
-
 		if !shouldTrigger {
-			roleLogger.With("cel_expression", role.OnCEL).Debug("Role did not match CEL condition, skipping")
 			continue
 		}
-
-		roleLogger.Info("Executing analysis role")
 
 		contextKey := getContextCacheKey(role.ContextItems)
-		var roleContext map[string]any
-		var cached bool
-		if roleContext, cached = contextCache[contextKey]; !cached {
+		roleContext, cached := contextCache[contextKey]
+		if !cached {
 			roleContext, err = assembler.BuildContext(ctx, pr, event, role.ContextItems, prov)
 			if err != nil {
-				roleLogger.With("error", err).Warn("Failed to build context for role")
-				results = append(results, AnalysisResult{
-					Role:  role.Name,
-					Error: fmt.Errorf("context build failed: %w", err),
-				})
+				logger.With("role", role.Name, "error", err).Warn("Skipping role because context build failed")
 				continue
 			}
 			contextCache[contextKey] = roleContext
 		}
 
-		client, err := NewClient(
-			ctx,
-			AIProvider(config.Provider),
-			config.TokenSecretRef,
-			namespace,
-			kinteract,
-			config.GetAPIURL(),
-			role.GetModel(),
-			config.TimeoutSeconds,
-			config.MaxTokens,
-		)
-		if err != nil {
-			roleLogger.With("error", err).Warn("Failed to create LLM client for role")
-			results = append(results, AnalysisResult{
-				Role:  role.Name,
-				Error: fmt.Errorf("client creation failed: %w", err),
-			})
-			continue
-		}
-
-		analysisRequest := &AnalysisRequest{
+		request := &AnalysisRequest{
 			Prompt:         role.Prompt,
 			Context:        roleContext,
-			MaxTokens:      config.MaxTokens,
-			TimeoutSeconds: config.TimeoutSeconds,
+			MaxTokens:      maxTokensOrDefault(config.MaxTokens),
+			TimeoutSeconds: timeoutSecondsOrDefault(config.TimeoutSeconds),
 		}
 
-		if analysisRequest.MaxTokens == 0 {
-			analysisRequest.MaxTokens = DefaultMaxTokens
-		}
-		if analysisRequest.TimeoutSeconds == 0 {
-			analysisRequest.TimeoutSeconds = DefaultTimeoutSeconds
-		}
-
-		roleLogger.With(
-			"max_tokens", analysisRequest.MaxTokens,
-			"timeout_seconds", analysisRequest.TimeoutSeconds,
-			"context_items", len(roleContext),
-		).Debug("Sending analysis request to LLM")
-
-		var response *AnalysisResponse
-		var analysisErr error
-		analysisStart := time.Now()
-
-		const maxRetries = 3
-		const retryDelay = 2 * time.Second
-
-		for attempt := 1; attempt <= maxRetries; attempt++ {
-			response, analysisErr = client.Analyze(ctx, analysisRequest)
-			if analysisErr == nil {
-				break
-			}
-
-			roleLogger.With(
-				"error", analysisErr,
-				"attempt", attempt,
-				"max_attempts", maxRetries,
-			).Warn("LLM analysis attempt failed")
-
-			if attempt < maxRetries {
-				timer := time.NewTimer(retryDelay)
-				select {
-				case <-timer.C:
-				case <-ctx.Done():
-					roleLogger.With("context_error", ctx.Err()).Warn("Context cancelled during retry backoff")
-					analysisErr = fmt.Errorf("context cancelled: %w", ctx.Err())
-					attempt = maxRetries
-				}
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
-					}
-				}
-			}
-		}
-		analysisDuration := time.Since(analysisStart)
-
-		if analysisErr != nil {
-			roleLogger.With(
-				"error", analysisErr,
-				"duration", analysisDuration,
-			).Warn("LLM analysis failed for role after all retries")
-			results = append(results, AnalysisResult{
-				Role:  role.Name,
-				Error: analysisErr,
-			})
+		renderedPrompt, err := BuildPrompt(request)
+		if err != nil {
+			logger.With("role", role.Name, "error", err).Warn("Skipping role because prompt rendering failed")
 			continue
 		}
 
-		roleLogger.With(
-			"tokens_used", response.TokensUsed,
-			"duration", analysisDuration,
-			"response_length", len(response.Content),
-		).Info("LLM analysis completed successfully")
-
-		results = append(results, AnalysisResult{
-			Role:     role.Name,
-			Response: response,
+		executions = append(executions, roleExecution{
+			Role:     role,
+			Request:  request,
+			Rendered: renderedPrompt,
 		})
 	}
 
-	analysisLogger.With(
-		"total_results", len(results),
-		"successful_analyses", countSuccessfulResults(results),
-		"failed_analyses", countFailedResults(results),
-	).Info("LLM analysis completed")
+	return executions, nil
+}
 
-	return results, nil
+func handleAnalysisResult(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	repo *v1alpha1.Repository,
+	pr *tektonv1.PipelineRun,
+	event *info.Event,
+	prov provider.Interface,
+	result AnalysisResult,
+) error {
+	if result.Error != nil {
+		logger.Warnf("Analysis failed for role %s: %v", result.Role, result.Error)
+		return nil //nolint:nilerr
+	}
+	if result.Response == nil {
+		logger.Warnf("No response for role %s", result.Role)
+		return nil
+	}
+
+	var roleConfig *v1alpha1.AnalysisRole
+	for i := range repo.Spec.Settings.AIAnalysis.Roles {
+		if repo.Spec.Settings.AIAnalysis.Roles[i].Name == result.Role {
+			roleConfig = &repo.Spec.Settings.AIAnalysis.Roles[i]
+			break
+		}
+	}
+	output := result.Output
+	if output == "" && roleConfig != nil {
+		output = roleConfig.GetOutput()
+	}
+	if output == "" {
+		output = "pr-comment"
+	}
+
+	switch output {
+	case "pr-comment":
+		if err := postPRComment(ctx, result, event, prov, logger); err != nil {
+			return fmt.Errorf("failed to publish llm result for role %s on PipelineRun %s/%s: %w", result.Role, pr.Namespace, pr.Name, err)
+		}
+		return nil
+	case "check-run":
+		if err := postCheckRun(ctx, result, pr, event, prov, logger); err != nil {
+			return fmt.Errorf("failed to publish llm result for role %s on PipelineRun %s/%s: %w", result.Role, pr.Namespace, pr.Name, err)
+		}
+		return nil
+	default:
+		logger.Warnf("Unsupported output destination %q for role %s, skipping", output, result.Role)
+		return nil
+	}
 }
 
 // postPRComment posts LLM analysis as a PR comment.
@@ -291,8 +250,7 @@ func postPRComment(ctx context.Context, result AnalysisResult, event *info.Event
 		return nil
 	}
 
-	comment := fmt.Sprintf("## 🤖 AI Analysis - %s\n\n%s\n\n---\n*Generated by Pipelines-as-Code LLM Analysis*",
-		result.Role, result.Response.Content)
+	comment := formatAnalysisComment(result.Role, result.Response.Content)
 
 	updateMarker := fmt.Sprintf("llm-analysis-%s", result.Role)
 
@@ -302,6 +260,186 @@ func postPRComment(ctx context.Context, result AnalysisResult, event *info.Event
 
 	logger.Infof("Posted LLM analysis as PR comment for role %s", result.Role)
 	return nil
+}
+
+// postCheckRun posts LLM analysis as a GitHub Check Run (GitHub App only).
+func postCheckRun(
+	ctx context.Context,
+	result AnalysisResult,
+	_ *tektonv1.PipelineRun,
+	event *info.Event,
+	prov provider.Interface,
+	logger *zap.SugaredLogger,
+) error {
+	// Check-run output requires GitHub App installation
+	if event.InstallationID == 0 {
+		logger.Infof("Skipping check-run output for role %s: not a GitHub App installation (InstallationID is 0)", result.Role)
+		return nil
+	}
+
+	content := normalizeAnalysisContent(result.Response.Content)
+	if content == "" {
+		content = "_No analysis content produced._"
+	}
+
+	statusOpts := analysisCheckRunStatusOpts(result.Role, event.SHA)
+	statusOpts.Status = "completed"
+	statusOpts.Conclusion = status.ConclusionNeutral
+	statusOpts.Text = content
+
+	if err := prov.CreateStatus(ctx, event, statusOpts); err != nil {
+		return fmt.Errorf("failed to create check run for AI analysis role %s: %w", result.Role, err)
+	}
+
+	logger.Infof("Posted LLM analysis as check run for role %s", result.Role)
+	return nil
+}
+
+func postQueuedCheckRun(
+	ctx context.Context,
+	roleName string,
+	event *info.Event,
+	prov provider.Interface,
+	logger *zap.SugaredLogger,
+) error {
+	if event.InstallationID == 0 {
+		logger.Infof("Skipping queued check-run output for role %s: not a GitHub App installation (InstallationID is 0)", roleName)
+		return nil
+	}
+
+	statusOpts := analysisCheckRunStatusOpts(roleName, event.SHA)
+	statusOpts.Status = "queued"
+	statusOpts.Conclusion = status.ConclusionPending
+	statusOpts.Summary = "AI analysis has been scheduled."
+
+	if err := prov.CreateStatus(ctx, event, statusOpts); err != nil {
+		return fmt.Errorf("failed to create queued check run for AI analysis role %s: %w", roleName, err)
+	}
+
+	logger.Infof("Posted queued AI analysis check run for role %s", roleName)
+	return nil
+}
+
+func analysisCheckRunStatusOpts(roleName, sha string) status.StatusOpts {
+	return status.StatusOpts{
+		PipelineRunName:         analysisCheckRunExternalID(roleName, sha),
+		OriginalPipelineRunName: analysisCheckRunName(roleName),
+		Title:                   fmt.Sprintf("AI Analysis - %s", roleName),
+		PipelineRun:             nil, // Don't patch any PipelineRun annotations
+	}
+}
+
+func analysisCheckRunExternalID(roleName, sha string) string {
+	return fmt.Sprintf("llm-analysis-%s-%s", roleName, sha)
+}
+
+func analysisCheckRunName(roleName string) string {
+	return fmt.Sprintf("AI Analysis / %s", roleName)
+}
+
+func formatAnalysisComment(role, content string) string {
+	body := normalizeAnalysisContent(content)
+	if body == "" {
+		body = "_No analysis content produced._"
+	}
+
+	return fmt.Sprintf("## 🤖 AI Analysis - %s\n\n%s\n\n---\n*Generated by Pipelines-as-Code LLM Analysis*", role, body)
+}
+
+func normalizeAnalysisContent(content string) string {
+	cleaned := sanitizeTerminalOutput(content)
+	lines := strings.Split(cleaned, "\n")
+	filtered := make([]string, 0, len(lines))
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if shouldSkipAnalysisLine(trimmed) {
+			continue
+		}
+		filtered = append(filtered, strings.TrimRight(line, " \t"))
+	}
+
+	body := strings.TrimSpace(strings.Join(filtered, "\n"))
+	body = strings.TrimSuffix(body, "\n---")
+	body = collapseBlankLines(body)
+
+	return strings.TrimSpace(body)
+}
+
+func sanitizeTerminalOutput(content string) string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+	content = ansiOSCPattern.ReplaceAllString(content, "")
+	content = ansiControlPattern.ReplaceAllString(content, "")
+
+	var builder strings.Builder
+	builder.Grow(len(content))
+
+	for _, r := range content {
+		switch {
+		case r == '\n' || r == '\t':
+			builder.WriteRune(r)
+		case r >= 0x20:
+			builder.WriteRune(r)
+		}
+	}
+
+	return builder.String()
+}
+
+func shouldSkipAnalysisLine(line string) bool {
+	if line == "" {
+		return false
+	}
+
+	lower := strings.ToLower(line)
+
+	switch {
+	case strings.HasPrefix(line, "## 🤖 AI Analysis -"):
+		return true
+	case lower == "# todos", lower == "## todos":
+		return true
+	case checklistLinePattern.MatchString(line):
+		return true
+	case strings.HasPrefix(lower, "performing one time database migration"):
+		return true
+	case lower == "sqlite-migration:done":
+		return true
+	case lower == "database migration complete.":
+		return true
+	case strings.HasPrefix(line, "> ") && strings.Contains(line, "·"):
+		return true
+	case strings.HasPrefix(lower, "i'll analyze this"):
+		return true
+	case strings.HasPrefix(lower, "would you like me"):
+		return true
+	case strings.Contains(lower, "generated by pipelines-as-code llm analysis"):
+		return true
+	default:
+		return false
+	}
+}
+
+func collapseBlankLines(content string) string {
+	lines := strings.Split(content, "\n")
+	result := make([]string, 0, len(lines))
+	lastBlank := false
+
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			if lastBlank {
+				continue
+			}
+			lastBlank = true
+			result = append(result, "")
+			continue
+		}
+
+		lastBlank = false
+		result = append(result, line)
+	}
+
+	return strings.Join(result, "\n")
 }
 
 // getContextCacheKey generates a unique key for a context configuration.
@@ -321,26 +459,6 @@ func getContextCacheKey(config *v1alpha1.ContextConfig) string {
 		config.ContainerLogs != nil && config.ContainerLogs.Enabled,
 		maxLines,
 	)
-}
-
-func countSuccessfulResults(results []AnalysisResult) int {
-	count := 0
-	for _, result := range results {
-		if result.Error == nil && result.Response != nil {
-			count++
-		}
-	}
-	return count
-}
-
-func countFailedResults(results []AnalysisResult) int {
-	count := 0
-	for _, result := range results {
-		if result.Error != nil {
-			count++
-		}
-	}
-	return count
 }
 
 // shouldTriggerRole evaluates the CEL expression to determine if a role should be triggered.
@@ -368,12 +486,32 @@ func shouldTriggerRole(role v1alpha1.AnalysisRole, celContext map[string]any, pr
 
 // validateAnalysisConfig validates the AI analysis configuration.
 func validateAnalysisConfig(config *v1alpha1.AIAnalysisConfig) error {
-	if config.Provider == "" {
-		return fmt.Errorf("provider is required")
+	if config.GetExecutionMode() != string(ExecutionModePipelineRun) {
+		return fmt.Errorf("execution mode %q is not supported", config.GetExecutionMode())
 	}
 
-	if config.TokenSecretRef == nil {
-		return fmt.Errorf("token secret reference is required")
+	if config.Backend == "" {
+		return fmt.Errorf("backend is required")
+	}
+	switch AgentBackend(config.Backend) {
+	case BackendCodex, BackendClaude, BackendClaudeVertex, BackendGemini, BackendOpencode:
+	default:
+		return fmt.Errorf("backend %q is not supported", config.Backend)
+	}
+
+	if (AgentBackend(config.Backend) == BackendClaudeVertex || AgentBackend(config.Backend) == BackendOpencode) && config.VertexProjectID == "" {
+		return fmt.Errorf("vertex_project_id is required when backend is %q", config.Backend)
+	}
+
+	if config.Image == "" {
+		return fmt.Errorf("image is required")
+	}
+
+	if config.SecretRef == nil {
+		return fmt.Errorf("secret reference is required")
+	}
+	if config.SecretRef.Name == "" {
+		return fmt.Errorf("secret reference name is required")
 	}
 
 	if len(config.Roles) == 0 {
@@ -384,16 +522,20 @@ func validateAnalysisConfig(config *v1alpha1.AIAnalysisConfig) error {
 		if role.Name == "" {
 			return fmt.Errorf("role[%d]: name is required", i)
 		}
-
 		if role.Prompt == "" {
 			return fmt.Errorf("role[%d]: prompt is required", i)
 		}
-
-		output := role.GetOutput()
-		if output != "pr-comment" {
-			return fmt.Errorf("role[%d]: invalid output destination '%s' (only 'pr-comment' is currently supported)", i, output)
+		if role.GetOutput() != "pr-comment" && role.GetOutput() != "check-run" {
+			return fmt.Errorf("role[%d]: invalid output destination '%s' (only 'pr-comment' and 'check-run' are currently supported)", i, role.GetOutput())
 		}
 	}
 
 	return nil
+}
+
+func timeoutSecondsOrDefault(timeoutSeconds int) int {
+	if timeoutSeconds == 0 {
+		return DefaultTimeoutSeconds
+	}
+	return timeoutSeconds
 }

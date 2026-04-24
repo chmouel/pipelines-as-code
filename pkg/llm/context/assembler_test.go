@@ -11,6 +11,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/test/logger"
+	testprovider "github.com/openshift-pipelines/pipelines-as-code/pkg/test/provider"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -472,4 +473,176 @@ func TestBuildCommitContent(t *testing.T) {
 		_, err := assembler.buildCommitContent(ctx, nil, nil)
 		assert.ErrorContains(t, err, "event is nil")
 	})
+}
+
+func TestBuildDiffContent(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	run := &params.Run{}
+	kinteract := &kubeinteraction.Interaction{}
+	assembler := NewAssembler(run, kinteract, logger)
+	ctx, _ := rtesting.SetupFakeContext(t)
+
+	tests := []struct {
+		name         string
+		diff         string
+		expectedDiff string
+		wantTruncate bool
+	}{
+		{
+			name:         "normal diff",
+			diff:         "--- a/file.go\n+++ b/file.go\n@@ -1,3 +1,3 @@\n-old\n+new\n",
+			expectedDiff: "--- a/file.go\n+++ b/file.go\n@@ -1,3 +1,3 @@\n-old\n+new\n",
+		},
+		{
+			name:         "empty diff",
+			diff:         "",
+			expectedDiff: "",
+		},
+		{
+			name:         "large diff gets truncated",
+			diff:         strings.Repeat("x", maxDiffSize+100),
+			wantTruncate: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prov := &testprovider.TestProviderImp{
+				WantPullRequestDiff: tt.diff,
+			}
+			event := &info.Event{PullRequestNumber: 1}
+
+			result, err := assembler.buildDiffContent(ctx, event, prov)
+			assert.NilError(t, err)
+
+			if tt.wantTruncate {
+				assert.Assert(t, len(result) <= maxDiffSize+50, "diff should be truncated")
+				assert.Assert(t, strings.HasSuffix(result, "[diff truncated]"))
+			} else {
+				assert.Equal(t, result, tt.expectedDiff)
+			}
+		})
+	}
+
+	t.Run("nil provider", func(t *testing.T) {
+		_, err := assembler.buildDiffContent(ctx, &info.Event{}, nil)
+		assert.ErrorContains(t, err, "nil")
+	})
+}
+
+func TestBuildFileContext(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	run := &params.Run{}
+	kinteract := &kubeinteraction.Interaction{}
+	assembler := NewAssembler(run, kinteract, logger)
+	ctx, _ := rtesting.SetupFakeContext(t)
+
+	tests := []struct {
+		name          string
+		files         []string
+		repoFiles     map[string]string
+		expectedFiles map[string]string
+	}{
+		{
+			name:  "single file",
+			files: []string{"AGENTS.md"},
+			repoFiles: map[string]string{
+				"AGENTS.md": "# Agent Instructions\nNotify #prodsec on security changes.",
+			},
+			expectedFiles: map[string]string{
+				"AGENTS.md": "# Agent Instructions\nNotify #prodsec on security changes.",
+			},
+		},
+		{
+			name:  "multiple files",
+			files: []string{"AGENTS.md", "README.md"},
+			repoFiles: map[string]string{
+				"AGENTS.md": "agent instructions",
+				"README.md": "project readme",
+			},
+			expectedFiles: map[string]string{
+				"AGENTS.md": "agent instructions",
+				"README.md": "project readme",
+			},
+		},
+		{
+			name:  "missing file skipped",
+			files: []string{"AGENTS.md", "MISSING.md"},
+			repoFiles: map[string]string{
+				"AGENTS.md": "agent instructions",
+			},
+			expectedFiles: map[string]string{
+				"AGENTS.md": "agent instructions",
+			},
+		},
+		{
+			name:          "all files missing",
+			files:         []string{"MISSING.md"},
+			repoFiles:     map[string]string{},
+			expectedFiles: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prov := &testprovider.TestProviderImp{
+				FilesInsideRepo: tt.repoFiles,
+			}
+			event := &info.Event{}
+
+			result, err := assembler.buildFileContext(ctx, event, prov, tt.files)
+			assert.NilError(t, err)
+			assert.DeepEqual(t, result, tt.expectedFiles)
+		})
+	}
+}
+
+func TestBuildContextWithDiffAndFiles(t *testing.T) {
+	logger, _ := logger.GetLogger()
+	run := &params.Run{}
+	kinteract := &kubeinteraction.Interaction{}
+	assembler := NewAssembler(run, kinteract, logger)
+	ctx, _ := rtesting.SetupFakeContext(t)
+
+	prov := &testprovider.TestProviderImp{
+		WantPullRequestDiff: "--- a/main.go\n+++ b/main.go\n@@ -1 +1 @@\n-old\n+new\n",
+		FilesInsideRepo: map[string]string{
+			"AGENTS.md": "# Instructions",
+		},
+	}
+
+	event := &info.Event{
+		SHA:               "abc123",
+		SHATitle:          "fix: update image",
+		PullRequestNumber: 42,
+	}
+
+	pr := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pr",
+			Namespace: "test-ns",
+		},
+	}
+
+	config := &v1alpha1.ContextConfig{
+		DiffContent: true,
+		Files:       []string{"AGENTS.md"},
+	}
+
+	contextData, err := assembler.BuildContext(ctx, pr, event, config, prov)
+	assert.NilError(t, err)
+
+	// Verify diff is included
+	diff, ok := contextData["code_diff"].(string)
+	assert.Assert(t, ok, "code_diff should be a string")
+	assert.Assert(t, strings.Contains(diff, "main.go"))
+
+	// Verify files are included
+	files, ok := contextData["repository_files"].(map[string]string)
+	assert.Assert(t, ok, "repository_files should be a map")
+	assert.Equal(t, files["AGENTS.md"], "# Instructions")
+
+	// Verify pipeline context is always included
+	_, ok = contextData["pipeline"]
+	assert.Assert(t, ok, "pipeline context should always be included")
 }

@@ -72,8 +72,7 @@ func TestReconcilerReconcileKind(t *testing.T) {
 	defer teardown()
 
 	vcx := &ghprovider.Provider{
-		Token:  github.Ptr("None"),
-		Logger: fakelogger,
+		Token: github.Ptr("None"),
 	}
 
 	vcx.SetGithubClient(fakeclient)
@@ -242,6 +241,36 @@ func TestReconcilerReconcileKind(t *testing.T) {
 			assert.Equal(t, got.Annotations[keys.State], kubeinteraction.StateCompleted)
 		})
 	}
+}
+
+func TestLoadControllerInfo(t *testing.T) {
+	r := Reconciler{
+		run: &params.Run{
+			Info: info.Info{
+				Controller: &info.ControllerInfo{
+					Name:             "default",
+					Configmap:        "default-cm",
+					Secret:           "default-secret",
+					GlobalRepository: "default-global",
+				},
+			},
+		},
+	}
+
+	pr := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				keys.ControllerInfo: `{"name":"tenant","configmap":"tenant-cm","secret":"tenant-secret","gRepo":"tenant-global"}`,
+			},
+		},
+	}
+
+	err := r.loadControllerInfo(pr)
+	assert.NilError(t, err)
+	assert.Equal(t, r.run.Info.Controller.Name, "tenant")
+	assert.Equal(t, r.run.Info.Controller.Configmap, "tenant-cm")
+	assert.Equal(t, r.run.Info.Controller.Secret, "tenant-secret")
+	assert.Equal(t, r.run.Info.Controller.GlobalRepository, "tenant-global")
 }
 
 func TestUpdatePipelineRunState(t *testing.T) {

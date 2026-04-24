@@ -31,10 +31,12 @@ type TestProviderImp struct {
 	WantDeletedFiles       []string
 	WantModifiedFiles      []string
 	WantRenamedFiles       []string
+	WantPullRequestDiff    string
 	FailGetCommitInfo      bool
 	CommitInfoErrorMsg     string
 	pacInfo                *info.PacOpts
 	CommitStatuses         []provider.CommitStatusInfo
+	LastStatusOpts         *providerstatus.StatusOpts
 }
 
 func (v *TestProviderImp) SetPacInfo(pacInfo *info.PacOpts) {
@@ -105,7 +107,8 @@ func (v *TestProviderImp) GetTaskURI(_ context.Context, _ *info.Event, _ string)
 	return v.WantProviderRemoteTask, "", nil
 }
 
-func (v *TestProviderImp) CreateStatus(_ context.Context, _ *info.Event, _ providerstatus.StatusOpts) error {
+func (v *TestProviderImp) CreateStatus(_ context.Context, _ *info.Event, opts providerstatus.StatusOpts) error {
+	v.LastStatusOpts = &opts
 	if v.CreateStatusErorring {
 		return fmt.Errorf("some provider error occurred while reporting status")
 	}
@@ -134,6 +137,10 @@ func (v *TestProviderImp) GetFiles(_ context.Context, _ *info.Event) (changedfil
 		Modified: v.WantModifiedFiles,
 		Renamed:  v.WantRenamedFiles,
 	}, nil
+}
+
+func (v *TestProviderImp) GetPullRequestDiff(_ context.Context, _ *info.Event) (string, error) {
+	return v.WantPullRequestDiff, nil
 }
 
 func (v *TestProviderImp) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {

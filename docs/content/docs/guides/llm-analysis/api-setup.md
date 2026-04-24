@@ -1,33 +1,81 @@
 ---
-title: API Keys and Endpoints
+title: API Keys and Credentials
 weight: 2
 ---
 
-This page explains how to store your LLM provider API keys as Kubernetes secrets and how to configure custom API endpoints. Complete these steps before enabling LLM-powered analysis in your Repository CR.
+This page explains how to store credentials for each AI backend as Kubernetes Secrets and how to reference them from your Repository CR. Complete these steps before enabling LLM-powered analysis.
 
 {{< callout type="warning" >}}
-You must create the Secret in the same namespace as the Repository CR.
+Create the Secret in the same namespace as the Repository CR.
 {{< /callout >}}
 
-## Setting Up API Keys
+## Backend Credentials
 
-### OpenAI
+Each backend reads its API key from a specific environment variable. Pipelines-as-Code injects the secret value under the right variable name automatically based on the `backend` field.
 
-1. Get an API key from [OpenAI Platform](https://platform.openai.com/api-keys)
+| Backend | Environment variable | Where to get the key |
+|---------|---------------------|----------------------|
+| `claude` | `ANTHROPIC_API_KEY` | [Anthropic Console](https://console.anthropic.com/settings/keys) |
+| `codex` | `OPENAI_API_KEY` | [OpenAI Platform](https://platform.openai.com/api-keys) |
+| `gemini` | `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/app/apikey) |
+| `claude-vertex` | GCP service account JSON (see [Vertex AI](#vertex-ai)) | GCP IAM |
+| `opencode` | GCP service account JSON (see [Vertex AI](#vertex-ai)) | GCP IAM |
 
-2. Create a Kubernetes secret:
+### `claude` (Anthropic)
+
+1. Get an API key from the [Anthropic Console](https://console.anthropic.com/settings/keys).
+
+2. Create a Kubernetes Secret:
 
 ```bash
-kubectl create secret generic openai-api-key \
-  --from-literal=token="sk-your-openai-api-key" \
+kubectl create secret generic anthropic-api-key \
+  --from-literal=token="sk-ant-your-key-here" \
   -n <namespace>
 ```
 
-### Google Gemini
+3. Reference it in your Repository CR:
 
-1. Get an API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
+```yaml
+settings:
+  ai:
+    enabled: true
+    backend: "claude"
+    image: "ghcr.io/openshift-pipelines/ai-agents:latest"
+    secret_ref:
+      name: anthropic-api-key
+      key: token
+```
 
-2. Create a Kubernetes secret:
+### `codex` (OpenAI)
+
+1. Get an API key from the [OpenAI Platform](https://platform.openai.com/api-keys).
+
+2. Create a Kubernetes Secret:
+
+```bash
+kubectl create secret generic openai-api-key \
+  --from-literal=token="sk-your-openai-key" \
+  -n <namespace>
+```
+
+3. Reference it in your Repository CR:
+
+```yaml
+settings:
+  ai:
+    enabled: true
+    backend: "codex"
+    image: "ghcr.io/openshift-pipelines/ai-agents:latest"
+    secret_ref:
+      name: openai-api-key
+      key: token
+```
+
+### `gemini` (Google Gemini CLI)
+
+1. Get an API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
+
+2. Create a Kubernetes Secret:
 
 ```bash
 kubectl create secret generic gemini-api-key \
@@ -35,61 +83,66 @@ kubectl create secret generic gemini-api-key \
   -n <namespace>
 ```
 
-## Using Custom API Endpoints
-
-By default, Pipelines-as-Code sends requests to each LLM provider's public API. The `api_url` field lets you override the endpoint, which is useful when you run:
-
-- Self-hosted LLM services (for example, LocalAI, vLLM, or Ollama with an OpenAI adapter)
-- Enterprise proxy services
-- Regional or custom endpoints (for example, Azure OpenAI)
-- Alternative OpenAI-compatible APIs
-
-### Example Configuration
+3. Reference it in your Repository CR:
 
 ```yaml
 settings:
   ai:
     enabled: true
-    provider: "openai"
-    api_url: "https://custom-llm.example.com/v1"  # Custom endpoint
+    backend: "gemini"
+    image: "ghcr.io/openshift-pipelines/ai-agents:latest"
     secret_ref:
-      name: "custom-api-key"
-      key: "token"
-    roles:
-      - name: "failure-analysis"
-        prompt: "Analyze this pipeline failure..."
-        output: "pr-comment"
+      name: gemini-api-key
+      key: token
 ```
 
-### Default API Endpoints
+## Vertex AI
 
-If you do not specify `api_url`, Pipelines-as-Code uses these defaults:
+The `claude-vertex` backend runs Anthropic Claude through Google Cloud Vertex AI instead of the Anthropic API. Use this when you want to keep traffic inside GCP or need enterprise billing through GCP.
 
-- **OpenAI**: `https://api.openai.com/v1`
-- **Gemini**: `https://generativelanguage.googleapis.com/v1beta`
+### Prerequisites
 
-### URL Format Requirements
+- A GCP project with the Vertex AI API enabled
+- A service account with the `roles/aiplatform.user` role
 
-The `api_url` value must:
+### Creating the Service Account
 
-- Use an `http://` or `https://` scheme
-- Include a valid hostname
-- Optionally include port and path components
+```bash
+# Create service account
+gcloud iam service-accounts create pac-ai-analysis \
+  --display-name "PAC AI Analysis"
 
-The following examples show valid and invalid formats:
+# Grant Vertex AI user role
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+  --member "serviceAccount:pac-ai-analysis@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+  --role "roles/aiplatform.user"
+
+# Download a JSON key
+gcloud iam service-accounts keys create /tmp/sa-key.json \
+  --iam-account pac-ai-analysis@YOUR_PROJECT_ID.iam.gserviceaccount.com
+```
+
+### Storing the Credentials
+
+```bash
+kubectl create secret generic gcp-sa-key \
+  --from-file=token=/tmp/sa-key.json \
+  -n <namespace>
+```
+
+### Repository CR Configuration
 
 ```yaml
-# Valid URLs
-api_url: "https://api.openai.com/v1"
-api_url: "http://localhost:8080/v1"
-api_url: "https://custom-proxy.company.com:9000/openai/v1"
-
-# Invalid URLs
-api_url: "ftp://example.com"       # Wrong scheme
-api_url: "//example.com"           # Missing scheme
-api_url: "not-a-url"               # Invalid format
+settings:
+  ai:
+    enabled: true
+    backend: "claude-vertex"
+    image: "ghcr.io/openshift-pipelines/ai-agents:latest"
+    secret_ref:
+      name: gcp-sa-key
+      key: token
+    vertex_project_id: "your-gcp-project-id"
+    vertex_region: "us-east5"   # optional, defaults to "global"
 ```
 
-## Complete Configuration Example
-
-For a full configuration with multiple roles, see the [complete example](https://github.com/tektoncd/pipelines-as-code/blob/main/samples/repository-llm.yaml) in the Pipelines-as-Code repository.
+`vertex_region` is optional. Supported values depend on which regions Vertex AI Claude models are available in; check the [Vertex AI model garden](https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude) for current availability.

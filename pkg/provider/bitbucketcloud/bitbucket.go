@@ -358,6 +358,10 @@ func (v *Provider) GetFiles(_ context.Context, _ *info.Event) (changedfiles.Chan
 	return changedfiles.ChangedFiles{}, nil
 }
 
+func (v *Provider) GetPullRequestDiff(_ context.Context, _ *info.Event) (string, error) {
+	return "", nil
+}
+
 func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {
 	return "", nil
 }
