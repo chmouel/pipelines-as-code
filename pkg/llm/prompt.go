@@ -4,21 +4,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	_ "embed"
 )
+
+//go:embed templates/initial_prompt.md
+var initialPrompt string
 
 // BuildPrompt combines the base prompt with context data.
 // This function is shared across all LLM providers to ensure consistent prompt formatting.
 func BuildPrompt(request *AnalysisRequest) (string, error) {
 	var promptBuilder strings.Builder
 
-	promptBuilder.WriteString("Keep your response concise and focused. " +
-		"Your entire response must not exceed 65,000 characters — it will be " +
-		"displayed inside a GitHub check-run which enforces that limit.\n\n")
-	promptBuilder.WriteString("When this analysis runs in a checked-out repository and you identify a " +
-		"clean, concrete fix, apply the fix by editing the repository files. Do not only describe " +
-		"or suggest the change. Do not commit or push changes; the analysis runner will capture " +
-		"the resulting git diff for the Fix it button. If no safe fix is clear, leave the working " +
-		"tree unchanged and explain why.\n\n")
+	promptBuilder.WriteString("The initial prompt provides instructions for analyzing the provided information. Please follow the instructions carefully to generate accurate and relevant insights.\n\n")
+	promptBuilder.WriteString(initialPrompt)
+	promptBuilder.WriteString("\n\nThe user prompt to analyze:\n")
+
 	promptBuilder.WriteString(request.Prompt)
 	promptBuilder.WriteString("\n\n")
 

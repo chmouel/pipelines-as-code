@@ -9,17 +9,27 @@ import (
 
 func TestBuildPrompt(t *testing.T) {
 	tests := []struct {
-		name        string
-		request     *AnalysisRequest
-		wantContain []string
-		wantErr     bool
+		name           string
+		request        *AnalysisRequest
+		wantContain    []string
+		wantNotContain []string
+		wantErr        bool
 	}{
 		{
 			name: "simple prompt without context",
 			request: &AnalysisRequest{
 				Prompt: "Analyze this error",
 			},
-			wantContain: []string{"apply the fix by editing the repository files", "Do not only describe", "Analyze this error"},
+			wantContain: []string{
+				"modify the repository files directly",
+				"Do not only\ndescribe",
+				"follow-up automation when\nsupported",
+				"Analyze this error",
+			},
+			wantNotContain: []string{
+				"Click **Fix it** above to apply the proposed fix",
+				"Fix it button",
+			},
 		},
 		{
 			name: "prompt with string context",
@@ -108,6 +118,10 @@ func TestBuildPrompt(t *testing.T) {
 				for _, want := range tt.wantContain {
 					assert.Assert(t, strings.Contains(prompt, want),
 						"prompt should contain %q, got: %s", want, prompt)
+				}
+				for _, want := range tt.wantNotContain {
+					assert.Assert(t, !strings.Contains(prompt, want),
+						"prompt should not contain %q, got: %s", want, prompt)
 				}
 			}
 		})

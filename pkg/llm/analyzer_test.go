@@ -432,7 +432,6 @@ This file should be skipped.
 	assert.Equal(t, len(analysisPRs.Items), 2)
 }
 
-
 func TestExecuteAnalysisCollectsPipelineRun(t *testing.T) {
 	testLogger, _ := logger.GetLogger()
 	parent := failedPipelineRun()
