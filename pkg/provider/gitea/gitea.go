@@ -489,27 +489,37 @@ func (v *Provider) getObject(sha string, event *info.Event) ([]byte, error) {
 // ListDirFilesInsideRepo returns the paths of all .md files inside path at the event SHA.
 // Returns an empty slice without error if the directory does not exist.
 func (v *Provider) ListDirFilesInsideRepo(_ context.Context, event *info.Event, path string) ([]string, error) {
-	dirSHA := ""
-	rootObjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, event.SHA, forgejo.GetTreesOptions{Recursive: false})
-	if err != nil {
-		return nil, err
-	}
-	for _, object := range rootObjects.Entries {
-		if object.Path == path {
-			if object.Type != "tree" {
-				return nil, fmt.Errorf("%s has been found but is not a directory", path)
-			}
-			dirSHA = object.SHA
+	// Walk each path segment: a non-recursive root tree fetch only returns
+	// immediate children, so ".tekton/ai" won't appear there — only ".tekton" will.
+	segments := strings.Split(path, "/")
+	currentSHA := event.SHA
+
+	for i, segment := range segments {
+		objects, _, err := v.Client().GetTrees(event.Organization, event.Repository, currentSHA, forgejo.GetTreesOptions{Recursive: false})
+		if err != nil {
+			return nil, err
 		}
-	}
-	if dirSHA == "" {
-		return nil, nil
+
+		found := false
+		for _, object := range objects.Entries {
+			if object.Path == segment {
+				if object.Type != "tree" {
+					return nil, fmt.Errorf("%s has been found but is not a directory", strings.Join(segments[:i+1], "/"))
+				}
+				currentSHA = object.SHA
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, nil
+		}
 	}
 
 	var files []string
 	opts := forgejo.GetTreesOptions{Recursive: true, ListOptions: forgejo.ListOptions{PageSize: 100, Page: 1}}
 	for {
-		dirObjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, dirSHA, opts)
+		dirObjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, currentSHA, opts)
 		if err != nil {
 			return nil, err
 		}
