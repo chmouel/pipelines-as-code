@@ -32,6 +32,8 @@ type AnalysisResult struct {
 	Role     string
 	Output   string
 	Response *AnalysisResponse
+	Patch    *MachinePatchMetadata
+	Metadata map[string]string
 	Error    error
 }
 
@@ -118,7 +120,7 @@ func ExecuteAnalysis(
 			return fmt.Errorf("failed to create llm PipelineRun for role %s: %w", exec.Role.Name, err)
 		}
 		if exec.Role.GetOutput() == "check-run" {
-			if err := postQueuedCheckRun(ctx, exec.Role.Name, event, prov, logger); err != nil {
+			if err := postQueuedCheckRun(ctx, exec.Role.Name, pr.Name, event, prov, logger); err != nil {
 				logger.With("role", exec.Role.Name, "error", err).Warn("Failed to create queued AI analysis check run")
 			}
 		}
@@ -266,26 +268,39 @@ func postPRComment(ctx context.Context, result AnalysisResult, event *info.Event
 func postCheckRun(
 	ctx context.Context,
 	result AnalysisResult,
-	_ *tektonv1.PipelineRun,
+	parentPR *tektonv1.PipelineRun,
 	event *info.Event,
 	prov provider.Interface,
 	logger *zap.SugaredLogger,
 ) error {
-	// Check-run output requires GitHub App installation
 	if event.InstallationID == 0 {
 		logger.Infof("Skipping check-run output for role %s: not a GitHub App installation (InstallationID is 0)", result.Role)
 		return nil
 	}
 
-	content := normalizeAnalysisContent(result.Response.Content)
+	content := truncateForCheckRun(normalizeAnalysisContent(result.Response.Content))
 	if content == "" {
 		content = "_No analysis content produced._"
 	}
 
-	statusOpts := analysisCheckRunStatusOpts(result.Role, event.SHA)
+	parentName := ""
+	if parentPR != nil {
+		parentName = parentPR.Name
+	}
+
+	statusOpts := analysisCheckRunStatusOpts(result.Role, parentName, event.SHA)
 	statusOpts.Status = "completed"
 	statusOpts.Conclusion = status.ConclusionNeutral
 	statusOpts.Text = content
+	if isMachinePatchValid(result.Patch) {
+		statusOpts.Actions = []status.CheckRunAction{
+			{
+				Label:       "Fix it",
+				Description: "Apply the AI-generated patch",
+				Identifier:  "llm-fix",
+			},
+		}
+	}
 
 	if err := prov.CreateStatus(ctx, event, statusOpts); err != nil {
 		return fmt.Errorf("failed to create check run for AI analysis role %s: %w", result.Role, err)
@@ -295,9 +310,54 @@ func postCheckRun(
 	return nil
 }
 
+// postFixCheckRun posts the result of a fix PipelineRun as a GitHub Check Run.
+func postFixCheckRun(
+	ctx context.Context,
+	result AnalysisResult,
+	parentPR *tektonv1.PipelineRun,
+	event *info.Event,
+	prov provider.Interface,
+	logger *zap.SugaredLogger,
+) error {
+	if event.InstallationID == 0 {
+		return nil
+	}
+
+	parentName := ""
+	if parentPR != nil {
+		parentName = parentPR.Name
+	}
+
+	statusOpts := FixCheckRunStatusOpts(parentName, result.Role, event.SHA)
+	statusOpts.Status = "completed"
+
+	if result.Error != nil {
+		statusOpts.Conclusion = status.ConclusionFailure
+		statusOpts.Text = fmt.Sprintf("Fix failed: %v", result.Error)
+	} else if result.Response != nil {
+		statusOpts.Conclusion = status.ConclusionSuccess
+		content := truncateForCheckRun(normalizeAnalysisContent(result.Response.Content))
+		if content == "" {
+			content = "_Fix completed with no output._"
+		}
+		statusOpts.Text = content
+	} else {
+		statusOpts.Conclusion = status.ConclusionNeutral
+		statusOpts.Text = "_No fix result available._"
+	}
+
+	if err := prov.CreateStatus(ctx, event, statusOpts); err != nil {
+		return fmt.Errorf("failed to create fix check run for role %s: %w", result.Role, err)
+	}
+
+	logger.Infof("Posted fix check run for role %s", result.Role)
+	return nil
+}
+
 func postQueuedCheckRun(
 	ctx context.Context,
 	roleName string,
+	parentName string,
 	event *info.Event,
 	prov provider.Interface,
 	logger *zap.SugaredLogger,
@@ -307,7 +367,7 @@ func postQueuedCheckRun(
 		return nil
 	}
 
-	statusOpts := analysisCheckRunStatusOpts(roleName, event.SHA)
+	statusOpts := analysisCheckRunStatusOpts(roleName, parentName, event.SHA)
 	statusOpts.Status = "queued"
 	statusOpts.Conclusion = status.ConclusionPending
 	statusOpts.Summary = "AI analysis has been scheduled."
@@ -320,17 +380,13 @@ func postQueuedCheckRun(
 	return nil
 }
 
-func analysisCheckRunStatusOpts(roleName, sha string) status.StatusOpts {
+func analysisCheckRunStatusOpts(roleName, parentName, sha string) status.StatusOpts {
 	return status.StatusOpts{
-		PipelineRunName:         analysisCheckRunExternalID(roleName, sha),
+		PipelineRunName:         BuildExternalID(externalIDKindAnalysis, parentName, roleName, sha),
 		OriginalPipelineRunName: analysisCheckRunName(roleName),
 		Title:                   fmt.Sprintf("AI Analysis - %s", roleName),
 		PipelineRun:             nil, // Don't patch any PipelineRun annotations
 	}
-}
-
-func analysisCheckRunExternalID(roleName, sha string) string {
-	return fmt.Sprintf("llm-analysis-%s-%s", roleName, sha)
 }
 
 func analysisCheckRunName(roleName string) string {
@@ -418,6 +474,22 @@ func shouldSkipAnalysisLine(line string) bool {
 	default:
 		return false
 	}
+}
+
+func truncateForCheckRun(content string) string {
+	if len(content) <= MaxCheckRunOutputSize {
+		return content
+	}
+	truncated := content[:MaxCheckRunOutputSize]
+	// Walk back to the last valid UTF-8 boundary.
+	for len(truncated) > 0 {
+		r := truncated[len(truncated)-1]
+		if r&0x80 == 0 || r&0xC0 == 0xC0 {
+			break
+		}
+		truncated = truncated[:len(truncated)-1]
+	}
+	return truncated + "\n\n_(response truncated to fit GitHub check-run limit)_"
 }
 
 func collapseBlankLines(content string) string {

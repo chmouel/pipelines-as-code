@@ -806,11 +806,95 @@ func TestPostCheckRun(t *testing.T) {
 	opts := prov.LastStatusOpts
 	assert.Equal(t, opts.Status, "completed")
 	assert.Equal(t, opts.Conclusion, providerstatus.ConclusionNeutral)
-	assert.Equal(t, opts.PipelineRunName, analysisCheckRunExternalID("failure-analysis", event.SHA))
+	assert.Equal(t, opts.PipelineRunName, BuildExternalID("llm-analysis", "parent-pr", "failure-analysis", event.SHA))
 	assert.Equal(t, opts.OriginalPipelineRunName, analysisCheckRunName("failure-analysis"))
 	assert.Equal(t, opts.Title, "AI Analysis - failure-analysis")
 	assert.Assert(t, strings.Contains(opts.Text, "Root cause: missing dependency"))
 	assert.Assert(t, opts.PipelineRun == nil)
+}
+
+func TestPostCheckRunHasFixItButtonWhenPatchValid(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	prov := &statusCaptureProvider{}
+	event := testEvent()
+	event.InstallationID = 12345
+
+	result := AnalysisResult{
+		Role: "failure-analysis",
+		Response: &AnalysisResponse{
+			Content: "Root cause: missing dependency",
+		},
+		Patch: &MachinePatchMetadata{
+			Version:    1,
+			Format:     "git-diff",
+			Encoding:   "gzip+base64",
+			BaseSHA:    event.SHA,
+			Role:       "failure-analysis",
+			ChunkCount: 1,
+			Available:  true,
+		},
+	}
+
+	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger)
+	assert.NilError(t, err)
+	assert.Assert(t, prov.LastStatusOpts != nil)
+	assert.Assert(t, len(prov.LastStatusOpts.Actions) == 1, "should have Fix it action when patch is valid")
+	assert.Equal(t, prov.LastStatusOpts.Actions[0].Identifier, "llm-fix")
+	assert.Equal(t, prov.LastStatusOpts.Actions[0].Label, "Fix it")
+}
+
+func TestPostCheckRunHasNoFixItButtonWhenPatchNil(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	prov := &statusCaptureProvider{}
+	event := testEvent()
+	event.InstallationID = 12345
+
+	result := AnalysisResult{
+		Role: "failure-analysis",
+		Response: &AnalysisResponse{
+			Content: "Root cause: missing dependency",
+		},
+		Patch: nil,
+	}
+
+	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger)
+	assert.NilError(t, err)
+	assert.Assert(t, prov.LastStatusOpts != nil)
+	assert.Equal(t, len(prov.LastStatusOpts.Actions), 0, "should have no actions when patch is nil")
+}
+
+func TestPostCheckRunHasNoFixItButtonWhenPatchInvalid(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	prov := &statusCaptureProvider{}
+	event := testEvent()
+	event.InstallationID = 12345
+
+	result := AnalysisResult{
+		Role: "failure-analysis",
+		Response: &AnalysisResponse{
+			Content: "Root cause: missing dependency",
+		},
+		Patch: &MachinePatchMetadata{
+			Available: false, // invalid — not available
+		},
+	}
+
+	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger)
+	assert.NilError(t, err)
+	assert.Assert(t, prov.LastStatusOpts != nil)
+	assert.Equal(t, len(prov.LastStatusOpts.Actions), 0, "should have no actions when patch is invalid")
+}
+
+func TestPostQueuedCheckRunHasNoActions(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	prov := &statusCaptureProvider{}
+	event := testEvent()
+	event.InstallationID = 12345
+
+	err := postQueuedCheckRun(context.Background(), "review", "parent-pr", event, prov, testLogger)
+	assert.NilError(t, err)
+	assert.Assert(t, prov.LastStatusOpts != nil)
+	assert.Equal(t, len(prov.LastStatusOpts.Actions), 0, "queued check run must never have Fix it button")
 }
 
 func TestPostCheckRunSkipsWhenNotGitHubApp(t *testing.T) {
@@ -878,12 +962,12 @@ func TestPostQueuedCheckRun(t *testing.T) {
 	event := testEvent()
 	event.InstallationID = 12345
 
-	err := postQueuedCheckRun(context.Background(), "review", event, prov, testLogger)
+	err := postQueuedCheckRun(context.Background(), "review", "parent-pr", event, prov, testLogger)
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts != nil)
 	assert.Equal(t, prov.LastStatusOpts.Status, "queued")
 	assert.Equal(t, prov.LastStatusOpts.Conclusion, providerstatus.ConclusionPending)
-	assert.Equal(t, prov.LastStatusOpts.PipelineRunName, analysisCheckRunExternalID("review", event.SHA))
+	assert.Equal(t, prov.LastStatusOpts.PipelineRunName, BuildExternalID("llm-analysis", "parent-pr", "review", event.SHA))
 	assert.Equal(t, prov.LastStatusOpts.OriginalPipelineRunName, analysisCheckRunName("review"))
 	assert.Equal(t, prov.LastStatusOpts.Title, "AI Analysis - review")
 	assert.Equal(t, prov.LastStatusOpts.Summary, "AI analysis has been scheduled.")
@@ -895,7 +979,7 @@ func TestPostQueuedCheckRunSkipsWhenNotGitHubApp(t *testing.T) {
 	prov := &statusCaptureProvider{}
 	event := testEvent()
 
-	err := postQueuedCheckRun(context.Background(), "review", event, prov, testLogger)
+	err := postQueuedCheckRun(context.Background(), "review", "parent-pr", event, prov, testLogger)
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts == nil)
 }
@@ -924,7 +1008,7 @@ func TestExecuteAnalysisCreatesQueuedCheckRun(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts != nil)
 	assert.Equal(t, prov.LastStatusOpts.Status, "queued")
-	assert.Equal(t, prov.LastStatusOpts.PipelineRunName, analysisCheckRunExternalID("review", event.SHA))
+	assert.Equal(t, prov.LastStatusOpts.PipelineRunName, BuildExternalID("llm-analysis", "parent-pr", "review", event.SHA))
 }
 
 func TestExecuteAnalysisDoesNotRecreateQueuedCheckRunWhenAnalysisPipelineRunExists(t *testing.T) {

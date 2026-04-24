@@ -27,6 +27,7 @@ const (
 	pendingApproval              = "Pending approval, waiting for an /ok-to-test"
 	checkRunsFetchMaxRetries     = 2
 	checkRunsFetchInitialBackoff = 200 * time.Millisecond
+	aiAnalysisName               = "AI Analysis / "
 )
 
 const taskStatusTemplate = `
@@ -174,6 +175,10 @@ func isFailedCheckrun(run *github.CheckRun) bool {
 	return false
 }
 
+func isQueuedAIAnalysisCheckRun(statusOpts providerstatus.StatusOpts) bool {
+	return statusOpts.Status == "queued" && strings.HasPrefix(statusOpts.OriginalPipelineRunName, aiAnalysisName)
+}
+
 func (v *Provider) canIUseCheckrunID(checkrunid *int64) bool {
 	v.mutex.Lock()
 	defer v.mutex.Unlock()
@@ -196,13 +201,25 @@ func (v *Provider) createCheckRunStatus(ctx context.Context, runevent *info.Even
 			Summary: github.Ptr(status.Summary),
 			Text:    github.Ptr(status.Text),
 		},
-		DetailsURL: github.Ptr(status.DetailsURL),
 		ExternalID: github.Ptr(status.PipelineRunName),
 		StartedAt:  &now,
+	}
+	if status.DetailsURL != "" {
+		checkrunoption.DetailsURL = github.Ptr(status.DetailsURL)
 	}
 
 	if status.Status != "in_progress" && status.Status != "queued" {
 		checkrunoption.Conclusion = github.Ptr(string(status.Conclusion))
+	}
+
+	if len(status.Actions) > 0 {
+		for _, a := range status.Actions {
+			checkrunoption.Actions = append(checkrunoption.Actions, &github.CheckRunAction{
+				Label:       a.Label,
+				Description: a.Description,
+				Identifier:  a.Identifier,
+			})
+		}
 	}
 
 	checkRun, _, err := wrapAPI(v, "create_check_run", func() (*github.CheckRun, *github.Response, error) {
@@ -363,6 +380,16 @@ func (v *Provider) getOrUpdateCheckRunStatus(ctx context.Context, runevent *info
 		opts.Conclusion = github.Ptr("cancelled")
 	}
 
+	if len(statusOpts.Actions) > 0 {
+		for _, a := range statusOpts.Actions {
+			opts.Actions = append(opts.Actions, &github.CheckRunAction{
+				Label:       a.Label,
+				Description: a.Description,
+				Identifier:  a.Identifier,
+			})
+		}
+	}
+
 	_, _, err = wrapAPI(v, "update_check_run", func() (*github.CheckRun, *github.Response, error) {
 		return v.Client().Checks.UpdateCheckRun(ctx, runevent.Organization, runevent.Repository, *checkRunID, opts)
 	})
@@ -498,6 +525,15 @@ func (v *Provider) CreateStatus(ctx context.Context, runevent *info.Event, statu
 		}
 		statusOpts.Summary = "has <b>failed</b>."
 	case providerstatus.ConclusionPending:
+		if isQueuedAIAnalysisCheckRun(statusOpts) {
+			if statusOpts.Title == "" {
+				statusOpts.Title = "Pending"
+			}
+			if statusOpts.Summary == "" {
+				statusOpts.Summary = "is queued."
+			}
+			break
+		}
 		// for concurrency set title as pending
 		if statusOpts.Title == "" {
 			statusOpts.Title = "Pending"

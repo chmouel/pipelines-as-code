@@ -21,6 +21,13 @@ const (
 	ConclusionCancelled Conclusion = "cancelled"
 )
 
+// CheckRunAction represents a button that can be added to a GitHub check run.
+type CheckRunAction struct {
+	Label       string // max 20 chars
+	Description string // max 40 chars
+	Identifier  string // max 20 chars
+}
+
 //nolint:revive
 type StatusOpts struct {
 	PipelineRun              *v1.PipelineRun
@@ -34,4 +41,5 @@ type StatusOpts struct {
 	Title                    string
 	InstanceCountForCheckRun int
 	AccessDenied             bool
+	Actions                  []CheckRunAction
 }

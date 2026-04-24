@@ -535,6 +535,76 @@ func TestGithubProviderCreateStatus(t *testing.T) {
 	}
 }
 
+func TestGithubProviderCreateStatusPreservesQueuedAIAnalysisSummary(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+	defer teardown()
+
+	provider := New()
+	provider.SetGithubClient(fakeclient)
+	provider.Run = params.New()
+	provider.SetPacInfo(&info.PacOpts{
+		Settings: settings.Settings{
+			ApplicationName: settings.PACApplicationNameDefaultValue,
+		},
+	})
+
+	event := &info.Event{
+		Organization:   "check",
+		Repository:     "run",
+		SHA:            "queued-analysis-sha",
+		InstallationID: 12345,
+		Provider: &info.Provider{
+			Token: "hello",
+			URL:   "moto",
+		},
+	}
+
+	checkRunID := int64(2026)
+	createCalled := false
+	updateCalled := false
+
+	mux.HandleFunc("/repos/check/run/check-runs", func(rw http.ResponseWriter, r *http.Request) {
+		createCalled = true
+		body, err := io.ReadAll(r.Body)
+		assert.NilError(t, err)
+		checkRun := &github.CreateCheckRunOptions{}
+		err = json.Unmarshal(body, checkRun)
+		assert.NilError(t, err)
+		assert.Equal(t, checkRun.GetStatus(), "queued")
+		assert.Equal(t, checkRun.Output.GetTitle(), "AI Analysis - review")
+		assert.Assert(t, strings.Contains(checkRun.Output.GetSummary(), "AI analysis has been scheduled."))
+		_, err = fmt.Fprintf(rw, `{"id": %d}`, checkRunID)
+		assert.NilError(t, err)
+	})
+
+	mux.HandleFunc(fmt.Sprintf("/repos/check/run/check-runs/%d", checkRunID), func(rw http.ResponseWriter, r *http.Request) {
+		updateCalled = true
+		body, err := io.ReadAll(r.Body)
+		assert.NilError(t, err)
+		checkRun := &github.CheckRun{}
+		err = json.Unmarshal(body, checkRun)
+		assert.NilError(t, err)
+		assert.Equal(t, checkRun.GetStatus(), "queued")
+		assert.Equal(t, checkRun.Output.GetTitle(), "AI Analysis - review")
+		assert.Assert(t, strings.Contains(checkRun.Output.GetSummary(), "AI analysis has been scheduled."))
+		_, err = fmt.Fprintf(rw, `{"id": %d}`, checkRunID)
+		assert.NilError(t, err)
+	})
+
+	err := provider.CreateStatus(ctx, event, providerstatus.StatusOpts{
+		Status:                  "queued",
+		Conclusion:              providerstatus.ConclusionPending,
+		PipelineRunName:         "llm-analysis-review-queued-analysis-sha",
+		OriginalPipelineRunName: "AI Analysis / review",
+		Title:                   "AI Analysis - review",
+		Summary:                 "AI analysis has been scheduled.",
+	})
+	assert.NilError(t, err)
+	assert.Assert(t, createCalled)
+	assert.Assert(t, updateCalled)
+}
+
 func TestGithubProvidercreateStatusCommit(t *testing.T) {
 	issuenumber := 666
 	anevent := &info.Event{
