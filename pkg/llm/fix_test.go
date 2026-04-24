@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -225,7 +226,7 @@ func TestBuildFixPipelineRunLabelsAndAnnotations(t *testing.T) {
 		SHA:        "abc123",
 	}
 
-	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", settings.AIAnalysisGitImageDefault)
+	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault)
 
 	// Labels
 	assert.Equal(t, pr.Labels[keys.LLMFix], "true")
@@ -261,7 +262,7 @@ func TestBuildFixPipelineRunSingleTaskWithInlineClone(t *testing.T) {
 		SHA:        "abc123",
 	}
 
-	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", settings.AIAnalysisGitImageDefault)
+	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault)
 
 	// Should have exactly one PipelineTask
 	assert.Equal(t, len(pr.Spec.PipelineSpec.Tasks), 1)
@@ -308,7 +309,7 @@ func TestBuildFixPipelineRunEnvVars(t *testing.T) {
 		SHA:        "abc123",
 	}
 
-	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", settings.AIAnalysisGitImageDefault)
+	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault)
 
 	task := pr.Spec.PipelineSpec.Tasks[0]
 	fixStep := task.TaskSpec.Steps[1]
@@ -321,6 +322,12 @@ func TestBuildFixPipelineRunEnvVars(t *testing.T) {
 	assert.Equal(t, envMap["PR_BRANCH"], "feature-branch")
 	assert.Equal(t, envMap["EXPECTED_SHA"], "abc123")
 	assert.Equal(t, envMap["ROLE_NAME"], "reviewer")
+	subjectBytes, err := base64.StdEncoding.DecodeString(envMap["FIX_COMMIT_SUBJECT_B64"])
+	assert.NilError(t, err)
+	bodyBytes, err := base64.StdEncoding.DecodeString(envMap["FIX_COMMIT_BODY_B64"])
+	assert.NilError(t, err)
+	assert.Equal(t, string(subjectBytes), "fix: update docs")
+	assert.Equal(t, string(bodyBytes), "Apply the documentation fix.")
 
 	// These must NOT be present; no LLM is invoked in the fix pod
 	_, hasBackend := envMap["LLM_BACKEND"]
@@ -346,7 +353,7 @@ func TestBuildFixPipelineRunGitAuthWorkspace(t *testing.T) {
 		SHA:        "abc123",
 	}
 
-	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", settings.AIAnalysisGitImageDefault)
+	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault)
 
 	task := pr.Spec.PipelineSpec.Tasks[0]
 
@@ -413,6 +420,20 @@ func TestQueuedFixCheckRunStatusOptsHasFriendlyText(t *testing.T) {
 	assert.Assert(t, contains(opts.Text, "applying the AI-generated patch for role \"reviewer\""))
 }
 
+func TestBuildFixCommitMessageUsesAnalysisSummary(t *testing.T) {
+	subject, body := buildFixCommitMessage("reviewer", "Avoid creating a second check run when applying suggestions.\nUpdate the existing analysis check run instead.")
+	assert.Equal(t, subject, "fix: Avoid creating a second check run when applying suggestions")
+	assert.Assert(t, contains(body, "Apply the AI-generated fix for role \"reviewer\"."))
+	assert.Assert(t, contains(body, "Why this change:"))
+	assert.Assert(t, contains(body, "Update the existing analysis check run instead"))
+}
+
+func TestBuildFixCommitMessageFallsBackWhenAnalysisIsEmpty(t *testing.T) {
+	subject, body := buildFixCommitMessage("reviewer", "")
+	assert.Equal(t, subject, "fix: address reviewer findings")
+	assert.Equal(t, body, "Apply the AI-generated fix for role \"reviewer\".")
+}
+
 func TestFixScriptChecksRemoteBranchTip(t *testing.T) {
 	assert.Assert(t, contains(fixScriptTemplateContent, "git config --global --add safe.directory"), "should trust the working tree before git operations")
 	assert.Assert(t, contains(fixScriptTemplateContent, "git config --global --add safe.directory \"${repo_dir}/\""), "should trust the slash-normalized workspace path")
@@ -421,9 +442,10 @@ func TestFixScriptChecksRemoteBranchTip(t *testing.T) {
 	assert.Assert(t, contains(fixScriptTemplateContent, "git rev-parse \"origin/${pr_branch}\""), "should compare against the remote branch tip")
 	assert.Assert(t, contains(fixScriptTemplateContent, "branch_moved"), "should emit a branch_moved error envelope when the branch advanced")
 	assert.Assert(t, contains(fixScriptTemplateContent, "missing_checkout"), "should emit a missing_checkout error envelope when the shell clone failed")
+	assert.Assert(t, contains(fixScriptTemplateContent, "FIX_COMMIT_SUBJECT_B64"), "should read generated commit subject from the environment")
+	assert.Assert(t, contains(fixScriptTemplateContent, "FIX_COMMIT_BODY_B64"), "should read generated commit body from the environment")
 	assert.Assert(t, contains(fixScriptTemplateContent, "git apply"), "should apply the stored patch")
 	assert.Assert(t, contains(fixScriptTemplateContent, "base64 -d"), "should decode the patch payload")
-	assert.Assert(t, contains(fixScriptTemplateContent, "fix: apply AI fix from ${role_name}"), "should generate a friendly commit subject")
 	assert.Assert(t, contains(fixScriptTemplateContent, "Analyzed commit:"), "should include the analyzed commit in the commit body")
 	assert.Assert(t, contains(fixScriptTemplateContent, "commit_short_sha"), "should emit pushed commit metadata")
 	assert.Assert(t, contains(fixScriptTemplateContent, "cat \"${envelope_file}\" > \"${result_file}\""), "should persist the real fix envelope to the Tekton result")
