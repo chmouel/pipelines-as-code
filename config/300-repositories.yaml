@@ -435,7 +435,6 @@ spec:
                               - name
                               - prompt
                             type: object
-                          minItems: 1
                           type: array
                           x-kubernetes-list-map-keys:
                             - name
@@ -467,7 +466,6 @@ spec:
                         - backend
                         - enabled
                         - image
-                        - roles
                         - secret_ref
                       type: object
                     forgejo:

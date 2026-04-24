@@ -516,28 +516,37 @@ func (v *Provider) GetCommitInfo(ctx context.Context, runevent *info.Event) erro
 // ListDirFilesInsideRepo returns the paths of all files directly inside path at the
 // event SHA. Returns an empty slice without error if the directory does not exist.
 func (v *Provider) ListDirFilesInsideRepo(ctx context.Context, runevent *info.Event, path string) ([]string, error) {
-	rootobjects, _, err := wrapAPI(v, "list_dir_root_tree", func() (*github.Tree, *github.Response, error) {
-		return v.Client().Git.GetTree(ctx, runevent.Organization, runevent.Repository, runevent.SHA, false)
-	})
-	if err != nil {
-		return nil, err
-	}
+	// Walk each path segment: a non-recursive root tree fetch only returns
+	// immediate children, so ".tekton/ai" won't appear there — only ".tekton" will.
+	segments := strings.Split(path, "/")
+	currentSHA := runevent.SHA
 
-	dirSHA := ""
-	for _, object := range rootobjects.Entries {
-		if object.GetPath() == path {
-			if object.GetType() != "tree" {
-				return nil, fmt.Errorf("%s has been found but is not a directory", path)
-			}
-			dirSHA = object.GetSHA()
+	for i, segment := range segments {
+		objects, _, err := wrapAPI(v, "list_dir_tree", func() (*github.Tree, *github.Response, error) {
+			return v.Client().Git.GetTree(ctx, runevent.Organization, runevent.Repository, currentSHA, false)
+		})
+		if err != nil {
+			return nil, err
 		}
-	}
-	if dirSHA == "" {
-		return nil, nil
+
+		found := false
+		for _, object := range objects.Entries {
+			if object.GetPath() == segment {
+				if object.GetType() != "tree" {
+					return nil, fmt.Errorf("%s has been found but is not a directory", strings.Join(segments[:i+1], "/"))
+				}
+				currentSHA = object.GetSHA()
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, nil
+		}
 	}
 
 	dirObjects, _, err := wrapAPI(v, "list_dir_subtree", func() (*github.Tree, *github.Response, error) {
-		return v.Client().Git.GetTree(ctx, runevent.Organization, runevent.Repository, dirSHA, true)
+		return v.Client().Git.GetTree(ctx, runevent.Organization, runevent.Repository, currentSHA, true)
 	})
 	if err != nil {
 		return nil, err

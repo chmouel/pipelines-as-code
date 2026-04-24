@@ -728,6 +728,7 @@ func TestGetFileInsideRepo(t *testing.T) {
 	}
 }
 
+
 func TestGetFileInsideRepoRefSelection(t *testing.T) {
 	fileContent := base64.StdEncoding.EncodeToString([]byte("valid owners file"))
 	tests := []struct {
@@ -797,6 +798,53 @@ func TestGetFileInsideRepoRefSelection(t *testing.T) {
 			got, err := gvcs.GetFileInsideRepo(ctx, tt.event, "OWNERS", tt.target)
 			assert.NilError(t, err)
 			assert.Equal(t, got, "valid owners file")
+		})
+	}
+}
+
+
+func TestListDirFilesInsideRepo(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		wantFiles []string
+	}{
+		{
+			name:      "nested path finds files",
+			path:      ".tekton/ai",
+			wantFiles: []string{".tekton/ai/failure-analysis.md"},
+		},
+		{
+			name: "missing nested directory returns empty",
+			path: ".tekton/missing",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+			event := &info.Event{
+				Organization: "tekton",
+				Repository:   "thecat",
+				SHA:          "root-sha",
+			}
+			// Root tree: only .tekton at the top level
+			mux.HandleFunc("/repos/tekton/thecat/git/trees/root-sha", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, `{"sha":"root-sha","tree":[{"path":".tekton","type":"tree","sha":"tekton-sha"}]}`)
+			})
+			// .tekton tree: contains ai/ subdirectory
+			mux.HandleFunc("/repos/tekton/thecat/git/trees/tekton-sha", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, `{"sha":"tekton-sha","tree":[{"path":"ai","type":"tree","sha":"ai-sha"}]}`)
+			})
+			// ai/ tree: contains the role file
+			mux.HandleFunc("/repos/tekton/thecat/git/trees/ai-sha", func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, `{"sha":"ai-sha","tree":[{"path":"failure-analysis.md","type":"blob","sha":"file-sha"}]}`)
+			})
+			provider := &Provider{ghClient: fakeclient}
+			got, err := provider.ListDirFilesInsideRepo(ctx, event, tt.path)
+			assert.NilError(t, err)
+			assert.DeepEqual(t, tt.wantFiles, got)
 		})
 	}
 }
