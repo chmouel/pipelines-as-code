@@ -33,6 +33,8 @@ const (
 	collectedValue      = "true"
 	sourceWorkspaceName = "source"
 	sourceMountPath     = "/workspace/source"
+	gitCloneStepName    = "clone"
+	basicAuthName       = "basic-auth"
 	gcpCredsVolumeName  = "gcp-creds"            //nolint:gosec
 	gcpCredsMountPath   = "/workspace/gcp-creds" //nolint:gosec
 )
@@ -41,6 +43,13 @@ type roleExecution struct {
 	Role     v1alpha1.AnalysisRole
 	Request  *AnalysisRequest
 	Rendered string
+}
+
+type childPipelineRunWorkspaces struct {
+	task         []tektonv1.WorkspaceDeclaration
+	pipeline     []tektonv1.PipelineWorkspaceDeclaration
+	pipelineRun  []tektonv1.WorkspaceBinding
+	pipelineTask []tektonv1.WorkspacePipelineTaskBinding
 }
 
 func listAnalysisPipelineRuns(
@@ -103,7 +112,8 @@ func buildAnalysisPipelineRun(
 		repoURL = event.CloneURL
 	}
 
-	fetchTaskSpec := buildFetchRepoTaskSpec(repoURL, event.SHA, gitImage, parent)
+	workspaces := buildChildPipelineRunWorkspaces(parent)
+	cloneStep := buildCloneStep(repoURL, event.SHA, gitImage)
 
 	analysisEnv, analysisVolumes, analysisVolumeMounts := buildAnalysisEnv(config)
 	cliTimeout := timeoutSeconds - 60
@@ -116,13 +126,16 @@ func buildAnalysisPipelineRun(
 		corev1.EnvVar{Name: "LLM_MAX_TOKENS", Value: fmt.Sprintf("%d", maxTokensOrDefault(config.MaxTokens))},
 		corev1.EnvVar{Name: "LLM_PROMPT_B64", Value: promptB64},
 		corev1.EnvVar{Name: "LLM_TIMEOUT_SECONDS", Value: fmt.Sprintf("%d", cliTimeout)},
+		corev1.EnvVar{Name: "LLM_ROLE_NAME", Value: roleName},
+		corev1.EnvVar{Name: "LLM_COMMIT_SHA", Value: event.SHA},
 	)
 
 	analysisTaskSpec := tektonv1.TaskSpec{
-		Workspaces: []tektonv1.WorkspaceDeclaration{{Name: sourceWorkspaceName}},
+		Workspaces: workspaces.task,
 		Results:    []tektonv1.TaskResult{{Name: analysisResultName, Type: tektonv1.ResultsTypeString}},
 		Volumes:    analysisVolumes,
 		Steps: []tektonv1.Step{
+			cloneStep,
 			{
 				Name:         "run-analysis",
 				Image:        config.Image,
@@ -163,12 +176,10 @@ func buildAnalysisPipelineRun(
 			},
 		},
 		Spec: tektonv1.PipelineRunSpec{
-			Timeouts: &tektonv1.TimeoutFields{Pipeline: &timeout},
-			Workspaces: []tektonv1.WorkspaceBinding{
-				{Name: sourceWorkspaceName, EmptyDir: &corev1.EmptyDirVolumeSource{}},
-			},
+			Timeouts:   &tektonv1.TimeoutFields{Pipeline: &timeout},
+			Workspaces: workspaces.pipelineRun,
 			PipelineSpec: &tektonv1.PipelineSpec{
-				Workspaces: []tektonv1.PipelineWorkspaceDeclaration{{Name: sourceWorkspaceName}},
+				Workspaces: workspaces.pipeline,
 				Results: []tektonv1.PipelineResult{
 					{
 						Name:  analysisResultName,
@@ -177,19 +188,9 @@ func buildAnalysisPipelineRun(
 				},
 				Tasks: []tektonv1.PipelineTask{
 					{
-						Name:     "fetch-repo",
-						TaskSpec: &tektonv1.EmbeddedTask{TaskSpec: *fetchTaskSpec},
-						Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
-							{Name: sourceWorkspaceName, Workspace: sourceWorkspaceName},
-						},
-					},
-					{
-						Name:     "run-analysis",
-						RunAfter: []string{"fetch-repo"},
-						TaskSpec: &tektonv1.EmbeddedTask{TaskSpec: analysisTaskSpec},
-						Workspaces: []tektonv1.WorkspacePipelineTaskBinding{
-							{Name: sourceWorkspaceName, Workspace: sourceWorkspaceName},
-						},
+						Name:       "run-analysis",
+						TaskSpec:   &tektonv1.EmbeddedTask{TaskSpec: analysisTaskSpec},
+						Workspaces: workspaces.pipelineTask,
 					},
 				},
 			},
@@ -197,55 +198,65 @@ func buildAnalysisPipelineRun(
 	}
 }
 
-func buildFetchRepoTaskSpec(repoURL, sha, cloneImage string, parent *tektonv1.PipelineRun) *tektonv1.TaskSpec {
-	script := `#!/bin/sh
+func buildChildPipelineRunWorkspaces(parent *tektonv1.PipelineRun) childPipelineRunWorkspaces {
+	workspaces := childPipelineRunWorkspaces{
+		task:         []tektonv1.WorkspaceDeclaration{{Name: sourceWorkspaceName}},
+		pipeline:     []tektonv1.PipelineWorkspaceDeclaration{{Name: sourceWorkspaceName}},
+		pipelineRun:  []tektonv1.WorkspaceBinding{{Name: sourceWorkspaceName, EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		pipelineTask: []tektonv1.WorkspacePipelineTaskBinding{{Name: sourceWorkspaceName, Workspace: sourceWorkspaceName}},
+	}
+
+	gitAuthSecret := ""
+	if parent.Annotations != nil {
+		gitAuthSecret = parent.Annotations[keys.GitAuthSecret]
+	}
+	if gitAuthSecret == "" {
+		return workspaces
+	}
+
+	workspaces.task = append(workspaces.task, tektonv1.WorkspaceDeclaration{Name: basicAuthName})
+	workspaces.pipeline = append(workspaces.pipeline, tektonv1.PipelineWorkspaceDeclaration{Name: basicAuthName})
+	workspaces.pipelineRun = append(workspaces.pipelineRun, tektonv1.WorkspaceBinding{
+		Name:   basicAuthName,
+		Secret: &corev1.SecretVolumeSource{SecretName: gitAuthSecret},
+	})
+	workspaces.pipelineTask = append(workspaces.pipelineTask, tektonv1.WorkspacePipelineTaskBinding{
+		Name:      basicAuthName,
+		Workspace: basicAuthName,
+	})
+
+	return workspaces
+}
+
+func buildCloneStep(repoURL, revision, cloneImage string) tektonv1.Step {
+	return tektonv1.Step{
+		Name:  gitCloneStepName,
+		Image: cloneImage,
+		Env: []corev1.EnvVar{
+			{Name: "REPO_URL", Value: repoURL},
+			{Name: "REVISION", Value: revision},
+			{Name: "OUTPUT_PATH", Value: sourceMountPath},
+		},
+		Script: `#!/bin/sh
 set -eu
 if [ -d /workspace/basic-auth ]; then
-    cp /workspace/basic-auth/.gitconfig "${HOME}/.gitconfig" 2>/dev/null || true
-    cp /workspace/basic-auth/.git-credentials "${HOME}/.git-credentials" 2>/dev/null || true
-    chmod 600 "${HOME}/.git-credentials" 2>/dev/null || true
+	cp /workspace/basic-auth/.gitconfig "${HOME}/.gitconfig" 2>/dev/null || true
+	cp /workspace/basic-auth/.git-credentials "${HOME}/.git-credentials" 2>/dev/null || true
+	chmod 600 "${HOME}/.git-credentials" 2>/dev/null || true
 fi
+
+mkdir -p "${OUTPUT_PATH}"
+rm -rf "${OUTPUT_PATH:?}"/* "${OUTPUT_PATH}"/.[!.]* "${OUTPUT_PATH}"/..?* 2>/dev/null || true
+
 git init "${OUTPUT_PATH}"
 cd "${OUTPUT_PATH}"
+git config --global --add safe.directory "${OUTPUT_PATH}" 2>/dev/null || true
+git config --global --add safe.directory "${OUTPUT_PATH}/" 2>/dev/null || true
 git remote add origin "${REPO_URL}"
-git fetch --depth=1 origin "${REVISION}" 2>/dev/null || git fetch origin "${REVISION}"
-git checkout FETCH_HEAD
-`
-
-	env := []corev1.EnvVar{
-		{Name: "REPO_URL", Value: repoURL},
-		{Name: "REVISION", Value: sha},
-		{Name: "OUTPUT_PATH", Value: sourceMountPath},
-	}
-
-	volumes := []corev1.Volume{}
-	volumeMounts := []corev1.VolumeMount{}
-
-	if gitAuthSecret := parent.Annotations[keys.GitAuthSecret]; gitAuthSecret != "" {
-		volumes = append(volumes, corev1.Volume{
-			Name: "basic-auth",
-			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{SecretName: gitAuthSecret},
-			},
-		})
-		volumeMounts = append(volumeMounts, corev1.VolumeMount{
-			Name:      "basic-auth",
-			MountPath: "/workspace/basic-auth",
-		})
-	}
-
-	return &tektonv1.TaskSpec{
-		Workspaces: []tektonv1.WorkspaceDeclaration{{Name: sourceWorkspaceName}},
-		Volumes:    volumes,
-		Steps: []tektonv1.Step{
-			{
-				Name:         "clone",
-				Image:        cloneImage,
-				Script:       script,
-				Env:          env,
-				VolumeMounts: volumeMounts,
-			},
-		},
+git fetch --depth=50 origin "${REVISION}" 2>/dev/null || git fetch origin "${REVISION}"
+git checkout -B pac-ai-checkout FETCH_HEAD 2>/dev/null || git checkout FETCH_HEAD
+chmod -R a+rwX "${OUTPUT_PATH}" 2>/dev/null || true
+`,
 	}
 }
 
@@ -343,23 +354,24 @@ func maxTokensOrDefault(maxTokens int) int {
 	return maxTokens
 }
 
-func fetchAnalysisFromLogs(ctx context.Context, run *params.Run, pr *tektonv1.PipelineRun) (string, error) {
+// fetchRawPodLogs fetches the full log content for a given pipelineTask step container.
+func fetchRawPodLogs(ctx context.Context, run *params.Run, prName, namespace, pipelineTask, stepContainer string) (string, error) {
 	if run.Clients.Kube == nil {
 		return "", fmt.Errorf("kubernetes client not available")
 	}
 
-	labelSelector := fmt.Sprintf("tekton.dev/pipelineRun=%s,tekton.dev/pipelineTask=run-analysis", pr.Name)
-	pods, err := run.Clients.Kube.CoreV1().Pods(pr.Namespace).List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
+	labelSelector := fmt.Sprintf("tekton.dev/pipelineRun=%s,tekton.dev/pipelineTask=%s", prName, pipelineTask)
+	pods, err := run.Clients.Kube.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
 	if err != nil {
 		return "", fmt.Errorf("failed to list pods: %w", err)
 	}
 	if len(pods.Items) == 0 {
-		return "", fmt.Errorf("no pods found for analysis task")
+		return "", fmt.Errorf("no pods found for task %s", pipelineTask)
 	}
 
 	pod := pods.Items[0]
-	req := run.Clients.Kube.CoreV1().Pods(pr.Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{
-		Container: "step-run-analysis",
+	req := run.Clients.Kube.CoreV1().Pods(namespace).GetLogs(pod.Name, &corev1.PodLogOptions{
+		Container: stepContainer,
 	})
 	logs, err := req.Stream(ctx)
 	if err != nil {
@@ -371,10 +383,13 @@ func fetchAnalysisFromLogs(ctx context.Context, run *params.Run, pr *tektonv1.Pi
 	if err != nil {
 		return "", fmt.Errorf("failed to read logs: %w", err)
 	}
+	return string(logBytes), nil
+}
 
-	logContent := string(logBytes)
-	startMarker := "===ANALYSIS_BEGIN==="
-	endMarker := "===ANALYSIS_END==="
+// extractEnvelopeFromLogs finds and returns the JSON envelope between ===ANALYSIS_BEGIN=== and ===ANALYSIS_END===.
+func extractEnvelopeFromLogs(logContent string) (string, error) {
+	const startMarker = "===ANALYSIS_BEGIN==="
+	const endMarker = "===ANALYSIS_END==="
 
 	startIdx := strings.Index(logContent, startMarker)
 	if startIdx == -1 {
@@ -387,8 +402,14 @@ func fetchAnalysisFromLogs(ctx context.Context, run *params.Run, pr *tektonv1.Pi
 		return "", fmt.Errorf("analysis end marker not found in logs")
 	}
 
-	envelope := strings.TrimSpace(logContent[startIdx : startIdx+endIdx])
-	return envelope, nil
+	return strings.TrimSpace(logContent[startIdx : startIdx+endIdx]), nil
+}
+
+func pipelineRunLogSource(pr *tektonv1.PipelineRun) (string, string) {
+	if pr.Annotations[keys.LLMFix] == "true" || pr.Labels[keys.LLMFix] == "true" {
+		return "fix", "step-run-fix"
+	}
+	return "run-analysis", "step-run-analysis"
 }
 
 func parsePipelineRunEnvelope(ctx context.Context, run *params.Run, pr *tektonv1.PipelineRun) (AnalysisResult, AnalysisSummary) {
@@ -402,29 +423,34 @@ func parsePipelineRunEnvelope(ctx context.Context, run *params.Run, pr *tektonv1
 	}
 
 	var envelopeJSON string
-	var parseErr error
+	var rawLogs string
 
-	// Try log-based parsing first
-	envelopeJSON, parseErr = fetchAnalysisFromLogs(ctx, run, pr)
-	if parseErr != nil {
+	// Try log-based parsing first (fetch logs once for both envelope and patch).
+	var logErr error
+	pipelineTask, stepContainer := pipelineRunLogSource(pr)
+	rawLogs, logErr = fetchRawPodLogs(ctx, run, pr.Name, pr.Namespace, pipelineTask, stepContainer)
+	if logErr == nil {
+		envelopeJSON, _ = extractEnvelopeFromLogs(rawLogs)
+	}
+
+	if envelopeJSON == "" {
 		// Fall back to result-based parsing
-		var ok bool
 		for _, result := range pr.Status.Results {
 			if result.Name == analysisResultName {
 				envelopeJSON = result.Value.StringVal
-				ok = true
 				break
 			}
 		}
-		if !ok {
-			err := &AnalysisError{
-				Provider: summary.Backend,
-				Type:     "missing_result",
-				Message:  pipelineRunErrorMessage(pr),
-			}
-			summary.Error = err
-			return AnalysisResult{Role: role, Output: output, Error: err}, summary
+	}
+
+	if envelopeJSON == "" {
+		err := &AnalysisError{
+			Provider: summary.Backend,
+			Type:     "missing_result",
+			Message:  pipelineRunErrorMessage(pr),
 		}
+		summary.Error = err
+		return AnalysisResult{Role: role, Output: output, Error: err}, summary
 	}
 
 	envelope := AnalysisEnvelope{}
@@ -464,7 +490,22 @@ func parsePipelineRunEnvelope(ctx context.Context, run *params.Run, pr *tektonv1
 		Timestamp:  summary.CollectedAt,
 		Duration:   time.Duration(envelope.DurationMS) * time.Millisecond,
 	}
-	return AnalysisResult{Role: role, Output: output, Response: response}, summary
+
+	// Attempt to parse machine patch metadata from the same log content.
+	var patchMeta *MachinePatchMetadata
+	if rawLogs != "" {
+		if blocks, err := extractMachinePatchBlocks(rawLogs); err == nil && len(blocks) > 0 {
+			if meta, _, err := parseMachinePatch(blocks, role, ""); err == nil {
+				patchMeta = meta
+				summary.PatchAvailable = true
+				summary.PatchBaseSHA = meta.BaseSHA
+				summary.PatchFormat = meta.Format
+				summary.PatchVersion = meta.Version
+			}
+		}
+	}
+
+	return AnalysisResult{Role: role, Output: output, Response: response, Patch: patchMeta, Metadata: envelope.Metadata}, summary
 }
 
 func pipelineRunErrorMessage(pr *tektonv1.PipelineRun) string {

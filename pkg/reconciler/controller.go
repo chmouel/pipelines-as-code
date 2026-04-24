@@ -95,7 +95,7 @@ func checkStateAndEnqueue(impl *controller.Impl) func(obj any) {
 			impl.EnqueueKey(types.NamespacedName{Namespace: object.GetNamespace(), Name: object.GetName()})
 			return
 		}
-		if annotations[keys.LLMAnalysis] == "true" {
+		if annotations[keys.LLMAnalysis] == "true" || annotations[keys.LLMFix] == "true" {
 			if parentName := annotations[keys.LLMParentPipelineRun]; parentName != "" {
 				impl.EnqueueKey(types.NamespacedName{Namespace: object.GetNamespace(), Name: parentName})
 			}

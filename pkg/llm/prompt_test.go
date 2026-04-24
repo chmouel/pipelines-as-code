@@ -19,7 +19,7 @@ func TestBuildPrompt(t *testing.T) {
 			request: &AnalysisRequest{
 				Prompt: "Analyze this error",
 			},
-			wantContain: []string{"Analyze this error"},
+			wantContain: []string{"apply the fix by editing the repository files", "Do not only describe", "Analyze this error"},
 		},
 		{
 			name: "prompt with string context",

@@ -89,6 +89,7 @@ func parseRawBlock(content string) (rawPatchBlock, error) {
 
 		colonIdx := strings.IndexByte(line, ':')
 		if colonIdx == -1 {
+			// Not a header line; data section has started
 			if dataStart == -1 {
 				dataStart = i
 			}
@@ -120,6 +121,7 @@ func parseRawBlock(content string) (rawPatchBlock, error) {
 			}
 			b.chunkCount = n
 		case "chunk":
+			// format: "i/N"
 			parts := strings.SplitN(val, "/", 2)
 			if len(parts) != 2 {
 				return rawPatchBlock{}, fmt.Errorf("invalid chunk field %q", val)
@@ -180,6 +182,7 @@ func parseMachinePatch(blocks []rawPatchBlock, expectedRole, expectedSHA string)
 		return nil, "", fmt.Errorf("expected %d chunk(s), got %d", expectedChunks, len(blocks))
 	}
 
+	// Validate chunk indices and detect duplicates/gaps
 	seen := make(map[int]bool, len(blocks))
 	chunks := make([]string, len(blocks))
 	for _, b := range blocks {
