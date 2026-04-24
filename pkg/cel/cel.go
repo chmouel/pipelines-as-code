@@ -35,6 +35,56 @@ func evaluate(expr string, env *cel.Env, data map[string]any) (ref.Val, error) {
 	return out, nil
 }
 
+func newEnv() (*cel.Env, error) {
+	mapStrDyn := types.NewMapType(types.StringType, types.DynType)
+	return cel.NewEnv(
+		cel.VariableDecls(
+			decls.NewVariable("body", mapStrDyn),
+			decls.NewVariable("headers", mapStrDyn),
+			decls.NewVariable("pac", mapStrDyn),
+			decls.NewVariable("files", mapStrDyn),
+			// Direct variables as per documentation
+			decls.NewVariable("event", types.StringType),
+			decls.NewVariable("event_type", types.StringType),
+			decls.NewVariable("target_branch", types.StringType),
+			decls.NewVariable("source_branch", types.StringType),
+			decls.NewVariable("target_url", types.StringType),
+			decls.NewVariable("source_url", types.StringType),
+			decls.NewVariable("event_title", types.StringType),
+			decls.NewVariable("revision", types.StringType),
+			decls.NewVariable("repo_owner", types.StringType),
+			decls.NewVariable("repo_name", types.StringType),
+			decls.NewVariable("sender", types.StringType),
+			decls.NewVariable("repo_url", types.StringType),
+			decls.NewVariable("git_tag", types.StringType),
+			decls.NewVariable("target_namespace", types.StringType),
+			decls.NewVariable("trigger_comment", types.StringType),
+			decls.NewVariable("pull_request_labels", types.StringType),
+			decls.NewVariable("pull_request_number", types.StringType),
+			decls.NewVariable("git_auth_secret", types.StringType),
+		))
+}
+
+// Validate parses and type-checks a CEL expression without evaluating it.
+func Validate(query string) error {
+	env, err := newEnv()
+	if err != nil {
+		return err
+	}
+
+	parsed, issues := env.Parse(query)
+	if issues != nil && issues.Err() != nil {
+		return fmt.Errorf("failed to parse expression %#v: %w", query, issues.Err())
+	}
+
+	_, issues = env.Check(parsed)
+	if issues != nil && issues.Err() != nil {
+		return fmt.Errorf("expression %#v check failed: %w", query, issues.Err())
+	}
+
+	return nil
+}
+
 // Value evaluates a CEL expression with the given body, headers and
 // / pacParams, it will output a Cel value or an error if selectedjm.
 func Value(query string, body any, headers, pacParams map[string]string, changedFiles map[string]any) (ref.Val, error) {
@@ -64,33 +114,10 @@ func Value(query string, body any, headers, pacParams map[string]string, changed
 		}
 	}
 
-	mapStrDyn := types.NewMapType(types.StringType, types.DynType)
-	celDec, _ := cel.NewEnv(
-		cel.VariableDecls(
-			decls.NewVariable("body", mapStrDyn),
-			decls.NewVariable("headers", mapStrDyn),
-			decls.NewVariable("pac", mapStrDyn),
-			decls.NewVariable("files", mapStrDyn),
-			// Direct variables as per documentation
-			decls.NewVariable("event", types.StringType),
-			decls.NewVariable("event_type", types.StringType),
-			decls.NewVariable("target_branch", types.StringType),
-			decls.NewVariable("source_branch", types.StringType),
-			decls.NewVariable("target_url", types.StringType),
-			decls.NewVariable("source_url", types.StringType),
-			decls.NewVariable("event_title", types.StringType),
-			decls.NewVariable("revision", types.StringType),
-			decls.NewVariable("repo_owner", types.StringType),
-			decls.NewVariable("repo_name", types.StringType),
-			decls.NewVariable("sender", types.StringType),
-			decls.NewVariable("repo_url", types.StringType),
-			decls.NewVariable("git_tag", types.StringType),
-			decls.NewVariable("target_namespace", types.StringType),
-			decls.NewVariable("trigger_comment", types.StringType),
-			decls.NewVariable("pull_request_labels", types.StringType),
-			decls.NewVariable("pull_request_number", types.StringType),
-			decls.NewVariable("git_auth_secret", types.StringType),
-		))
+	celDec, err := newEnv()
+	if err != nil {
+		return nil, err
+	}
 	val, err := evaluate(query, celDec, map[string]any{
 		"body":    jsonMap,
 		"pac":     pacParams,

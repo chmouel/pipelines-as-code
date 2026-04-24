@@ -513,6 +513,45 @@ func (v *Provider) GetCommitInfo(ctx context.Context, runevent *info.Event) erro
 	return nil
 }
 
+// ListDirFilesInsideRepo returns the paths of all files directly inside path at the
+// event SHA. Returns an empty slice without error if the directory does not exist.
+func (v *Provider) ListDirFilesInsideRepo(ctx context.Context, runevent *info.Event, path string) ([]string, error) {
+	rootobjects, _, err := wrapAPI(v, "list_dir_root_tree", func() (*github.Tree, *github.Response, error) {
+		return v.Client().Git.GetTree(ctx, runevent.Organization, runevent.Repository, runevent.SHA, false)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	dirSHA := ""
+	for _, object := range rootobjects.Entries {
+		if object.GetPath() == path {
+			if object.GetType() != "tree" {
+				return nil, fmt.Errorf("%s has been found but is not a directory", path)
+			}
+			dirSHA = object.GetSHA()
+		}
+	}
+	if dirSHA == "" {
+		return nil, nil
+	}
+
+	dirObjects, _, err := wrapAPI(v, "list_dir_subtree", func() (*github.Tree, *github.Response, error) {
+		return v.Client().Git.GetTree(ctx, runevent.Organization, runevent.Repository, dirSHA, true)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var files []string
+	for _, entry := range dirObjects.Entries {
+		if entry.GetType() == "blob" && strings.HasSuffix(entry.GetPath(), ".md") {
+			files = append(files, path+"/"+entry.GetPath())
+		}
+	}
+	return files, nil
+}
+
 // GetFileInsideRepo Get a file via Github API using the runinfo information, we
 // branch is true, the user the branch as ref instead of the SHA
 // TODO: merge GetFileInsideRepo amd GetTektonDir.

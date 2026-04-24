@@ -15,7 +15,7 @@ LLM-powered analysis lets you:
 
 - **Analyze failed pipelines** automatically and get root-cause analysis
 - **Generate actionable recommendations** for fixing issues
-- **Post insights as PR comments** so your team sees them immediately
+- **Post insights as PR comments or check-run annotations** so your team sees them immediately
 - **Configure custom analysis scenarios** using different prompts and triggers
 - **Define roles inside your repository** so contributors can ship their own repo roles alongside pipeline code
 - **Apply AI-generated fixes** with one click using the "Fix it" action on GitHub check-runs
@@ -107,7 +107,7 @@ Each role defines a specific analysis scenario. You can configure multiple roles
 | `model`         | string  | No       | Model name (see backend docs for available models). Uses backend default if not specified.      |
 | `max_tokens`    | integer | No       | Override the top-level `max_tokens` for this role (1-4000)                                      |
 | `on_cel`        | string  | No       | CEL expression for conditional triggering. If not specified, runs only for failed PipelineRuns. |
-| `output`        | string  | Yes      | Output destination (currently only `pr-comment` is supported)                                   |
+| `output`        | string  | No       | Output destination: `pr-comment` (default) or `check-run`                                       |
 | `context_items` | object  | No       | Configuration for context inclusion                                                             |
 
 ### Context Items

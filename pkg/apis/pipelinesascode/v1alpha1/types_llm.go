@@ -121,39 +121,39 @@ type AnalysisRole struct {
 type ContextConfig struct {
 	// CommitContent includes commit message and diff information
 	// +optional
-	CommitContent bool `json:"commit_content,omitempty"`
+	CommitContent bool `json:"commit_content,omitempty" yaml:"commit_content,omitempty"`
 
 	// PRContent includes pull request title, description, and metadata
 	// +optional
-	PRContent bool `json:"pr_content,omitempty"`
+	PRContent bool `json:"pr_content,omitempty" yaml:"pr_content,omitempty"`
 
 	// ErrorContent includes error messages and failure summaries
 	// +optional
-	ErrorContent bool `json:"error_content,omitempty"`
+	ErrorContent bool `json:"error_content,omitempty" yaml:"error_content,omitempty"`
 
 	// ContainerLogs configures inclusion of container/task logs
 	// +optional
-	ContainerLogs *ContainerLogsConfig `json:"container_logs,omitempty"`
+	ContainerLogs *ContainerLogsConfig `json:"container_logs,omitempty" yaml:"container_logs,omitempty"`
 
 	// DiffContent includes the pull request code diff
 	// +optional
-	DiffContent bool `json:"diff_content,omitempty"`
+	DiffContent bool `json:"diff_content,omitempty" yaml:"diff_content,omitempty"`
 
 	// Files lists repository file paths to include verbatim in the context
 	// +optional
-	Files []string `json:"files,omitempty"`
+	Files []string `json:"files,omitempty" yaml:"files,omitempty"`
 }
 
 // ContainerLogsConfig defines how container logs should be included in analysis.
 type ContainerLogsConfig struct {
 	// Enabled controls whether container logs are included
-	Enabled bool `json:"enabled"`
+	Enabled bool `json:"enabled" yaml:"enabled"`
 
 	// MaxLines limits the number of log lines to include (default: 50)
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=1000
-	MaxLines int `json:"max_lines,omitempty"`
+	MaxLines int `json:"max_lines,omitempty" yaml:"max_lines,omitempty"`
 }
 
 func (c *ContainerLogsConfig) GetMaxLines() int {

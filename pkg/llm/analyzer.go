@@ -11,6 +11,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cel"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	llmcontext "github.com/openshift-pipelines/pipelines-as-code/pkg/llm/context"
+	reporoles "github.com/openshift-pipelines/pipelines-as-code/pkg/llm/roles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
@@ -140,6 +141,7 @@ func ExecuteAnalysis(
 		if err := createAnalysisPipelineRun(ctx, run, config, repo, pr, event, exec); err != nil {
 			return fmt.Errorf("failed to create llm PipelineRun for role %s: %w", exec.Role.Name, err)
 		}
+		analysisPRsByRole[exec.Role.Name] = &tektonv1.PipelineRun{}
 		if exec.Role.GetOutput() == "check-run" {
 			if err := postQueuedCheckRun(ctx, exec.Role.Name, pr.Name, event, prov, logger); err != nil {
 				logger.With("role", exec.Role.Name, "error", err).Warn("Failed to create queued AI analysis check run")
@@ -163,6 +165,13 @@ func buildRoleExecutions(
 ) ([]roleExecution, error) {
 	config := repo.Spec.Settings.AIAnalysis
 	assembler := llmcontext.NewAssembler(run, kinteract, logger)
+	roles, err := analysisRolesFromSources(ctx, logger, event, prov, config)
+	if err != nil {
+		return nil, err
+	}
+	if len(roles) == 0 {
+		return nil, nil
+	}
 
 	celContext, err := assembler.BuildCELContext(pr, event, repo)
 	if err != nil {
@@ -172,8 +181,8 @@ func buildRoleExecutions(
 	contextCache := make(map[string]map[string]any)
 	executions := []roleExecution{}
 
-	for _, role := range config.Roles {
-		shouldTrigger, err := shouldTriggerRole(role, celContext, pr)
+	for _, role := range roles {
+		shouldTrigger, err := shouldTrigger(role.OnCEL, celContext, pr)
 		if err != nil {
 			logger.With("role", role.Name, "error", err).Warn("Skipping role because CEL evaluation failed")
 			continue
@@ -196,7 +205,8 @@ func buildRoleExecutions(
 		request := &AnalysisRequest{
 			Prompt:         role.Prompt,
 			Context:        roleContext,
-			MaxTokens:      maxTokensOrDefault(config.MaxTokens),
+			Model:          role.GetModel(),
+			MaxTokens:      maxTokensForRole(config, role),
 			TimeoutSeconds: timeoutSecondsOrDefault(config.TimeoutSeconds),
 		}
 
@@ -609,27 +619,48 @@ func getContextCacheKey(config *v1alpha1.ContextConfig) string {
 	)
 }
 
-// shouldTriggerRole evaluates the CEL expression to determine if a role should be triggered.
+// shouldTrigger evaluates the CEL expression to determine if a role should be triggered.
 // If no on_cel is provided, defaults to triggering only for failed PipelineRuns.
-func shouldTriggerRole(role v1alpha1.AnalysisRole, celContext map[string]any, pr *tektonv1.PipelineRun) (bool, error) {
-	if role.OnCEL == "" {
+func shouldTrigger(onCEL string, celContext map[string]any, pr *tektonv1.PipelineRun) (bool, error) {
+	if onCEL == "" {
 		succeededCondition := pr.Status.GetCondition(apis.ConditionSucceeded)
 		return succeededCondition != nil && succeededCondition.Status == corev1.ConditionFalse, nil
 	}
 
-	result, err := cel.Value(role.OnCEL, celContext["body"],
+	result, err := cel.Value(onCEL, celContext["body"],
 		make(map[string]string),
 		make(map[string]string),
 		make(map[string]any))
 	if err != nil {
-		return false, fmt.Errorf("failed to evaluate CEL expression '%s': %w", role.OnCEL, err)
+		return false, fmt.Errorf("failed to evaluate CEL expression '%s': %w", onCEL, err)
 	}
 
 	if boolVal, ok := result.Value().(bool); ok {
 		return boolVal, nil
 	}
 
-	return false, fmt.Errorf("CEL expression '%s' did not return boolean value", role.OnCEL)
+	return false, fmt.Errorf("CEL expression '%s' did not return boolean value", onCEL)
+}
+
+func analysisRolesFromSources(
+	ctx context.Context,
+	logger *zap.SugaredLogger,
+	event *info.Event,
+	prov provider.Interface,
+	config *v1alpha1.AIAnalysisConfig,
+) ([]v1alpha1.AnalysisRole, error) {
+	roles := make([]v1alpha1.AnalysisRole, 0, len(config.Roles))
+	roles = append(roles, config.Roles...)
+
+	repoRoles, errs := reporoles.DiscoverAndLoad(ctx, prov, event)
+	for _, err := range errs {
+		logger.With("error", err).Warn("Skipping repository AI role")
+	}
+	for _, role := range repoRoles {
+		roles = append(roles, role.AnalysisRole())
+	}
+
+	return roles, nil
 }
 
 // validateAnalysisConfig validates the AI analysis configuration.
@@ -660,10 +691,6 @@ func validateAnalysisConfig(config *v1alpha1.AIAnalysisConfig) error {
 	}
 	if config.SecretRef.Name == "" {
 		return fmt.Errorf("secret reference name is required")
-	}
-
-	if len(config.Roles) == 0 {
-		return fmt.Errorf("at least one analysis role is required")
 	}
 
 	for i, role := range config.Roles {

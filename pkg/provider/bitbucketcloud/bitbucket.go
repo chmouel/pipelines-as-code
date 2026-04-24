@@ -196,6 +196,22 @@ func (v *Provider) getDir(event *info.Event, path string) ([]bitbucket.Repositor
 	return repositoryFiles, nil
 }
 
+// ListDirFilesInsideRepo returns the paths of all .md files inside path at the event SHA.
+// Returns an empty slice without error if the directory does not exist.
+func (v *Provider) ListDirFilesInsideRepo(_ context.Context, event *info.Event, path string) ([]string, error) {
+	entries, err := v.getDir(event, path)
+	if err != nil {
+		return nil, nil
+	}
+	var files []string
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Path, ".md") {
+			files = append(files, entry.Path)
+		}
+	}
+	return files, nil
+}
+
 func (v *Provider) GetFileInsideRepo(_ context.Context, event *info.Event, path, _ string) (string, error) {
 	revision := event.SHA
 	if v.provenance == "default_branch" {

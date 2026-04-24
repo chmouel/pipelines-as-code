@@ -282,8 +282,8 @@ settings:
 
 {{< /param >}}
 
-{{< param name="ai.roles" type="[]AnalysisRole" required="true" id="param-ai-roles" >}}
-Defines the analysis scenarios and their configurations. You must specify at least one role.
+{{< param name="ai.roles" type="[]AnalysisRole" id="param-ai-roles" >}}
+Defines the analysis scenarios and their configurations. This field is optional when repo roles are present in `.tekton/ai/`. See [Repo Roles]({{< relref "/docs/guides/llm-analysis#repo-roles" >}}).
 
 {{< param-group label="Show AnalysisRole Fields" >}}
 
@@ -306,7 +306,10 @@ Use the structured LLM CEL context, such as `body.event.*`,
 {{< /param >}}
 
 {{< param name="roles[].output" type="string" id="param-roles-output" >}}
-Specifies where Pipelines-as-Code sends the analysis results. Currently only `pr-comment` is supported (default).
+Specifies where Pipelines-as-Code sends the analysis results. Supported values:
+
+- `pr-comment` (default) — posts the result as a pull request comment
+- `check-run` — posts the result as a GitHub check-run annotation (GitHub App only)
 {{< /param >}}
 
 {{< param name="roles[].context_items" type="ContextConfig" id="param-roles-context-items" >}}
