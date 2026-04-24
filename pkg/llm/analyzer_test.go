@@ -1068,9 +1068,9 @@ func TestPostCheckRunHasFixItButtonWhenPatchValid(t *testing.T) {
 	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger)
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts != nil)
-	assert.Assert(t, len(prov.LastStatusOpts.Actions) == 1, "should have Fix it action when patch is valid")
+	assert.Assert(t, len(prov.LastStatusOpts.Actions) == 1, "should have Apply Suggestions action when patch is valid")
 	assert.Equal(t, prov.LastStatusOpts.Actions[0].Identifier, "llm-fix")
-	assert.Equal(t, prov.LastStatusOpts.Actions[0].Label, "Fix it")
+	assert.Equal(t, prov.LastStatusOpts.Actions[0].Label, "Apply Suggestions")
 }
 
 func TestPostCheckRunHasNoFixItButtonWhenPatchNil(t *testing.T) {
@@ -1124,7 +1124,7 @@ func TestPostQueuedCheckRunHasNoActions(t *testing.T) {
 	err := postQueuedCheckRun(context.Background(), "review", "parent-pr", event, prov, testLogger)
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts != nil)
-	assert.Equal(t, len(prov.LastStatusOpts.Actions), 0, "queued check run must never have Fix it button")
+	assert.Equal(t, len(prov.LastStatusOpts.Actions), 0, "queued check run must never have Apply Suggestions button")
 }
 
 func TestPostCheckRunSkipsWhenNotGitHubApp(t *testing.T) {

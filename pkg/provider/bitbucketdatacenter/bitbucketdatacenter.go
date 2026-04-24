@@ -253,7 +253,7 @@ func (v *Provider) ListDirFilesInsideRepo(ctx context.Context, event *info.Event
 	for {
 		entries, _, err := v.Client().Contents.List(ctx, orgAndRepo, path, event.SHA, opts)
 		if err != nil {
-			return nil, nil
+			return nil, err
 		}
 		fileEntries = append(fileEntries, entries...)
 		if len(entries) < apiResponseLimit {

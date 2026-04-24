@@ -224,10 +224,10 @@ Benefits of check-runs:
 
 - Analysis appears in the **Checks** tab alongside your CI results.
 - The check-run title shows the role name, making it easy to distinguish multiple analysis roles.
-- When the backend produces a concrete fix, a **"Fix it"** action button appears on the check-run. Clicking it triggers PAC to apply the AI-generated patch and push it to the PR branch. See [Fix it Action]({{< relref "/docs/guides/llm-analysis#fix-it-action" >}}) for details.
+- When the backend produces a concrete fix, an **"Apply Suggestions"** action button appears on the check-run. Clicking it triggers PAC to apply the AI-generated patch and push it to the PR branch. See [Apply Suggestions Action]({{< relref "/docs/guides/llm-analysis#apply-suggestions-action" >}}) for details.
 
 When to choose `check-run` over `pr-comment`:
 
 - You want the analysis result separated from the PR conversation thread.
-- You want to offer the one-click "Fix it" capability to contributors.
+- You want to offer the one-click "Apply Suggestions" capability to contributors.
 - You are running multiple analysis roles and want each result to be independently re-runnable.

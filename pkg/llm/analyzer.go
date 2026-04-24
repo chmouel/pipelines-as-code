@@ -165,10 +165,7 @@ func buildRoleExecutions(
 ) ([]roleExecution, error) {
 	config := repo.Spec.Settings.AIAnalysis
 	assembler := llmcontext.NewAssembler(run, kinteract, logger)
-	roles, err := analysisRolesFromSources(ctx, logger, event, prov, config)
-	if err != nil {
-		return nil, err
-	}
+	roles := analysisRolesFromSources(ctx, logger, event, prov, config)
 	if len(roles) == 0 {
 		return nil, nil
 	}
@@ -326,7 +323,7 @@ func postCheckRun(
 	if isMachinePatchValid(result.Patch) {
 		statusOpts.Actions = []status.CheckRunAction{
 			{
-				Label:       "Fix it",
+				Label:       "Apply Suggestions",
 				Description: "Apply the AI-generated patch",
 				Identifier:  "llm-fix",
 			},
@@ -648,7 +645,7 @@ func analysisRolesFromSources(
 	event *info.Event,
 	prov provider.Interface,
 	config *v1alpha1.AIAnalysisConfig,
-) ([]v1alpha1.AnalysisRole, error) {
+) []v1alpha1.AnalysisRole {
 	roles := make([]v1alpha1.AnalysisRole, 0, len(config.Roles))
 	roles = append(roles, config.Roles...)
 
@@ -660,7 +657,7 @@ func analysisRolesFromSources(
 		roles = append(roles, role.AnalysisRole())
 	}
 
-	return roles, nil
+	return roles
 }
 
 // validateAnalysisConfig validates the AI analysis configuration.
