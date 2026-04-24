@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
@@ -124,6 +125,17 @@ func (v *TestProviderImp) GetFileInsideRepo(_ context.Context, _ *info.Event, fi
 		return val, nil
 	}
 	return "", fmt.Errorf("could not find %s in tests", file)
+}
+
+func (v *TestProviderImp) ListDirFilesInsideRepo(_ context.Context, _ *info.Event, path string) ([]string, error) {
+	prefix := path + "/"
+	var files []string
+	for k := range v.FilesInsideRepo {
+		if strings.HasPrefix(k, prefix) && strings.HasSuffix(k, ".md") {
+			files = append(files, k)
+		}
+	}
+	return files, nil
 }
 
 func (v *TestProviderImp) GetFiles(_ context.Context, _ *info.Event) (changedfiles.ChangedFiles, error) {

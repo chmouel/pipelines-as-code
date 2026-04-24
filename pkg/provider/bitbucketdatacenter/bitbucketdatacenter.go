@@ -244,6 +244,34 @@ func (v *Provider) GetTektonDir(ctx context.Context, event *info.Event, path, pr
 	return v.concatAllYamlFiles(ctx, fpathTmpl, at, event)
 }
 
+// ListDirFilesInsideRepo returns the paths of all .md files inside path at the event SHA.
+// Returns an empty slice without error if the directory does not exist.
+func (v *Provider) ListDirFilesInsideRepo(ctx context.Context, event *info.Event, path string) ([]string, error) {
+	orgAndRepo := fmt.Sprintf("%s/%s", event.Organization, event.Repository)
+	var fileEntries []*scm.FileEntry
+	opts := &scm.ListOptions{Page: 1, Size: apiResponseLimit}
+	for {
+		entries, _, err := v.Client().Contents.List(ctx, orgAndRepo, path, event.SHA, opts)
+		if err != nil {
+			return nil, nil
+		}
+		fileEntries = append(fileEntries, entries...)
+		if len(entries) < apiResponseLimit {
+			break
+		}
+		opts.Page++
+	}
+
+	var files []string
+	for _, e := range fileEntries {
+		fullPath := filepath.Join(path, e.Path)
+		if strings.HasSuffix(fullPath, ".md") {
+			files = append(files, fullPath)
+		}
+	}
+	return files, nil
+}
+
 func (v *Provider) GetFileInsideRepo(ctx context.Context, event *info.Event, path, targetBranch string) (string, error) {
 	branch := event.SHA
 	// TODO: this may be buggy? we need to figure out how to get the fromSource ref

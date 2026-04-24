@@ -123,7 +123,7 @@ func buildAnalysisPipelineRun(
 	analysisEnv = append(analysisEnv,
 		corev1.EnvVar{Name: "LLM_BACKEND", Value: backend},
 		corev1.EnvVar{Name: "LLM_MODEL", Value: model},
-		corev1.EnvVar{Name: "LLM_MAX_TOKENS", Value: fmt.Sprintf("%d", maxTokensOrDefault(config.MaxTokens))},
+		corev1.EnvVar{Name: "LLM_MAX_TOKENS", Value: fmt.Sprintf("%d", maxTokensForRole(config, exec.Role))},
 		corev1.EnvVar{Name: "LLM_PROMPT_B64", Value: promptB64},
 		corev1.EnvVar{Name: "LLM_TIMEOUT_SECONDS", Value: fmt.Sprintf("%d", cliTimeout)},
 		corev1.EnvVar{Name: "LLM_ROLE_NAME", Value: roleName},
@@ -352,6 +352,13 @@ func maxTokensOrDefault(maxTokens int) int {
 		return DefaultMaxTokens
 	}
 	return maxTokens
+}
+
+func maxTokensForRole(config *v1alpha1.AIAnalysisConfig, role v1alpha1.AnalysisRole) int {
+	if role.GetMaxTokens() > 0 {
+		return role.GetMaxTokens()
+	}
+	return maxTokensOrDefault(config.MaxTokens)
 }
 
 // fetchRawPodLogs fetches the full log content for a given pipelineTask step container.

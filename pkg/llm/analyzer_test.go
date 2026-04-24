@@ -9,6 +9,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm/roles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	paramclients "github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
@@ -212,6 +213,15 @@ func TestValidateAnalysisConfig(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "empty roles are allowed for repository-backed skills",
+			config: &v1alpha1.AIAnalysisConfig{
+				ExecutionMode: "pipelinerun",
+				Backend:       "codex",
+				Image:         "quay.io/example/codex:latest",
+				SecretRef:     &v1alpha1.Secret{Name: "llm-token", Key: "token"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -273,6 +283,155 @@ func TestExecuteAnalysisCreatesPipelineRun(t *testing.T) {
 	assert.Equal(t, len(cloneStep.VolumeMounts), 0)
 	assert.Equal(t, analysisPRs.Items[0].Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[1].Name, "run-analysis")
 }
+
+func TestExecuteAnalysisCreatesPipelineRunFromRepositorySkill(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	tekton := fakepipelineclientset.NewSimpleClientset() //nolint:staticcheck
+	run := &params.Run{
+		Clients: paramclients.Clients{
+			Tekton: tekton,
+		},
+		Info: info.Info{
+			Pac: &info.PacOpts{
+				Settings: settings.DefaultSettings(),
+			},
+		},
+	}
+
+	repo := testAIRepository()
+	repo.Spec.Settings.AIAnalysis.Roles = nil
+	pr := failedPipelineRun()
+	event := testEvent()
+	prov := &tprovider.TestProviderImp{
+		FilesInsideRepo: map[string]string{
+			roles.Path("failure-analysis"): `---
+name: failure-analysis
+output: check-run
+max_tokens: 321
+context_items:
+  error_content: true
+---
+Analyze the failure and suggest a fix.
+`,
+		},
+	}
+
+	err := ExecuteAnalysis(context.Background(), run, &kubeinteraction.Interaction{}, testLogger, repo, pr, event, prov)
+	assert.NilError(t, err)
+
+	analysisPRs, err := tekton.TektonV1().PipelineRuns(pr.Namespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: keys.LLMAnalysis + "=true",
+	})
+	assert.NilError(t, err)
+	assert.Equal(t, len(analysisPRs.Items), 1)
+	assert.Equal(t, analysisPRs.Items[0].Annotations[keys.LLMRole], "failure-analysis")
+	assert.Equal(t, analysisPRs.Items[0].Annotations[keys.LLMOutput], "check-run")
+
+	analysisStep := analysisPRs.Items[0].Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[1]
+	envMap := map[string]string{}
+	for _, env := range analysisStep.Env {
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		}
+	}
+	assert.Equal(t, envMap["LLM_MAX_TOKENS"], "321")
+	assert.Assert(t, envMap["LLM_PROMPT_B64"] != "")
+}
+
+func TestExecuteAnalysisRunsCRAndRepositoryRoles(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	tekton := fakepipelineclientset.NewSimpleClientset() //nolint:staticcheck
+	run := &params.Run{
+		Clients: paramclients.Clients{
+			Tekton: tekton,
+		},
+		Info: info.Info{
+			Pac: &info.PacOpts{
+				Settings: settings.DefaultSettings(),
+			},
+		},
+	}
+
+	repo := testAIRepository()
+	repo.Spec.Settings.AIAnalysis.Roles = []v1alpha1.AnalysisRole{
+		{Name: "cr-review", Prompt: "review this change"},
+	}
+	pr := failedPipelineRun()
+	event := testEvent()
+	prov := &tprovider.TestProviderImp{
+		FilesInsideRepo: map[string]string{
+			roles.Path("repo-review"): `---
+name: repo-review
+output: check-run
+---
+Analyze the failure from the repository role.
+`,
+		},
+	}
+
+	err := ExecuteAnalysis(context.Background(), run, &kubeinteraction.Interaction{}, testLogger, repo, pr, event, prov)
+	assert.NilError(t, err)
+
+	analysisPRs, err := tekton.TektonV1().PipelineRuns(pr.Namespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: keys.LLMAnalysis + "=true",
+	})
+	assert.NilError(t, err)
+	assert.Equal(t, len(analysisPRs.Items), 2)
+
+	roles := map[string]string{}
+	for _, item := range analysisPRs.Items {
+		roles[item.Annotations[keys.LLMRole]] = item.Annotations[keys.LLMOutput]
+	}
+	assert.Equal(t, roles["cr-review"], "pr-comment")
+	assert.Equal(t, roles["repo-review"], "check-run")
+}
+
+func TestExecuteAnalysisSkipsInvalidRepositorySkillAndRunsRemainingRoles(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	tekton := fakepipelineclientset.NewSimpleClientset() //nolint:staticcheck
+	run := &params.Run{
+		Clients: paramclients.Clients{
+			Tekton: tekton,
+		},
+		Info: info.Info{
+			Pac: &info.PacOpts{
+				Settings: settings.DefaultSettings(),
+			},
+		},
+	}
+
+	repo := testAIRepository()
+	repo.Spec.Settings.AIAnalysis.Roles = []v1alpha1.AnalysisRole{
+		{Name: "cr-review", Prompt: "review this change"},
+	}
+	pr := failedPipelineRun()
+	event := testEvent()
+	prov := &tprovider.TestProviderImp{
+		FilesInsideRepo: map[string]string{
+			roles.Path("repo-review"): `---
+name: repo-review
+---
+Analyze the failure from the repository role.
+`,
+			roles.Path("broken"): `---
+name: broken
+output: invalid-output
+---
+This file should be skipped.
+`,
+		},
+	}
+
+	err := ExecuteAnalysis(context.Background(), run, &kubeinteraction.Interaction{}, testLogger, repo, pr, event, prov)
+	assert.NilError(t, err)
+
+	analysisPRs, err := tekton.TektonV1().PipelineRuns(pr.Namespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: keys.LLMAnalysis + "=true",
+	})
+	assert.NilError(t, err)
+	assert.Equal(t, len(analysisPRs.Items), 2)
+}
+
 
 func TestExecuteAnalysisCollectsPipelineRun(t *testing.T) {
 	testLogger, _ := logger.GetLogger()
@@ -733,7 +892,7 @@ func TestShouldTriggerRole(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			trigger, err := shouldTriggerRole(tt.role, tt.celContext, tt.pr)
+			trigger, err := shouldTrigger(tt.role.OnCEL, tt.celContext, tt.pr)
 			if tt.wantError {
 				assert.Assert(t, err != nil, "expected error but got none")
 				return

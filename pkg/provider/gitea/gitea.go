@@ -486,6 +486,46 @@ func (v *Provider) getObject(sha string, event *info.Event) ([]byte, error) {
 	return decoded, err
 }
 
+// ListDirFilesInsideRepo returns the paths of all .md files inside path at the event SHA.
+// Returns an empty slice without error if the directory does not exist.
+func (v *Provider) ListDirFilesInsideRepo(_ context.Context, event *info.Event, path string) ([]string, error) {
+	dirSHA := ""
+	rootObjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, event.SHA, forgejo.GetTreesOptions{Recursive: false})
+	if err != nil {
+		return nil, err
+	}
+	for _, object := range rootObjects.Entries {
+		if object.Path == path {
+			if object.Type != "tree" {
+				return nil, fmt.Errorf("%s has been found but is not a directory", path)
+			}
+			dirSHA = object.SHA
+		}
+	}
+	if dirSHA == "" {
+		return nil, nil
+	}
+
+	var files []string
+	opts := forgejo.GetTreesOptions{Recursive: true, ListOptions: forgejo.ListOptions{PageSize: 100, Page: 1}}
+	for {
+		dirObjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, dirSHA, opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range dirObjects.Entries {
+			if entry.Type == "blob" && strings.HasSuffix(entry.Path, ".md") {
+				files = append(files, path+"/"+entry.Path)
+			}
+		}
+		if !dirObjects.Truncated {
+			break
+		}
+		opts.Page++
+	}
+	return files, nil
+}
+
 func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, path, target string) (string, error) {
 	ref := runevent.SHA
 	if target != "" {
