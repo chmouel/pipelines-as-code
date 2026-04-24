@@ -84,6 +84,22 @@ func (a *Assembler) BuildContext(
 		}
 	}
 
+	if contextConfig.DiffContent {
+		if diffData, err := a.buildDiffContent(ctx, event, provider); err != nil {
+			a.logger.Warnf("Failed to get pull request diff: %v", err)
+		} else if diffData != "" {
+			contextData["code_diff"] = diffData
+		}
+	}
+
+	if len(contextConfig.Files) > 0 {
+		if fileData, err := a.buildFileContext(ctx, event, provider, contextConfig.Files); err != nil {
+			a.logger.Warnf("Failed to fetch repository files: %v", err)
+		} else if len(fileData) > 0 {
+			contextData["repository_files"] = fileData
+		}
+	}
+
 	// Always include basic pipeline information
 	contextData["pipeline"] = a.buildBasicPipelineContext(pipelineRun, event)
 
@@ -271,6 +287,45 @@ func (a *Assembler) buildContainerLogs(ctx context.Context, pipelineRun *tektonv
 		"failed_tasks_logs": logs,
 		"max_lines":         maxLines,
 	}
+}
+
+const maxDiffSize = 10000
+
+// buildDiffContent fetches the pull request diff from the provider.
+func (a *Assembler) buildDiffContent(ctx context.Context, event *info.Event, prov provider.Interface) (string, error) {
+	if prov == nil || event == nil {
+		return "", fmt.Errorf("provider or event is nil")
+	}
+
+	diff, err := prov.GetPullRequestDiff(ctx, event)
+	if err != nil {
+		return "", err
+	}
+
+	if len(diff) > maxDiffSize {
+		diff = diff[:maxDiffSize] + "\n[diff truncated]"
+	}
+
+	return diff, nil
+}
+
+// buildFileContext fetches repository files and returns them as a map of path -> content.
+func (a *Assembler) buildFileContext(ctx context.Context, event *info.Event, prov provider.Interface, files []string) (map[string]string, error) {
+	if prov == nil || event == nil {
+		return nil, fmt.Errorf("provider or event is nil")
+	}
+
+	result := make(map[string]string, len(files))
+	for _, filePath := range files {
+		content, err := prov.GetFileInsideRepo(ctx, event, filePath, "")
+		if err != nil {
+			a.logger.Warnf("Could not fetch file %q: %v", filePath, err)
+			continue
+		}
+		result[filePath] = content
+	}
+
+	return result, nil
 }
 
 // BuildCELContext builds context data for CEL expression evaluation.

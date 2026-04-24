@@ -87,10 +87,17 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 func checkStateAndEnqueue(impl *controller.Impl) func(obj any) {
 	return func(obj any) {
 		object, err := kmeta.DeletionHandlingAccessor(obj)
-		if err == nil {
-			_, exist := object.GetAnnotations()[keys.State]
-			if exist {
-				impl.EnqueueKey(types.NamespacedName{Namespace: object.GetNamespace(), Name: object.GetName()})
+		if err != nil {
+			return
+		}
+		annotations := object.GetAnnotations()
+		if _, exist := annotations[keys.State]; exist {
+			impl.EnqueueKey(types.NamespacedName{Namespace: object.GetNamespace(), Name: object.GetName()})
+			return
+		}
+		if annotations[keys.LLMAnalysis] == "true" {
+			if parentName := annotations[keys.LLMParentPipelineRun]; parentName != "" {
+				impl.EnqueueKey(types.NamespacedName{Namespace: object.GetNamespace(), Name: parentName})
 			}
 		}
 	}

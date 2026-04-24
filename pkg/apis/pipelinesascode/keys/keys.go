@@ -64,13 +64,18 @@ const (
 	SCMReportingPLRStarted = pipelinesascode.GroupName + "/scm-reporting-plr-started"
 	SecretCreated          = pipelinesascode.GroupName + "/secret-created"
 	CloneURL               = pipelinesascode.GroupName + "/clone-url"
+	LLMAnalysis            = pipelinesascode.GroupName + "/llm-analysis"
+	LLMBackend             = pipelinesascode.GroupName + "/llm-backend"
+	LLMRole                = pipelinesascode.GroupName + "/llm-role"
+	LLMOutput              = pipelinesascode.GroupName + "/llm-output"
+	LLMParentPipelineRun   = pipelinesascode.GroupName + "/llm-parent-pipelinerun"
+	LLMCollected           = pipelinesascode.GroupName + "/llm-collected"
+	LLMResultSummary       = pipelinesascode.GroupName + "/llm-result-summary"
 	// PublicGithubAPIURL default is "https://api.github.com" but it can be overridden by X-GitHub-Enterprise-Host header.
 	PublicGithubAPIURL   = "https://api.github.com"
 	GithubApplicationID  = "github-application-id"
 	GithubPrivateKey     = "github-private-key"
 	ResultsRecordSummary = "results.tekton.dev/recordSummaryAnnotations"
-
-	SpanContextAnnotation = "tekton.dev/pipelinerunSpanContext"
 )
 
 var ParamsRe = regexp.MustCompile(`{{([^}]{2,})}}`)

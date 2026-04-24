@@ -661,6 +661,18 @@ func (v *Provider) fetchChangedFiles(_ context.Context, runevent *info.Event) (c
 	return changedFiles, nil
 }
 
+// GetPullRequestDiff returns the unified diff for a pull request.
+func (v *Provider) GetPullRequestDiff(_ context.Context, runevent *info.Event) (string, error) {
+	if runevent.PullRequestNumber == 0 {
+		return "", nil
+	}
+	rawDiff, _, err := v.Client().GetPullRequestDiff(runevent.Organization, runevent.Repository, int64(runevent.PullRequestNumber), forgejo.PullRequestDiffOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get pull request diff: %w", err)
+	}
+	return string(rawDiff), nil
+}
+
 func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {
 	return "", nil
 }

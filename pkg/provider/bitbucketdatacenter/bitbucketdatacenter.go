@@ -368,6 +368,10 @@ func (v *Provider) GetConfig() *info.ProviderConfig {
 }
 
 // GetFiles gets and caches the list of files changed by a given event.
+func (v *Provider) GetPullRequestDiff(_ context.Context, _ *info.Event) (string, error) {
+	return "", nil
+}
+
 func (v *Provider) GetFiles(ctx context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
 	if v.cachedChangedFiles == nil {
 		changes, err := v.fetchChangedFiles(ctx, runevent)

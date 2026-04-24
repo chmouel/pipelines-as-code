@@ -30,6 +30,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/settings"
+	pac "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelineascode"
 	prmetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/pipelinerunmetrics"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
@@ -73,10 +74,33 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 		return nil
 	}
 
-	// if pipelineRun is in completed or failed state then return
+	// if pipelineRun is in completed or failed state then return early,
+	// unless LLM analysis is enabled and needs follow-up.
 	state, exist := pr.GetAnnotations()[keys.State]
 	if exist && (state == kubeinteraction.StateCompleted || state == kubeinteraction.StateFailed) {
+		repoName := pr.GetAnnotations()[keys.Repository]
+		repo, err := r.repoLister.Repositories(pr.Namespace).Get(repoName)
+		if err != nil {
+			return nil //nolint:nilerr
+		}
+		if repo.Spec.Settings == nil || repo.Spec.Settings.AIAnalysis == nil || !repo.Spec.Settings.AIAnalysis.Enabled {
+			return nil
+		}
+		if err := r.loadControllerInfo(pr); err != nil {
+			return err
+		}
+		detectedProvider, event, err := r.initGitProviderClient(ctx, logger, repo, pr)
+		if err != nil {
+			return fmt.Errorf("cannot initialize git provider client for llm follow-up: %w", err)
+		}
+		if err := r.performLLMAnalysis(ctx, logger, repo, pr, event, detectedProvider); err != nil {
+			return fmt.Errorf("llm analysis follow-up failed: %w", err)
+		}
 		return nil
+	}
+
+	if err := r.loadControllerInfo(pr); err != nil {
+		return err
 	}
 
 	repoName := pr.GetAnnotations()[keys.Repository]
@@ -87,24 +111,6 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 
 	// use same pac opts across the reconciliation
 	pacInfo := r.run.Info.GetPacOpts()
-
-	// If we have a controllerInfo annotation, then we need to get the
-	// configmap configuration for it
-	//
-	// The annotation is a json string with a label, the pac controller
-	// configmap and the GitHub app secret .
-	//
-	// We always assume the controller is in the same namespace as the original
-	// controller but that may changes
-	if controllerInfo, ok := pr.GetAnnotations()[keys.ControllerInfo]; ok {
-		var parsedControllerInfo *info.ControllerInfo
-		if err := json.Unmarshal([]byte(controllerInfo), &parsedControllerInfo); err != nil {
-			return fmt.Errorf("failed to parse controllerInfo: %w", err)
-		}
-		r.run.Info.Controller = parsedControllerInfo
-	} else {
-		r.run.Info.Controller = info.GetControllerInfoFromEnvOrDefault()
-	}
 
 	if secretCreated, ok := pr.GetAnnotations()[keys.SecretCreated]; ok && secretCreated == "false" && pacInfo.SecretAutoCreation {
 		// if secret creation is true then return anyway from createSecretForPipelineRun function
@@ -200,6 +206,28 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 	return nil
 }
 
+func (r *Reconciler) loadControllerInfo(pr *tektonv1.PipelineRun) error {
+	// If we have a controllerInfo annotation, then we need to get the
+	// configmap configuration for it.
+	//
+	// The annotation is a json string with a label, the pac controller
+	// configmap and the GitHub app secret.
+	//
+	// We always assume the controller is in the same namespace as the original
+	// controller but that may change.
+	if controllerInfo, ok := pr.GetAnnotations()[keys.ControllerInfo]; ok {
+		var parsedControllerInfo *info.ControllerInfo
+		if err := json.Unmarshal([]byte(controllerInfo), &parsedControllerInfo); err != nil {
+			return fmt.Errorf("failed to parse controllerInfo: %w", err)
+		}
+		r.run.Info.Controller = parsedControllerInfo
+		return nil
+	}
+
+	r.run.Info.Controller = info.GetControllerInfoFromEnvOrDefault()
+	return nil
+}
+
 func (r *Reconciler) createSecretForPipelineRun(ctx context.Context, logger *zap.SugaredLogger, pr *tektonv1.PipelineRun, repo *v1alpha1.Repository) error {
 	var gitAuthSecretName string
 	// as GitAuthSecret annotation is added to the PipelineRun in getPipelineRunsFromRepo function
@@ -285,9 +313,9 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	r.run.Clients.ConsoleUI().SetParams(maptemplate)
 
 	if event.InstallationID > 0 {
-		event.Provider.WebhookSecret, _ = secrets.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
+		event.Provider.WebhookSecret, _ = pac.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
 	} else {
-		secretFromRepo := secrets.SecretFromRepository{
+		secretFromRepo := pac.SecretFromRepository{
 			K8int:       r.kinteract,
 			Config:      provider.GetConfig(),
 			Event:       event,
@@ -310,7 +338,7 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	}
 
 	finalState := kubeinteraction.StateCompleted
-	newPr, trStatus, err := r.postFinalStatus(ctx, logger, pacInfo, provider, event, pr)
+	newPr, err := r.postFinalStatus(ctx, logger, pacInfo, provider, event, pr)
 	if err != nil {
 		logger.Errorf("failed to post final status, moving on: %v", err)
 		finalState = kubeinteraction.StateFailed
@@ -336,8 +364,6 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	if err := r.emitMetrics(ctx, pr); err != nil {
 		logger.Error("failed to emit metrics: ", err)
 	}
-
-	emitTimingSpans(logger, pr, &pacInfo.Settings, trStatus)
 
 	// remove pipelineRun from Queue and start the next one
 	for {
@@ -423,7 +449,7 @@ func (r *Reconciler) initGitProviderClient(ctx context.Context, logger *zap.Suga
 
 	// installation ID indicates Github App installation
 	if event.InstallationID > 0 {
-		event.Provider.WebhookSecret, _ = secrets.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
+		event.Provider.WebhookSecret, _ = pac.GetCurrentNSWebhookSecret(ctx, r.kinteract, r.run)
 	} else {
 		// secretNS is needed when git provider is other than Github App.
 		secretNS := repo.GetNamespace()
@@ -434,7 +460,7 @@ func (r *Reconciler) initGitProviderClient(ctx context.Context, logger *zap.Suga
 			repo.Spec.Merge(r.globalRepo.Spec)
 		}
 
-		secretFromRepo := secrets.SecretFromRepository{
+		secretFromRepo := pac.SecretFromRepository{
 			K8int:       r.kinteract,
 			Config:      detectedProvider.GetConfig(),
 			Event:       event,

@@ -28,6 +28,7 @@ type Interface interface {
 	GetCommitInfo(context.Context, *info.Event) error
 	GetConfig() *info.ProviderConfig
 	GetFiles(context.Context, *info.Event) (changedfiles.ChangedFiles, error)
+	GetPullRequestDiff(context.Context, *info.Event) (string, error)
 	GetTaskURI(ctx context.Context, event *info.Event, uri string) (bool, string, error)
 	CreateToken(context.Context, []string, *info.Event) (string, error)
 	CheckPolicyAllowing(context.Context, *info.Event, []string) (bool, string)

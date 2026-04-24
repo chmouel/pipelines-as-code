@@ -710,6 +710,33 @@ func (v *Provider) fetchChangedFiles(ctx context.Context, runevent *info.Event) 
 	return changedFiles, nil
 }
 
+// GetPullRequestDiff returns the unified diff for a pull request.
+func (v *Provider) GetPullRequestDiff(ctx context.Context, runevent *info.Event) (string, error) {
+	if runevent.PullRequestNumber == 0 {
+		return "", nil
+	}
+	opt := &github.ListOptions{PerPage: v.PaginedNumber}
+	var patches []string
+	for {
+		files, resp, err := wrapAPI(v, "list_pull_request_files_for_diff", func() ([]*github.CommitFile, *github.Response, error) {
+			return v.Client().PullRequests.ListFiles(ctx, runevent.Organization, runevent.Repository, runevent.PullRequestNumber, opt)
+		})
+		if err != nil {
+			return "", err
+		}
+		for _, f := range files {
+			if f.Patch != nil && *f.Patch != "" {
+				patches = append(patches, fmt.Sprintf("--- a/%s\n+++ b/%s\n%s", f.GetFilename(), f.GetFilename(), *f.Patch))
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
+	}
+	return strings.Join(patches, "\n"), nil
+}
+
 // getObject Get an object from a repository.
 func (v *Provider) getObject(ctx context.Context, sha string, runevent *info.Event) ([]byte, error) {
 	blob, _, err := wrapAPI(v, "get_blob", func() (*github.Blob, *github.Response, error) {
