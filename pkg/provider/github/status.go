@@ -71,13 +71,18 @@ func (v *Provider) fetchAllCheckRunPages(ctx context.Context, runevent *info.Eve
 
 func (v *Provider) searchCheckRuns(runs []*github.CheckRun, status providerstatus.StatusOpts) *int64 {
 	for _, checkrun := range runs {
+		if checkrun.ExternalID != nil && *checkrun.ExternalID == status.PipelineRunName {
+			return checkrun.ID
+		}
+	}
+	if status.SkipCheckRunReuse {
+		return nil
+	}
+	for _, checkrun := range runs {
 		if isPendingApprovalCheckrun(checkrun) || isFailedCheckrun(checkrun) {
 			if v.canIUseCheckrunID(checkrun.ID) {
 				return checkrun.ID
 			}
-		}
-		if checkrun.ExternalID != nil && *checkrun.ExternalID == status.PipelineRunName {
-			return checkrun.ID
 		}
 	}
 	return nil

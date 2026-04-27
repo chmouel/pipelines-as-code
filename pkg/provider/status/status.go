@@ -42,4 +42,5 @@ type StatusOpts struct {
 	InstanceCountForCheckRun int
 	AccessDenied             bool
 	Actions                  []CheckRunAction
+	SkipCheckRunReuse        bool
 }
