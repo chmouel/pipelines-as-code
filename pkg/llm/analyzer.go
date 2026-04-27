@@ -170,6 +170,24 @@ func buildRoleExecutions(
 		return nil, nil
 	}
 
+	changedFiles := []string{}
+	changedFilesError := false
+	if prov != nil {
+		files, err := prov.GetFiles(ctx, event)
+		if err != nil {
+			changedFilesError = true
+			logger.With(
+				"error", err,
+				"sha", event.SHA,
+				"pr_number", event.PullRequestNumber,
+				"repo", fmt.Sprintf("%s/%s", event.Organization, event.Repository),
+			).Warn("Continuing without changed files metadata")
+		} else {
+			files.RemoveDuplicates()
+			changedFiles = append(changedFiles, files.All...)
+		}
+	}
+
 	celContext, err := assembler.BuildCELContext(pr, event, repo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build CEL context: %w", err)
@@ -214,9 +232,11 @@ func buildRoleExecutions(
 		}
 
 		executions = append(executions, roleExecution{
-			Role:     role,
-			Request:  request,
-			Rendered: renderedPrompt,
+			Role:              role,
+			Request:           request,
+			Rendered:          renderedPrompt,
+			ChangedFiles:      append([]string(nil), changedFiles...),
+			ChangedFilesError: changedFilesError,
 		})
 	}
 

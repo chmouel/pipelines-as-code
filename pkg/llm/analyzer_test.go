@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -302,6 +303,12 @@ func TestExecuteAnalysisCreatesPipelineRunFromRepositorySkill(t *testing.T) {
 	repo.Spec.Settings.AIAnalysis.Roles = nil
 	pr := failedPipelineRun()
 	event := testEvent()
+	event.PullRequestNumber = 42
+	event.PullRequestTitle = "Notify Tekton changes"
+	event.BaseBranch = "main"
+	event.HeadBranch = "feature/notify"
+	event.Organization = "owner"
+	event.Repository = "repo"
 	prov := &tprovider.TestProviderImp{
 		FilesInsideRepo: map[string]string{
 			roles.Path("failure-analysis"): `---
@@ -314,6 +321,7 @@ context_items:
 Analyze the failure and suggest a fix.
 `,
 		},
+		WantAllChangedFiles: []string{".tekton/pipeline.yaml", "README.md"},
 	}
 
 	err := ExecuteAnalysis(context.Background(), run, &kubeinteraction.Interaction{}, testLogger, repo, pr, event, prov)
@@ -336,6 +344,73 @@ Analyze the failure and suggest a fix.
 	}
 	assert.Equal(t, envMap["LLM_MAX_TOKENS"], "321")
 	assert.Assert(t, envMap["LLM_PROMPT_B64"] != "")
+	assert.Equal(t, envMap["CI"], "true")
+	assert.Equal(t, envMap["PAC_LLM_EXECUTION_CONTEXT"], "ci")
+	assert.Equal(t, envMap["PAC_LLM_PIPELINERUN_KIND"], "analysis")
+	assert.Equal(t, envMap["PAC_PR_NUMBER"], "42")
+	assert.Equal(t, envMap["PAC_PR_TITLE"], "Notify Tekton changes")
+	assert.Equal(t, envMap["PAC_BASE_BRANCH"], "main")
+	assert.Equal(t, envMap["PAC_HEAD_BRANCH"], "feature/notify")
+	assert.Equal(t, envMap["PAC_REPO_OWNER"], "owner")
+	assert.Equal(t, envMap["PAC_REPO_NAME"], "repo")
+	assert.Equal(t, envMap["PAC_REPO_URL"], "https://github.com/owner/repo")
+	changedFiles, err := base64.StdEncoding.DecodeString(envMap["PAC_CHANGED_FILES_B64"])
+	assert.NilError(t, err)
+	assert.Equal(t, string(changedFiles), ".tekton/pipeline.yaml\nREADME.md")
+	assert.Equal(t, envMap["PAC_CHANGED_FILES_ERROR"], "")
+}
+
+func TestExecuteAnalysisMarksChangedFilesErrorInPipelineRunEnv(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	tekton := fakepipelineclientset.NewSimpleClientset() //nolint:staticcheck
+	run := &params.Run{
+		Clients: paramclients.Clients{
+			Tekton: tekton,
+		},
+		Info: info.Info{
+			Pac: &info.PacOpts{
+				Settings: settings.DefaultSettings(),
+			},
+		},
+	}
+
+	repo := testAIRepository()
+	repo.Spec.Settings.AIAnalysis.Roles = nil
+	pr := failedPipelineRun()
+	event := testEvent()
+	event.PullRequestNumber = 42
+	event.Organization = "owner"
+	event.Repository = "repo"
+	prov := &tprovider.TestProviderImp{
+		FilesInsideRepo: map[string]string{
+			roles.Path("failure-analysis"): `---
+name: failure-analysis
+output: check-run
+---
+Analyze the failure and suggest a fix.
+`,
+		},
+		WantGetFilesError: "provider files unavailable",
+	}
+
+	err := ExecuteAnalysis(context.Background(), run, &kubeinteraction.Interaction{}, testLogger, repo, pr, event, prov)
+	assert.NilError(t, err)
+
+	analysisPRs, err := tekton.TektonV1().PipelineRuns(pr.Namespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: keys.LLMAnalysis + "=true",
+	})
+	assert.NilError(t, err)
+	assert.Equal(t, len(analysisPRs.Items), 1)
+
+	analysisStep := analysisPRs.Items[0].Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[1]
+	envMap := map[string]string{}
+	for _, env := range analysisStep.Env {
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		}
+	}
+	assert.Equal(t, envMap["PAC_CHANGED_FILES_B64"], "")
+	assert.Equal(t, envMap["PAC_CHANGED_FILES_ERROR"], "true")
 }
 
 func TestExecuteAnalysisRunsCRAndRepositoryRoles(t *testing.T) {
