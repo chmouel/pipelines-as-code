@@ -6,6 +6,7 @@ repo_url="${REPO_URL}"
 repo_dir="${REPO_DIR:-/workspace/source}"
 # shellcheck disable=SC2153
 pr_branch="${PR_BRANCH}"
+# shellcheck disable=SC2153
 pr_number="${PR_NUMBER}"
 expected_sha="${EXPECTED_SHA:-}"
 role_name="${ROLE_NAME:-AI analysis}"
@@ -26,7 +27,7 @@ emit_envelope() {
   echo "===ANALYSIS_BEGIN==="
   cat "${envelope_file}"
   echo "===ANALYSIS_END==="
-  cat "${envelope_file}" >"${result_file}"
+  cat "${envelope_file}" > "${result_file}"
 }
 
 # Setup git credentials for push
@@ -130,17 +131,16 @@ EOF
   jq -n \
     --arg content "We have successfully applied ${commit_short_sha} to the branch \`${pr_branch}\`
 
-Go to the pull request checks to see the changes and verify that the fix looks
-correct. If you have any feedback on the fix, please leave a comment on the
-pull request.
+Go back to the pull request #${pr_number} checks to see if the changes have been validated properly.
 
 Files modified:
 ${changed_files}" \
     --arg commit_sha "${commit_sha}" \
     --arg commit_short_sha "${commit_short_sha}" \
     --arg branch "${pr_branch}" \
+    --arg pr_number "${pr_number}" \
     --arg changed_files "${changed_files}" \
-    '{status: "success", backend: "patch-apply", model: "", content: $content, tokens_used: 0, duration_ms: 0, metadata: {commit_sha: $commit_sha, commit_short_sha: $commit_short_sha, branch: $branch, changed_files: $changed_files}}' >/tmp/fix-envelope.json
+    '{status: "success", backend: "patch-apply", model: "", content: $content, tokens_used: 0, duration_ms: 0, metadata: {commit_sha: $commit_sha, commit_short_sha: $commit_short_sha, branch: $branch, pr_number: $pr_number, changed_files: $changed_files}}' >/tmp/fix-envelope.json
   emit_envelope /tmp/fix-envelope.json
 else
   echo "fix: git apply failed" >&2
