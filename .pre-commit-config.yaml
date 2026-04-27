@@ -20,6 +20,7 @@ repos:
     hooks:
       - id: codespell
         files: "^(docs/content|pkg|test)/.*"
+        exclude: "pkg/llm/templates/analysis.sh"
   - repo: local
     hooks:
       - id: test

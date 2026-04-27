@@ -728,7 +728,6 @@ func TestGetFileInsideRepo(t *testing.T) {
 	}
 }
 
-
 func TestGetFileInsideRepoRefSelection(t *testing.T) {
 	fileContent := base64.StdEncoding.EncodeToString([]byte("valid owners file"))
 	tests := []struct {
@@ -801,7 +800,6 @@ func TestGetFileInsideRepoRefSelection(t *testing.T) {
 		})
 	}
 }
-
 
 func TestListDirFilesInsideRepo(t *testing.T) {
 	tests := []struct {
