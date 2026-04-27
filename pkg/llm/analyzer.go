@@ -428,6 +428,7 @@ func analysisCheckRunStatusOpts(roleName, parentName, sha string) status.StatusO
 		OriginalPipelineRunName: analysisCheckRunName(roleName),
 		Title:                   fmt.Sprintf("AI Analysis - %s", roleName),
 		PipelineRun:             nil, // Don't patch any PipelineRun annotations
+		SkipCheckRunReuse:       true,
 	}
 }
 

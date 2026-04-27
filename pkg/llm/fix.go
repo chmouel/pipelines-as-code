@@ -86,6 +86,7 @@ func FixCheckRunStatusOpts(parentName, roleName, sha string) status.StatusOpts {
 		OriginalPipelineRunName: fmt.Sprintf("AI Fix / %s", roleName),
 		Title:                   fmt.Sprintf("AI Fix - %s", roleName),
 		PipelineRun:             nil,
+		SkipCheckRunReuse:       true,
 	}
 }
 

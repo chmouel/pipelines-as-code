@@ -134,7 +134,8 @@ Rules:
 - Do not modify files for broad refactors or binary files.
 - Do not print patch markers or raw diff text in your response.
 - Do not say you cannot modify files unless you first inspect the repository checkout.
-- Explain the root cause and the intended fix in normal prose.
+- Explain the root cause, cite the supporting evidence, and describe the intended fix in normal prose.
+- Describe the fix as a proposed pull request change, not as an already deployed or verified runtime outcome.
 
 PATCHINSTRUCTIONS
 
