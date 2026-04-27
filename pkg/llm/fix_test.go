@@ -420,18 +420,72 @@ func TestQueuedFixCheckRunStatusOptsHasFriendlyText(t *testing.T) {
 	assert.Assert(t, contains(opts.Text, "applying the AI-generated patch for role \"reviewer\""))
 }
 
-func TestBuildFixCommitMessageUsesAnalysisSummary(t *testing.T) {
-	subject, body := buildFixCommitMessage("reviewer", "Avoid creating a second check run when applying suggestions.\nUpdate the existing analysis check run instead.")
-	assert.Equal(t, subject, "fix: Avoid creating a second check run when applying suggestions")
-	assert.Assert(t, contains(body, "Apply the AI-generated fix for role \"reviewer\"."))
-	assert.Assert(t, contains(body, "Why this change:"))
-	assert.Assert(t, contains(body, "Update the existing analysis check run instead"))
+func TestBuildFixCommitMessageUsesMetadata(t *testing.T) {
+	metadata := map[string]string{
+		"commit_subject": "fix: avoid creating a second check run when applying suggestions",
+		"commit_body":    "The check-run reuse logic was bypassed for fix runs.",
+	}
+	subject, body := buildFixCommitMessage("reviewer", metadata)
+	assert.Equal(t, subject, "fix: avoid creating a second check run when applying suggestions")
+	assert.Equal(t, body, "The check-run reuse logic was bypassed for fix runs.")
 }
 
-func TestBuildFixCommitMessageFallsBackWhenAnalysisIsEmpty(t *testing.T) {
-	subject, body := buildFixCommitMessage("reviewer", "")
+func TestBuildFixCommitMessageFallsBackWhenMetadataIsEmpty(t *testing.T) {
+	subject, body := buildFixCommitMessage("reviewer", map[string]string{})
 	assert.Equal(t, subject, "fix: address reviewer findings")
 	assert.Equal(t, body, "Apply the AI-generated fix for role \"reviewer\".")
+}
+
+func TestBuildFixCommitMessageFallsBackWhenMetadataIsNil(t *testing.T) {
+	subject, body := buildFixCommitMessage("reviewer", nil)
+	assert.Equal(t, subject, "fix: address reviewer findings")
+	assert.Equal(t, body, "Apply the AI-generated fix for role \"reviewer\".")
+}
+
+func TestBuildFixCommitMessageSubjectOnly(t *testing.T) {
+	metadata := map[string]string{
+		"commit_subject": "fix: handle nil pointer in auth handler",
+	}
+	subject, body := buildFixCommitMessage("reviewer", metadata)
+	assert.Equal(t, subject, "fix: handle nil pointer in auth handler")
+	assert.Equal(t, body, "Apply the AI-generated fix for role \"reviewer\".")
+}
+
+func TestBuildFixCommitMessageStripsMarkdownFences(t *testing.T) {
+	metadata := map[string]string{
+		"commit_subject": "```text\nfix: restrict tekton-pr-notify skill execution to CI context\n```",
+		"commit_body":    "```\nThe skill should only run when PAC_LLM_EXECUTION_CONTEXT=ci is present.\n```",
+	}
+	subject, body := buildFixCommitMessage("reviewer", metadata)
+	assert.Equal(t, subject, "fix: restrict tekton-pr-notify skill execution to CI context")
+	assert.Equal(t, body, "The skill should only run when PAC_LLM_EXECUTION_CONTEXT=ci is present.")
+}
+
+func TestBuildFixCommitMessageTruncatesLongSubject(t *testing.T) {
+	metadata := map[string]string{
+		"commit_subject": "fix: " + strings.Repeat("a very long description ", 5),
+	}
+	subject, _ := buildFixCommitMessage("reviewer", metadata)
+	assert.Assert(t, len(subject) <= fixCommitSubjectMaxLen)
+}
+
+func TestBuildFixCommitMessageSplitsOverflowIntoBody(t *testing.T) {
+	long := "fix: remove scheduling constraints blocking nginx deployment The deployment specified a nodeSelector for ssd/gpu nodes that do not exist"
+	metadata := map[string]string{
+		"commit_subject": long,
+	}
+	subject, body := buildFixCommitMessage("reviewer", metadata)
+	assert.Assert(t, len(subject) <= fixCommitSubjectMaxLen, "subject must fit in %d chars, got %d", fixCommitSubjectMaxLen, len(subject))
+	assert.Assert(t, contains(body, "nodeSelector"), "overflow should become the body")
+}
+
+func TestBuildFixCommitMessageTruncatesLongBody(t *testing.T) {
+	metadata := map[string]string{
+		"commit_subject": "fix: something",
+		"commit_body":    strings.Repeat("Long body text. ", 30),
+	}
+	_, body := buildFixCommitMessage("reviewer", metadata)
+	assert.Assert(t, len(body) <= fixCommitBodyMaxLen)
 }
 
 func TestFixScriptChecksRemoteBranchTip(t *testing.T) {
@@ -508,4 +562,126 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestAnalysisScriptCommitMessageExtraction(t *testing.T) {
+	assert.Assert(t, contains(analysisScriptContent, "commit_subject"), "analysis script should extract commit subject")
+	assert.Assert(t, contains(analysisScriptContent, "commit_body"), "analysis script should extract commit body")
+	assert.Assert(t, contains(analysisScriptContent, "Commit"), "analysis script should look for Commit message heading")
+	assert.Assert(t, contains(analysisScriptContent, "/^[[:space:]]*```/d"), "analysis script should drop markdown fence lines from commit metadata")
+}
+
+func TestFixScriptAuthorFallback(t *testing.T) {
+	assert.Assert(t, contains(fixScriptTemplateContent, "GIT_AUTHOR_NAME"), "should read author name from env")
+	assert.Assert(t, contains(fixScriptTemplateContent, "GIT_AUTHOR_EMAIL"), "should read author email from env")
+	assert.Assert(t, contains(fixScriptTemplateContent, "if [ -n \"${GIT_AUTHOR_NAME}\" ] && [ -n \"${GIT_AUTHOR_EMAIL}\" ]"), "should check both name and email")
+	assert.Assert(t, contains(fixScriptTemplateContent, "Pipelines as Code AI"), "should have fallback author")
+	assert.Assert(t, contains(fixScriptTemplateContent, "Co-authored-by:"), "should include co-author trailer")
+	assert.Assert(t, contains(fixScriptTemplateContent, "GIT_COAUTHOR_NAME"), "should read co-author name from env")
+	assert.Assert(t, contains(fixScriptTemplateContent, "GIT_COAUTHOR_EMAIL"), "should read co-author email from env")
+}
+
+func TestBuildFixPipelineRunAuthorEnvVars(t *testing.T) {
+	config := &v1alpha1.AIAnalysisConfig{
+		Backend:   "claude",
+		Image:     "test:latest",
+		SecretRef: &v1alpha1.Secret{Name: "test-secret", Key: "token"},
+		Roles:     []v1alpha1.AnalysisRole{{Name: "reviewer", Prompt: "fix it"}},
+	}
+	parent := failedPipelineRun()
+
+	t.Run("with trustworthy author", func(t *testing.T) {
+		event := &info.Event{
+			HeadBranch:     "feature-branch",
+			URL:            "https://github.com/test/repo",
+			SHA:            "abc123",
+			SHAAuthorName:  "Jane Developer",
+			SHAAuthorEmail: "jane@example.com",
+		}
+
+		pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", "ghcr.io/git:latest")
+
+		// Extract env vars from the fix step
+		task := pr.Spec.PipelineSpec.Tasks[0]
+		fixStep := task.TaskSpec.Steps[1]
+		envMap := make(map[string]string)
+		for _, env := range fixStep.Env {
+			envMap[env.Name] = env.Value
+		}
+
+		assert.Equal(t, envMap["GIT_AUTHOR_NAME"], "Jane Developer")
+		assert.Equal(t, envMap["GIT_AUTHOR_EMAIL"], "jane@example.com")
+		assert.Equal(t, envMap["GIT_COAUTHOR_NAME"], "Pipelines as Code AI")
+		assert.Equal(t, envMap["GIT_COAUTHOR_EMAIL"], "noreply@pipelinesascode.dev")
+	})
+
+	t.Run("without author", func(t *testing.T) {
+		event := &info.Event{
+			HeadBranch: "feature-branch",
+			URL:        "https://github.com/test/repo",
+			SHA:        "abc123",
+			// No SHAAuthorName or SHAAuthorEmail
+		}
+
+		pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", "ghcr.io/git:latest")
+
+		// Extract env vars from the fix step
+		task := pr.Spec.PipelineSpec.Tasks[0]
+		fixStep := task.TaskSpec.Steps[1]
+		envMap := make(map[string]string)
+		for _, env := range fixStep.Env {
+			envMap[env.Name] = env.Value
+		}
+
+		// Should have empty strings, shell script will use fallback
+		assert.Equal(t, envMap["GIT_AUTHOR_NAME"], "")
+		assert.Equal(t, envMap["GIT_AUTHOR_EMAIL"], "")
+		assert.Equal(t, envMap["GIT_COAUTHOR_NAME"], "Pipelines as Code AI")
+		assert.Equal(t, envMap["GIT_COAUTHOR_EMAIL"], "noreply@pipelinesascode.dev")
+	})
+}
+
+func TestPatchPayloadBase64Validation(t *testing.T) {
+	tests := []struct {
+		name      string
+		payload   string
+		wantError bool
+	}{
+		{
+			name:      "valid base64",
+			payload:   base64.StdEncoding.EncodeToString([]byte("valid patch data")),
+			wantError: false,
+		},
+		{
+			name:      "invalid base64 with bad chars",
+			payload:   "not!valid@base64#data",
+			wantError: true,
+		},
+		{
+			name:      "truncated base64",
+			payload:   "SGVsbG8gV29ybGQ",
+			wantError: true,
+		},
+		{
+			name:      "empty payload",
+			payload:   "",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := base64.StdEncoding.DecodeString(tt.payload)
+			if tt.wantError {
+				assert.Assert(t, err != nil, "expected base64 decode error for payload %q", tt.payload)
+			} else {
+				assert.NilError(t, err)
+			}
+		})
+	}
+}
+
+func TestFixScriptEmptyPatchGuard(t *testing.T) {
+	assert.Assert(t, contains(fixScriptTemplateContent, "if [ -z \"${PATCH_DATA_B64GZ}\" ]"), "should check for empty patch data")
+	assert.Assert(t, contains(fixScriptTemplateContent, "empty_patch"), "should report empty_patch error type")
 }

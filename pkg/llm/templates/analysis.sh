@@ -219,6 +219,27 @@ if printf '%s' "${output}" | grep -qF "===LLM_PATCH_BEGIN==="; then
 	output="$(printf '%s' "${output}" | sed 's/[[:space:]]*$//')"
 fi
 
+# Extract the "## Commit message" section from the AI output (if present).
+# First non-blank line becomes the subject, remaining lines become the body.
+commit_subject=""
+commit_body=""
+commit_section="$(printf '%s\n' "${output}" | awk '
+	/^## [Cc]ommit [Mm]essage/ { found=1; next }
+	found && /^## /            { exit }
+	found                      { print }
+')"
+if [ -n "${commit_section}" ]; then
+	commit_subject="$(printf '%s\n' "${commit_section}" | sed '/^[[:space:]]*$/d; /^[[:space:]]*```/d' | head -1)"
+	commit_body="$(printf '%s\n' "${commit_section}" | sed '/^[[:space:]]*$/d; /^[[:space:]]*```/d' | tail -n +2 | tr '\n' ' ' | sed 's/  */ /g; s/^ *//; s/ *$//')"
+fi
+
+# Strip the commit message section from the user-visible output.
+output="$(printf '%s\n' "${output}" | awk '
+	/^## [Cc]ommit [Mm]essage/ { skip=1; next }
+	skip && /^## /             { skip=0 }
+	!skip                      { print }
+')"
+
 capture_worktree_diff() {
 	repo="${repo_dir:-.}"
 	if ! git -C "${repo}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -270,11 +291,21 @@ if [ "${exit_code}" -eq 124 ]; then
 	exit 1
 elif [ "${exit_code}" -eq 0 ]; then
 	echo "===ANALYSIS_BEGIN==="
-	jq -n --arg backend "${backend}" \
-		--arg model "${model}" \
-		--arg content "${output}" \
-		--argjson duration_ms "${duration_ms}" \
-		'{status: "success", backend: $backend, model: $model, content: $content, tokens_used: 0, duration_ms: $duration_ms}'
+	if [ -n "${commit_subject}" ]; then
+		jq -n --arg backend "${backend}" \
+			--arg model "${model}" \
+			--arg content "${output}" \
+			--argjson duration_ms "${duration_ms}" \
+			--arg commit_subject "${commit_subject}" \
+			--arg commit_body "${commit_body}" \
+			'{status: "success", backend: $backend, model: $model, content: $content, tokens_used: 0, duration_ms: $duration_ms, metadata: {commit_subject: $commit_subject, commit_body: $commit_body}}'
+	else
+		jq -n --arg backend "${backend}" \
+			--arg model "${model}" \
+			--arg content "${output}" \
+			--argjson duration_ms "${duration_ms}" \
+			'{status: "success", backend: $backend, model: $model, content: $content, tokens_used: 0, duration_ms: $duration_ms}'
+	fi
 	echo "===ANALYSIS_END==="
 	emit_patch_block
 	echo '{"status":"complete"}' >"${result_file}"

@@ -29,9 +29,11 @@ const (
 	externalIDSeparator    = "|"
 	externalIDKindAnalysis = "llm-analysis"
 	externalIDKindFix      = "llm-fix"
-	fixCommitSubjectPrefix = "fix: "
 	fixCommitSubjectMaxLen = 72
 	fixCommitBodyMaxLen    = 320
+
+	coAuthorName  = "Pipelines as Code AI"
+	coAuthorEmail = "noreply@pipelinesascode.dev"
 
 	// maxInlinePatchBytes is the upper bound for a gzip+base64 patch payload that can
 	// be safely embedded in a Tekton step script. Patches beyond this size cannot be
@@ -99,118 +101,53 @@ func queuedFixCheckRunStatusOpts(parentName, roleName, sha string) status.Status
 	return statusOpts
 }
 
-func buildFixCommitMessage(roleName, analysisContent string) (string, string) {
-	lines := extractCommitMessageLines(analysisContent)
-	subjectCore := fmt.Sprintf("address %s findings", roleName)
-	if len(lines) > 0 {
-		subjectCore = firstSentence(lines[0])
-	}
-	subjectCore = strings.TrimSpace(strings.TrimRight(subjectCore, ".:;,-"))
-	if subjectCore == "" {
-		subjectCore = fmt.Sprintf("address %s findings", roleName)
+func buildFixCommitMessage(roleName string, metadata map[string]string) (string, string) {
+	subject := sanitizeCommitMessageField(metadata["commit_subject"])
+	body := sanitizeCommitMessageField(metadata["commit_body"])
+
+	if subject == "" {
+		subject = fmt.Sprintf("fix: address %s findings", roleName)
 	}
 
-	subject := truncateCommitMessage(fixCommitSubjectPrefix+subjectCore, fixCommitSubjectMaxLen)
-	body := fmt.Sprintf("Apply the AI-generated fix for role %q.", roleName)
-	if len(lines) > 0 {
-		bodyLines := []string{}
-		currentLen := 0
-		for _, line := range lines {
-			if line == "" {
-				continue
-			}
-			lineLen := len(line)
-			if currentLen > 0 && currentLen+1+lineLen > fixCommitBodyMaxLen {
-				break
-			}
-			bodyLines = append(bodyLines, line)
-			currentLen += lineLen
-			if currentLen >= fixCommitBodyMaxLen || len(bodyLines) == 2 {
-				break
-			}
-		}
-		if len(bodyLines) > 0 {
-			body = fmt.Sprintf("Apply the AI-generated fix for role %q.\n\nWhy this change:\n%s", roleName, strings.Join(bodyLines, "\n"))
-		}
+	// When the AI puts subject+body on one line, split the overflow into body.
+	if len(subject) > fixCommitSubjectMaxLen && body == "" {
+		truncated := truncateCommitMessage(subject, fixCommitSubjectMaxLen)
+		body = strings.TrimSpace(subject[len(truncated):])
+		subject = truncated
+	} else {
+		subject = truncateCommitMessage(subject, fixCommitSubjectMaxLen)
+	}
+
+	if body == "" {
+		body = fmt.Sprintf("Apply the AI-generated fix for role %q.", roleName)
+	}
+	if len(body) > fixCommitBodyMaxLen {
+		body = truncateCommitMessage(body, fixCommitBodyMaxLen)
 	}
 
 	return subject, body
 }
 
-func extractCommitMessageLines(analysisContent string) []string {
-	cleaned := normalizeAnalysisContent(analysisContent)
-	if cleaned == "" {
-		return nil
+func sanitizeCommitMessageField(text string) string {
+	if text == "" {
+		return ""
 	}
 
-	lines := []string{}
-	inCodeBlock := false
-	for _, rawLine := range strings.Split(cleaned, "\n") {
+	lines := make([]string, 0, len(strings.Split(text, "\n")))
+	inFence := false
+	for _, rawLine := range strings.Split(text, "\n") {
 		line := strings.TrimSpace(rawLine)
-		if line == "" {
-			continue
-		}
 		if strings.HasPrefix(line, "```") {
-			inCodeBlock = !inCodeBlock
+			inFence = !inFence
 			continue
 		}
-		if inCodeBlock {
-			continue
-		}
-
-		line = sanitizeCommitMessageLine(line)
 		if line == "" {
 			continue
 		}
 		lines = append(lines, line)
 	}
-	return lines
-}
 
-func sanitizeCommitMessageLine(line string) string {
-	line = strings.TrimSpace(line)
-	line = strings.TrimLeft(line, "#> ")
-	line = checklistLinePattern.ReplaceAllString(line, "")
-	line = trimOrderedListPrefix(line)
-	line = strings.TrimLeft(line, "-* ")
-
-	lowered := strings.ToLower(line)
-	for _, prefix := range []string{"root cause:", "cause:", "fix:", "summary:", "issue:"} {
-		if strings.HasPrefix(lowered, prefix) {
-			line = strings.TrimSpace(line[len(prefix):])
-			break
-		}
-	}
-
-	replacer := strings.NewReplacer("`", "", "**", "", "__", "", "*", "")
-	line = replacer.Replace(line)
-	line = strings.Join(strings.Fields(line), " ")
-	line = strings.TrimSpace(strings.TrimRight(line, ".:;,-"))
-	return line
-}
-
-func trimOrderedListPrefix(line string) string {
-	if line == "" {
-		return line
-	}
-	i := 0
-	for i < len(line) && line[i] >= '0' && line[i] <= '9' {
-		i++
-	}
-	if i == 0 || i+1 >= len(line) || line[i] != '.' || line[i+1] != ' ' {
-		return line
-	}
-	return strings.TrimSpace(line[i+2:])
-}
-
-func firstSentence(line string) string {
-	for i, r := range line {
-		switch r {
-		case '.', '!', '?':
-			return strings.TrimSpace(line[:i])
-		}
-	}
-	return strings.TrimSpace(line)
+	return strings.Join(strings.Fields(strings.Join(lines, " ")), " ")
 }
 
 func truncateCommitMessage(text string, maxLen int) string {
@@ -224,7 +161,7 @@ func truncateCommitMessage(text string, maxLen int) string {
 	return strings.TrimSpace(text[:cutoff])
 }
 
-func loadAnalysisContentForCheckRun(ctx context.Context, run *params.Run, namespace, parentName, roleName string) (string, error) {
+func loadAnalysisContentForCheckRun(ctx context.Context, run *params.Run, namespace, parentName, roleName string) (string, map[string]string, error) {
 	selector := fmt.Sprintf("%s=%s,%s=%s,%s=%s",
 		keys.LLMAnalysis, formatting.CleanValueKubernetes("true"),
 		keys.LLMParentPipelineRun, formatting.CleanValueKubernetes(parentName),
@@ -232,21 +169,21 @@ func loadAnalysisContentForCheckRun(ctx context.Context, run *params.Run, namesp
 	)
 	prs, err := run.Clients.Tekton.TektonV1().PipelineRuns(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
-		return "", fmt.Errorf("failed to list analysis PipelineRuns: %w", err)
+		return "", nil, fmt.Errorf("failed to list analysis PipelineRuns: %w", err)
 	}
 	if len(prs.Items) == 0 {
-		return "", fmt.Errorf("no analysis PipelineRun found for parent %s role %s", parentName, roleName)
+		return "", nil, fmt.Errorf("no analysis PipelineRun found for parent %s role %s", parentName, roleName)
 	}
 
 	analysisPR := prs.Items[0]
 	result, _ := parsePipelineRunEnvelope(ctx, run, &analysisPR)
 	if result.Response == nil {
 		if result.Error != nil {
-			return "", result.Error
+			return "", nil, result.Error
 		}
-		return "", fmt.Errorf("analysis result is unavailable")
+		return "", nil, fmt.Errorf("analysis result is unavailable")
 	}
-	return result.Response.Content, nil
+	return result.Response.Content, result.Metadata, nil
 }
 
 // loadPatchForFix retrieves the machine patch from the original analysis child PipelineRun logs.
@@ -285,6 +222,11 @@ func loadPatchForFix(ctx context.Context, run *params.Run, namespace, parentName
 	if err != nil {
 		return nil, "", fmt.Errorf("invalid machine patch: %w", err)
 	}
+
+	if _, err := base64.StdEncoding.DecodeString(payload); err != nil {
+		return nil, "", fmt.Errorf("patch payload is not valid base64: %w", err)
+	}
+
 	return meta, payload, nil
 }
 
@@ -350,11 +292,14 @@ func CreateFixPipelineRun(
 	if err != nil {
 		return fmt.Errorf("cannot find parent PipelineRun %s: %w", parentName, err)
 	}
-	analysisContent, err := loadAnalysisContentForCheckRun(ctx, run, repo.Namespace, parentName, roleName)
+	_, analysisMetadata, err := loadAnalysisContentForCheckRun(ctx, run, repo.Namespace, parentName, roleName)
 	if err != nil {
 		logger.Warnf("Failed to load analysis content for fix commit message on role %s: %v", roleName, err)
 	}
-	commitSubject, commitBody := buildFixCommitMessage(roleName, analysisContent)
+	if analysisMetadata == nil {
+		analysisMetadata = map[string]string{}
+	}
+	commitSubject, commitBody := buildFixCommitMessage(roleName, analysisMetadata)
 
 	gitImage := run.Info.GetPacOpts().AIAnalysisGitImage
 	pr := buildFixPipelineRun(config, repo, parentPR, event, roleName, encodedPayload, commitSubject, commitBody, gitImage)
@@ -404,12 +349,19 @@ func buildFixPipelineRun(
 
 	fixEnv := []corev1.EnvVar{
 		{Name: "REPO_URL", Value: repoURL},
+		{Name: "PR_NUMBER", Value: fmt.Sprintf("%d", event.PullRequestNumber)},
 		{Name: "REPO_DIR", Value: sourceMountPath},
 		{Name: "PR_BRANCH", Value: event.HeadBranch},
 		{Name: "EXPECTED_SHA", Value: event.SHA},
 		{Name: "ROLE_NAME", Value: roleName},
 		{Name: "FIX_COMMIT_SUBJECT_B64", Value: base64.StdEncoding.EncodeToString([]byte(commitSubject))},
 		{Name: "FIX_COMMIT_BODY_B64", Value: base64.StdEncoding.EncodeToString([]byte(commitBody))},
+		// AI co-author (always)
+		{Name: "GIT_COAUTHOR_NAME", Value: coAuthorName},
+		{Name: "GIT_COAUTHOR_EMAIL", Value: coAuthorEmail},
+		// Human author (only when trustworthy)
+		{Name: "GIT_AUTHOR_NAME", Value: event.SHAAuthorName},
+		{Name: "GIT_AUTHOR_EMAIL", Value: event.SHAAuthorEmail},
 	}
 
 	workspaces := buildChildPipelineRunWorkspaces(parent)
