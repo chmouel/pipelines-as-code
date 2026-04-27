@@ -33,6 +33,7 @@ type TestProviderImp struct {
 	WantModifiedFiles      []string
 	WantRenamedFiles       []string
 	WantPullRequestDiff    string
+	WantGetFilesError      string
 	FailGetCommitInfo      bool
 	CommitInfoErrorMsg     string
 	pacInfo                *info.PacOpts
@@ -141,6 +142,9 @@ func (v *TestProviderImp) ListDirFilesInsideRepo(_ context.Context, _ *info.Even
 func (v *TestProviderImp) GetFiles(_ context.Context, _ *info.Event) (changedfiles.ChangedFiles, error) {
 	if v == nil {
 		return changedfiles.ChangedFiles{}, nil
+	}
+	if v.WantGetFilesError != "" {
+		return changedfiles.ChangedFiles{}, fmt.Errorf("%s", v.WantGetFilesError)
 	}
 	return changedfiles.ChangedFiles{
 		All:      v.WantAllChangedFiles,

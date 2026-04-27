@@ -40,9 +40,11 @@ const (
 )
 
 type roleExecution struct {
-	Role     v1alpha1.AnalysisRole
-	Request  *AnalysisRequest
-	Rendered string
+	Role              v1alpha1.AnalysisRole
+	Request           *AnalysisRequest
+	Rendered          string
+	ChangedFiles      []string
+	ChangedFilesError bool
 }
 
 type childPipelineRunWorkspaces struct {
@@ -121,6 +123,7 @@ func buildAnalysisPipelineRun(
 		cliTimeout = 60
 	}
 	analysisEnv = append(analysisEnv,
+		corev1.EnvVar{Name: "CI", Value: "true"},
 		corev1.EnvVar{Name: "LLM_BACKEND", Value: backend},
 		corev1.EnvVar{Name: "LLM_MODEL", Value: model},
 		corev1.EnvVar{Name: "LLM_MAX_TOKENS", Value: fmt.Sprintf("%d", maxTokensForRole(config, exec.Role))},
@@ -128,7 +131,20 @@ func buildAnalysisPipelineRun(
 		corev1.EnvVar{Name: "LLM_TIMEOUT_SECONDS", Value: fmt.Sprintf("%d", cliTimeout)},
 		corev1.EnvVar{Name: "LLM_ROLE_NAME", Value: roleName},
 		corev1.EnvVar{Name: "LLM_COMMIT_SHA", Value: event.SHA},
+		corev1.EnvVar{Name: "PAC_LLM_EXECUTION_CONTEXT", Value: "ci"},
+		corev1.EnvVar{Name: "PAC_LLM_PIPELINERUN_KIND", Value: "analysis"},
+		corev1.EnvVar{Name: "PAC_PR_NUMBER", Value: fmt.Sprintf("%d", event.PullRequestNumber)},
+		corev1.EnvVar{Name: "PAC_PR_TITLE", Value: event.PullRequestTitle},
+		corev1.EnvVar{Name: "PAC_BASE_BRANCH", Value: event.BaseBranch},
+		corev1.EnvVar{Name: "PAC_HEAD_BRANCH", Value: event.HeadBranch},
+		corev1.EnvVar{Name: "PAC_REPO_OWNER", Value: event.Organization},
+		corev1.EnvVar{Name: "PAC_REPO_NAME", Value: event.Repository},
+		corev1.EnvVar{Name: "PAC_REPO_URL", Value: event.URL},
+		corev1.EnvVar{Name: "PAC_CHANGED_FILES_B64", Value: encodeChangedFiles(exec.ChangedFiles)},
 	)
+	if exec.ChangedFilesError {
+		analysisEnv = append(analysisEnv, corev1.EnvVar{Name: "PAC_CHANGED_FILES_ERROR", Value: "true"})
+	}
 
 	analysisTaskSpec := tektonv1.TaskSpec{
 		Workspaces: workspaces.task,
@@ -352,6 +368,13 @@ func maxTokensOrDefault(maxTokens int) int {
 		return DefaultMaxTokens
 	}
 	return maxTokens
+}
+
+func encodeChangedFiles(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString([]byte(strings.Join(paths, "\n")))
 }
 
 func maxTokensForRole(config *v1alpha1.AIAnalysisConfig, role v1alpha1.AnalysisRole) int {
