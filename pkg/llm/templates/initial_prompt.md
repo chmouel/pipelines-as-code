@@ -18,6 +18,20 @@ about what needs to change, but do not print raw diffs or code blocks.
 ## Why this works
 Explain why that change resolves the failure and note any remaining uncertainty.
 
+## Commit message
+
+When you apply a fix to the repository checkout, write a short conventional
+commit message summarizing the change. Use the format `type: description` where
+type is one of fix, feat, docs, refactor, chore, test, perf, ci, build, or
+style. Keep the subject line under 72 characters, lowercase after the colon.
+
+Optionally add a blank line and a body paragraph of 1-3 sentences explaining
+the root cause and why the change resolves it. Do not repeat the full analysis.
+Do not add trailers, co-author lines, or references.
+
+If you did not apply a fix, write `chore: no actionable fix identified` as the
+subject and leave the body empty.
+
 ## Skills used
 When project skills are present in the prompt, review them before deciding how
 to proceed. List each skill that was relevant to this task and mark it as one
