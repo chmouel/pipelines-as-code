@@ -96,8 +96,8 @@ func queuedFixCheckRunStatusOpts(parentName, roleName, sha string) status.Status
 	statusOpts := FixCheckRunStatusOpts(parentName, roleName, sha)
 	statusOpts.Status = "queued"
 	statusOpts.Conclusion = status.ConclusionPending
-	statusOpts.Summary = "AI fix has been scheduled."
-	statusOpts.Text = fmt.Sprintf("Pipelines-as-Code is applying the AI-generated patch for role %q. The final check run will report the pushed commit or the failure reason.", roleName)
+	statusOpts.Summary = "Applying AI-suggested fix."
+	statusOpts.Text = fmt.Sprintf("Applying the AI-suggested changes for the **%s** role. The result will appear here once the fix has been pushed.", roleName)
 	return statusOpts
 }
 
@@ -262,7 +262,7 @@ func CreateFixPipelineRun(
 			statusOpts := FixCheckRunStatusOpts(parentName, roleName, event.SHA)
 			statusOpts.Status = "completed"
 			statusOpts.Conclusion = status.ConclusionNeutral
-			statusOpts.Text = fmt.Sprintf("No machine patch is available for this analysis. %s\n\nPlease re-run analysis on the latest branch state.", reason)
+			statusOpts.Text = fmt.Sprintf("No automated fix is available for this analysis. %s\n\nTo apply suggestions manually, check the AI analysis output and re-run analysis on the latest branch state.", reason)
 			if postErr := prov.CreateStatus(ctx, event, statusOpts); postErr != nil {
 				logger.Warnf("Failed to post no-patch fix check run: %v", postErr)
 			}
@@ -276,11 +276,8 @@ func CreateFixPipelineRun(
 			statusOpts := FixCheckRunStatusOpts(parentName, roleName, event.SHA)
 			statusOpts.Status = "completed"
 			statusOpts.Conclusion = status.ConclusionNeutral
-			statusOpts.Text = fmt.Sprintf(
-				"The stored patch is too large (%d bytes encoded) to embed inline. "+
-					"Re-run analysis with a narrower scope or wait for a larger-transport implementation.",
-				len(encodedPayload),
-			)
+			statusOpts.Text = "The suggested fix is too large to apply automatically. " +
+				"Try re-running analysis with a narrower scope, or apply the suggestions manually."
 			if postErr := prov.CreateStatus(ctx, event, statusOpts); postErr != nil {
 				logger.Warnf("Failed to post oversized-patch fix check run: %v", postErr)
 			}
@@ -319,7 +316,9 @@ func CreateFixPipelineRun(
 		}
 	}
 
-	logger.Infof("Created fix PipelineRun %s for role %s", pr.Name, roleName)
+	consoleURL := run.Clients.ConsoleUI().DetailURL(pr)
+	logger.Infof("Created fix PipelineRun %s in namespace %s for role %s: %s",
+		pr.Name, repo.Namespace, roleName, consoleURL)
 	return nil
 }
 

@@ -129,9 +129,9 @@ EOF
   commit_short_sha="$(git rev-parse --short HEAD)"
 
   jq -n \
-    --arg content "We have successfully applied ${commit_short_sha} to the branch \`${pr_branch}\`
+    --arg content "Commit ${commit_short_sha} was pushed to \`${pr_branch}\`.
 
-Go back to the pull request #${pr_number} checks to see if the changes have been validated properly.
+Check the pull request #${pr_number} checks tab to confirm the fix is validated.
 
 Files modified:
 ${changed_files}" \

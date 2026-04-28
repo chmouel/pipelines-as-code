@@ -8,6 +8,7 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	paramclients "github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
@@ -416,8 +417,8 @@ func TestQueuedFixCheckRunStatusOptsHasFriendlyText(t *testing.T) {
 	opts := queuedFixCheckRunStatusOpts("parent-pr", "reviewer", "abc123")
 	assert.Equal(t, opts.Status, "queued")
 	assert.Equal(t, opts.Conclusion, providerstatus.ConclusionPending)
-	assert.Equal(t, opts.Summary, "AI fix has been scheduled.")
-	assert.Assert(t, contains(opts.Text, "applying the AI-generated patch for role \"reviewer\""))
+	assert.Equal(t, opts.Summary, "Applying AI-suggested fix.")
+	assert.Assert(t, contains(opts.Text, "Applying the AI-suggested changes for the **reviewer** role"))
 }
 
 func TestBuildFixCommitMessageUsesMetadata(t *testing.T) {
@@ -524,6 +525,7 @@ func TestCreateFixPipelineRunPostsNoPatchStatusWhenAnalysisChildMissing(t *testi
 			},
 		},
 	}
+	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 	event := testEvent()
 	event.InstallationID = 12345
 	event.HeadBranch = "feature-branch"
@@ -538,7 +540,7 @@ func TestCreateFixPipelineRunPostsNoPatchStatusWhenAnalysisChildMissing(t *testi
 	assert.Assert(t, prov.LastStatusOpts != nil, "should post a status when no patch is found")
 	assert.Equal(t, prov.LastStatusOpts.Status, "completed")
 	assert.Equal(t, prov.LastStatusOpts.Conclusion, providerstatus.ConclusionNeutral)
-	assert.Assert(t, contains(prov.LastStatusOpts.Text, "No machine patch"), "should explain that no patch is available")
+	assert.Assert(t, contains(prov.LastStatusOpts.Text, "No automated fix is available"), "should explain that no patch is available")
 
 	// Should NOT have created a fix PipelineRun
 	_, err = tekton.TektonV1().PipelineRuns(parent.Namespace).Get(context.Background(), fixPipelineRunName(parent.Name, "review"), metav1.GetOptions{})
