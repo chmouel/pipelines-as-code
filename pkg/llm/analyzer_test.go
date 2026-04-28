@@ -9,6 +9,7 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/llm/roles"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
@@ -250,6 +251,7 @@ func TestExecuteAnalysisCreatesPipelineRun(t *testing.T) {
 			},
 		},
 	}
+	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 
 	repo := testAIRepository()
 	pr := failedPipelineRun()
@@ -298,6 +300,7 @@ func TestExecuteAnalysisCreatesPipelineRunFromRepositorySkill(t *testing.T) {
 			},
 		},
 	}
+	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 
 	repo := testAIRepository()
 	repo.Spec.Settings.AIAnalysis.Roles = nil
@@ -373,6 +376,7 @@ func TestExecuteAnalysisMarksChangedFilesErrorInPipelineRunEnv(t *testing.T) {
 			},
 		},
 	}
+	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 
 	repo := testAIRepository()
 	repo.Spec.Settings.AIAnalysis.Roles = nil
@@ -426,6 +430,7 @@ func TestExecuteAnalysisRunsCRAndRepositoryRoles(t *testing.T) {
 			},
 		},
 	}
+	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 
 	repo := testAIRepository()
 	repo.Spec.Settings.AIAnalysis.Roles = []v1alpha1.AnalysisRole{
@@ -474,6 +479,7 @@ func TestExecuteAnalysisSkipsInvalidRepositorySkillAndRunsRemainingRoles(t *test
 			},
 		},
 	}
+	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 
 	repo := testAIRepository()
 	repo.Spec.Settings.AIAnalysis.Roles = []v1alpha1.AnalysisRole{
@@ -568,6 +574,7 @@ func TestExecuteAnalysisCollectsPipelineRun(t *testing.T) {
 			},
 		},
 	}
+	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 
 	err = ExecuteAnalysis(context.Background(), run, &kubeinteraction.Interaction{}, testLogger, testAIRepository(), parent, testEvent(), &tprovider.TestProviderImp{})
 	assert.NilError(t, err)
@@ -650,6 +657,7 @@ func TestExecuteAnalysisCollectsOrphanedPipelineRun(t *testing.T) {
 			},
 		},
 	}
+	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 
 	err = ExecuteAnalysis(context.Background(), run, &kubeinteraction.Interaction{}, testLogger, testAIRepository(), parent, testEvent(), &tprovider.TestProviderImp{})
 	assert.NilError(t, err)
@@ -730,6 +738,7 @@ func TestExecuteAnalysisCollectsOrphanedCheckRunOutput(t *testing.T) {
 			},
 		},
 	}
+	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 	event := testEvent()
 	event.InstallationID = 12345
 	prov := &statusCaptureProvider{}
@@ -1087,7 +1096,7 @@ func TestFormatAnalysisCommentFallsBackWhenContentIsEmpty(t *testing.T) {
 	comment := formatAnalysisComment("failure-analysis", "␛[0m\n> build · claude-sonnet-4@20250514\n")
 
 	assert.Assert(t, strings.Contains(comment, "## 🤖 AI Analysis - failure-analysis"))
-	assert.Assert(t, strings.Contains(comment, "_No analysis content produced._"))
+	assert.Assert(t, strings.Contains(comment, "_The AI analysis returned no output._"))
 	assert.Assert(t, !strings.Contains(comment, "> build · claude-sonnet-4@20250514"))
 }
 
@@ -1275,8 +1284,8 @@ func TestPostQueuedCheckRun(t *testing.T) {
 	assert.Equal(t, prov.LastStatusOpts.PipelineRunName, BuildExternalID("llm-analysis", "parent-pr", "review", event.SHA))
 	assert.Equal(t, prov.LastStatusOpts.OriginalPipelineRunName, analysisCheckRunName("review"))
 	assert.Equal(t, prov.LastStatusOpts.Title, "AI Analysis - review")
-	assert.Equal(t, prov.LastStatusOpts.Summary, "AI analysis has been scheduled.")
-	assert.Assert(t, strings.Contains(prov.LastStatusOpts.Text, "running AI analysis for role \"review\""))
+	assert.Equal(t, prov.LastStatusOpts.Summary, "AI analysis is in progress.")
+	assert.Assert(t, strings.Contains(prov.LastStatusOpts.Text, "analyzing the pipeline results for the **review** role"))
 }
 
 func TestPostFixCheckRunPostsPRCommentWithPushedCommit(t *testing.T) {
@@ -1333,6 +1342,7 @@ func TestExecuteAnalysisCreatesQueuedCheckRun(t *testing.T) {
 			},
 		},
 	}
+	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 	repo := testAIRepository()
 	repo.Spec.Settings.AIAnalysis.Roles[0].Output = "check-run"
 	pr := failedPipelineRun()
@@ -1377,6 +1387,7 @@ func TestExecuteAnalysisDoesNotRecreateQueuedCheckRunWhenAnalysisPipelineRunExis
 			},
 		},
 	}
+	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
 	repo := testAIRepository()
 	repo.Spec.Settings.AIAnalysis.Roles[0].Output = "check-run"
 	event := testEvent()

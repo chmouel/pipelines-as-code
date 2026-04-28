@@ -77,14 +77,17 @@ func createAnalysisPipelineRun(
 	parent *tektonv1.PipelineRun,
 	event *info.Event,
 	exec roleExecution,
-) error {
+) (*tektonv1.PipelineRun, error) {
 	gitImage := run.Info.GetPacOpts().AIAnalysisGitImage
 	pr := buildAnalysisPipelineRun(config, repo, parent, event, exec, gitImage)
-	_, err := run.Clients.Tekton.TektonV1().PipelineRuns(parent.Namespace).Create(ctx, pr, metav1.CreateOptions{})
+	created, err := run.Clients.Tekton.TektonV1().PipelineRuns(parent.Namespace).Create(ctx, pr, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
-		return nil
+		return nil, nil
 	}
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
 }
 
 func buildAnalysisPipelineRun(
