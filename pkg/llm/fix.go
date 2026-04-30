@@ -135,7 +135,7 @@ func sanitizeCommitMessageField(text string) string {
 
 	lines := make([]string, 0, len(strings.Split(text, "\n")))
 	inFence := false
-	for _, rawLine := range strings.Split(text, "\n") {
+	for rawLine := range strings.SplitSeq(text, "\n") {
 		line := strings.TrimSpace(rawLine)
 		if strings.HasPrefix(line, "```") {
 			inFence = !inFence
@@ -161,7 +161,11 @@ func truncateCommitMessage(text string, maxLen int) string {
 	return strings.TrimSpace(text[:cutoff])
 }
 
-func loadAnalysisContentForCheckRun(ctx context.Context, run *params.Run, namespace, parentName, roleName string) (string, map[string]string, error) {
+func loadAnalysisPipelineRun(
+	ctx context.Context,
+	run *params.Run,
+	namespace, parentName, roleName string,
+) (*tektonv1.PipelineRun, error) {
 	selector := fmt.Sprintf("%s=%s,%s=%s,%s=%s",
 		keys.LLMAnalysis, formatting.CleanValueKubernetes("true"),
 		keys.LLMParentPipelineRun, formatting.CleanValueKubernetes(parentName),
@@ -169,14 +173,25 @@ func loadAnalysisContentForCheckRun(ctx context.Context, run *params.Run, namesp
 	)
 	prs, err := run.Clients.Tekton.TektonV1().PipelineRuns(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to list analysis PipelineRuns: %w", err)
+		return nil, fmt.Errorf("failed to list analysis PipelineRuns: %w", err)
 	}
 	if len(prs.Items) == 0 {
-		return "", nil, fmt.Errorf("no analysis PipelineRun found for parent %s role %s", parentName, roleName)
+		return nil, fmt.Errorf("no analysis PipelineRun found for parent %s role %s", parentName, roleName)
 	}
 
-	analysisPR := prs.Items[0]
-	result, _ := parsePipelineRunEnvelope(ctx, run, &analysisPR)
+	return &prs.Items[0], nil
+}
+
+func loadAnalysisContentFromPipelineRun(
+	ctx context.Context,
+	run *params.Run,
+	analysisPR *tektonv1.PipelineRun,
+) (string, map[string]string, error) {
+	if analysisPR == nil {
+		return "", nil, fmt.Errorf("analysis PipelineRun is required")
+	}
+
+	result, _ := parsePipelineRunEnvelope(ctx, run, analysisPR)
 	if result.Response == nil {
 		if result.Error != nil {
 			return "", nil, result.Error
@@ -186,24 +201,34 @@ func loadAnalysisContentForCheckRun(ctx context.Context, run *params.Run, namesp
 	return result.Response.Content, result.Metadata, nil
 }
 
-// loadPatchForFix retrieves the machine patch from the original analysis child PipelineRun logs.
-// It returns the patch metadata and the raw encoded payload (gzip+base64 string).
-func loadPatchForFix(ctx context.Context, run *params.Run, namespace, parentName, roleName, sha string) (*MachinePatchMetadata, string, error) {
-	selector := fmt.Sprintf("%s=%s,%s=%s,%s=%s",
-		keys.LLMAnalysis, formatting.CleanValueKubernetes("true"),
-		keys.LLMParentPipelineRun, formatting.CleanValueKubernetes(parentName),
-		keys.LLMRole, formatting.CleanValueKubernetes(roleName),
-	)
-	prs, err := run.Clients.Tekton.TektonV1().PipelineRuns(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to list analysis PipelineRuns: %w", err)
-	}
-	if len(prs.Items) == 0 {
-		return nil, "", fmt.Errorf("no analysis PipelineRun found for parent %s role %s", parentName, roleName)
+func analysisPipelineRunImage(pr *tektonv1.PipelineRun) string {
+	if pr == nil || pr.Spec.PipelineSpec == nil {
+		return ""
 	}
 
-	// Use the first (should be only one per role).
-	analysisPR := prs.Items[0]
+	for _, task := range pr.Spec.PipelineSpec.Tasks {
+		if task.TaskSpec == nil {
+			continue
+		}
+		for _, step := range task.TaskSpec.Steps {
+			if step.Name == "run-analysis" && step.Image != "" {
+				return step.Image
+			}
+		}
+	}
+
+	return ""
+}
+
+func loadPatchForFixFromPipelineRun(
+	ctx context.Context,
+	run *params.Run,
+	analysisPR *tektonv1.PipelineRun,
+	namespace, roleName, sha string,
+) (*MachinePatchMetadata, string, error) {
+	if analysisPR == nil {
+		return nil, "", fmt.Errorf("analysis PipelineRun is required")
+	}
 
 	logContent, err := fetchRawPodLogs(ctx, run, analysisPR.Name, namespace, "run-analysis", "step-run-analysis")
 	if err != nil {
@@ -250,8 +275,13 @@ func CreateFixPipelineRun(
 	parentName := event.CheckRunParentPipelineRun
 	roleName := event.CheckRunAnalysisRole
 
+	analysisPR, err := loadAnalysisPipelineRun(ctx, run, repo.Namespace, parentName, roleName)
+	if err != nil {
+		analysisPR = nil
+	}
+
 	// Retrieve the stored machine patch from the original analysis child.
-	patchMeta, encodedPayload, err := loadPatchForFix(ctx, run, repo.Namespace, parentName, roleName, event.SHA)
+	patchMeta, encodedPayload, err := loadPatchForFixFromPipelineRun(ctx, run, analysisPR, repo.Namespace, roleName, event.SHA)
 	if err != nil || !isMachinePatchValid(patchMeta) {
 		reason := "no reusable machine patch is available"
 		if err != nil {
@@ -289,7 +319,7 @@ func CreateFixPipelineRun(
 	if err != nil {
 		return fmt.Errorf("cannot find parent PipelineRun %s: %w", parentName, err)
 	}
-	_, analysisMetadata, err := loadAnalysisContentForCheckRun(ctx, run, repo.Namespace, parentName, roleName)
+	_, analysisMetadata, err := loadAnalysisContentFromPipelineRun(ctx, run, analysisPR)
 	if err != nil {
 		logger.Warnf("Failed to load analysis content for fix commit message on role %s: %v", roleName, err)
 	}
@@ -298,8 +328,13 @@ func CreateFixPipelineRun(
 	}
 	commitSubject, commitBody := buildFixCommitMessage(roleName, analysisMetadata)
 
+	fixConfig := *config
+	if fixImage := analysisPipelineRunImage(analysisPR); fixImage != "" {
+		fixConfig.Image = fixImage
+	}
+
 	gitImage := run.Info.GetPacOpts().AIAnalysisGitImage
-	pr := buildFixPipelineRun(config, repo, parentPR, event, roleName, encodedPayload, commitSubject, commitBody, gitImage)
+	pr := buildFixPipelineRun(&fixConfig, repo, parentPR, event, roleName, encodedPayload, commitSubject, commitBody, gitImage)
 	_, err = run.Clients.Tekton.TektonV1().PipelineRuns(repo.Namespace).Create(ctx, pr, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		logger.Infof("Fix PipelineRun already exists for role %s, skipping", roleName)

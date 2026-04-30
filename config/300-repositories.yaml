@@ -405,6 +405,14 @@ spec:
                                     description: PRContent includes pull request title, description, and metadata
                                     type: boolean
                                 type: object
+                              image:
+                                description: |-
+                                  Image overrides the top-level AIAnalysisConfig.Image for this role only.
+                                  When set, the child PipelineRun for this role uses this container image
+                                  instead of the shared default image, allowing different roles to use
+                                  different agent images (e.g. a heavier model image for code review vs.
+                                  a lighter one for failure summarisation).
+                                type: string
                               max_tokens:
                                 description: |-
                                   MaxTokens limits the response length for this specific role.

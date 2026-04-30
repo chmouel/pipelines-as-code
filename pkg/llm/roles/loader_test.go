@@ -152,3 +152,33 @@ Analyze the failure.
 `)
 	assert.ErrorContains(t, err, "container_logs.max_lines must be between 1 and 1000 when set")
 }
+
+func TestParseRoleWithCustomImage(t *testing.T) {
+	role, err := ParseRole(Path("failure-analysis"), "failure-analysis", `---
+name: failure-analysis
+image: ghcr.io/chmouel/agents-image:latest
+output: check-run
+---
+Analyze the failure.
+`)
+	assert.NilError(t, err)
+	assert.Equal(t, role.Name, "failure-analysis")
+	assert.Equal(t, role.Image, "ghcr.io/chmouel/agents-image:latest")
+	assert.Equal(t, role.Output, "check-run")
+
+	ar := role.AnalysisRole()
+	assert.Equal(t, ar.Image, "ghcr.io/chmouel/agents-image:latest")
+	assert.Equal(t, ar.GetImage(), "ghcr.io/chmouel/agents-image:latest")
+}
+
+func TestParseRoleWithoutImageInheritsEmpty(t *testing.T) {
+	role, err := ParseRole(Path("failure-analysis"), "failure-analysis", `---
+name: failure-analysis
+---
+Analyze the failure.
+`)
+	assert.NilError(t, err)
+	assert.Equal(t, role.Image, "")
+	ar2 := role.AnalysisRole()
+	assert.Equal(t, ar2.GetImage(), "")
+}

@@ -296,6 +296,36 @@ func TestBuildFixPipelineRunSingleTaskWithInlineClone(t *testing.T) {
 	assert.Assert(t, contains(pr.Spec.PipelineSpec.Results[0].Value.StringVal, "tasks.fix.results.analysis"))
 }
 
+func TestBuildFixPipelineRunUsesAnalysisChildImageOverride(t *testing.T) {
+	config := &v1alpha1.AIAnalysisConfig{
+		Backend:   "claude",
+		Image:     "global:latest",
+		SecretRef: &v1alpha1.Secret{Name: "test-secret", Key: "token"},
+		Roles: []v1alpha1.AnalysisRole{
+			{Name: "reviewer", Prompt: "fix it", Image: "role:latest"},
+		},
+	}
+	parent := failedPipelineRun()
+	event := &info.Event{
+		HeadBranch: "feature-branch",
+		URL:        "https://github.com/test/repo",
+		SHA:        "abc123",
+	}
+
+	analysisPR := buildAnalysisPipelineRun(config, testAIRepository(), parent, event, roleExecution{
+		Role:     config.Roles[0],
+		Rendered: "review this",
+	}, settings.AIAnalysisGitImageDefault)
+	fixConfig := *config
+	fixConfig.Image = analysisPipelineRunImage(analysisPR)
+
+	pr := buildFixPipelineRun(&fixConfig, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault)
+
+	task := pr.Spec.PipelineSpec.Tasks[0]
+	fixStep := task.TaskSpec.Steps[1]
+	assert.Equal(t, fixStep.Image, "role:latest")
+}
+
 func TestBuildFixPipelineRunEnvVars(t *testing.T) {
 	config := &v1alpha1.AIAnalysisConfig{
 		Backend:   "claude",

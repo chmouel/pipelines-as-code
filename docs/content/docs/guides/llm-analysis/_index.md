@@ -199,6 +199,7 @@ The frontmatter fields mirror the CR role fields:
 | Field           | Type    | Required | Description                                                                                 |
 | --------------- | ------- | -------- | ------------------------------------------------------------------------------------------- |
 | `name`          | string  | Yes      | Must match the filename (without `.md`). Only letters, digits, `_`, and `-` are allowed.   |
+| `image`         | string  | No       | Container image for this role. Overrides the global `image` from the Repository CR.         |
 | `output`        | string  | No       | `pr-comment` or `check-run`. Defaults to `pr-comment`.                                     |
 | `model`         | string  | No       | Model override for this role. Falls back to the backend default if omitted.                 |
 | `max_tokens`    | integer | No       | Response length cap for this role (1-4000). Falls back to the CR-level `max_tokens`.        |

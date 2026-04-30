@@ -108,6 +108,12 @@ func buildAnalysisPipelineRun(
 	output := exec.Role.GetOutput()
 	model := exec.Role.GetModel()
 
+	// Use the role-level image if specified; fall back to the global config image.
+	analysisImage := exec.Role.GetImage()
+	if analysisImage == "" {
+		analysisImage = config.Image
+	}
+
 	prName := analysisPipelineRunName(parent.Name, roleName)
 	timeout := metav1.Duration{Duration: time.Duration(timeoutSeconds) * time.Second}
 	promptB64 := base64.StdEncoding.EncodeToString([]byte(exec.Rendered))
@@ -157,7 +163,7 @@ func buildAnalysisPipelineRun(
 			cloneStep,
 			{
 				Name:         "run-analysis",
-				Image:        config.Image,
+				Image:        analysisImage,
 				WorkingDir:   sourceMountPath,
 				VolumeMounts: analysisVolumeMounts,
 				Env:          analysisEnv,

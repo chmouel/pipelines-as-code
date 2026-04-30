@@ -295,6 +295,12 @@ Sets a unique identifier for this analysis role.
 Defines the base prompt template that Pipelines-as-Code sends to the LLM.
 {{< /param >}}
 
+{{< param name="roles[].image" type="string" id="param-roles-image" >}}
+Overrides the top-level `image` for this role only. When set, the child PipelineRun for this role
+uses this container image instead of the shared default. This lets you use a heavier or specialised
+agent image for certain roles (e.g. a code-rewrite role) while keeping a lighter image as the default.
+{{< /param >}}
+
 {{< param name="roles[].model" type="string" id="param-roles-model" >}}
 Specifies the model for this role. If omitted, the backend CLI uses its own default model. Consult each backend's documentation for available model names.
 {{< /param >}}

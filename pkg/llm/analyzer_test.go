@@ -913,6 +913,78 @@ func TestBuildAnalysisPipelineRunVertexDefaultRegion(t *testing.T) {
 	assert.Equal(t, envMap["CLOUD_ML_REGION"], "global")
 }
 
+// TestBuildAnalysisPipelineRunRoleImageOverride verifies that when a role
+// specifies its own Image the child PipelineRun uses the role image instead of
+// the global config image.
+func TestBuildAnalysisPipelineRunRoleImageOverride(t *testing.T) {
+	const globalImage = "quay.io/example/default-agent:latest"
+	const roleImage = "ghcr.io/chmouel/agents-image:latest"
+
+	config := &v1alpha1.AIAnalysisConfig{
+		Enabled:       true,
+		ExecutionMode: "pipelinerun",
+		Backend:       "claude",
+		Image:         globalImage,
+		SecretRef:     &v1alpha1.Secret{Name: "secret", Key: "token"},
+		Roles: []v1alpha1.AnalysisRole{
+			{Name: "custom-image-role", Prompt: "analyze this", Image: roleImage},
+		},
+	}
+	repo := &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{Name: "repo", Namespace: "ns"},
+		Spec:       v1alpha1.RepositorySpec{Settings: &v1alpha1.Settings{AIAnalysis: config}},
+	}
+	parent := failedPipelineRun()
+	event := testEvent()
+
+	exec := roleExecution{
+		Role:     config.Roles[0],
+		Rendered: "analyze this",
+	}
+
+	pr := buildAnalysisPipelineRun(config, repo, parent, event, exec, settings.AIAnalysisGitImageDefault)
+
+	runAnalysisStep := pr.Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[1]
+	assert.Equal(t, runAnalysisStep.Name, "run-analysis")
+	assert.Equal(t, runAnalysisStep.Image, roleImage,
+		"run-analysis step should use the role-level image, not the global config image")
+}
+
+// TestBuildAnalysisPipelineRunRoleImageFallback verifies that when a role does
+// not set its own Image the child PipelineRun falls back to the global config image.
+func TestBuildAnalysisPipelineRunRoleImageFallback(t *testing.T) {
+	const globalImage = "quay.io/example/default-agent:latest"
+
+	config := &v1alpha1.AIAnalysisConfig{
+		Enabled:       true,
+		ExecutionMode: "pipelinerun",
+		Backend:       "claude",
+		Image:         globalImage,
+		SecretRef:     &v1alpha1.Secret{Name: "secret", Key: "token"},
+		Roles: []v1alpha1.AnalysisRole{
+			{Name: "no-image-role", Prompt: "analyze this"},
+		},
+	}
+	repo := &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{Name: "repo", Namespace: "ns"},
+		Spec:       v1alpha1.RepositorySpec{Settings: &v1alpha1.Settings{AIAnalysis: config}},
+	}
+	parent := failedPipelineRun()
+	event := testEvent()
+
+	exec := roleExecution{
+		Role:     config.Roles[0],
+		Rendered: "analyze this",
+	}
+
+	pr := buildAnalysisPipelineRun(config, repo, parent, event, exec, settings.AIAnalysisGitImageDefault)
+
+	runAnalysisStep := pr.Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[1]
+	assert.Equal(t, runAnalysisStep.Name, "run-analysis")
+	assert.Equal(t, runAnalysisStep.Image, globalImage,
+		"run-analysis step should fall back to the global config image when role has no image")
+}
+
 func TestAnalysisPipelineRunNameLeadingHyphen(t *testing.T) {
 	// A long parent name where truncation would land on a hyphen.
 	longParent := "a-very-long-pipeline-run-name-that-exceeds-the-limit-by-quite-a-bit"
