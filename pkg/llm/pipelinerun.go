@@ -23,7 +23,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	apis "knative.dev/pkg/apis"
 )
@@ -193,11 +192,12 @@ func buildAnalysisPipelineRun(
 				keys.Repository:           repo.Name,
 			},
 			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(parent, schema.GroupVersionKind{
-					Group:   "tekton.dev",
-					Version: "v1",
-					Kind:    "PipelineRun",
-				}),
+				{
+					APIVersion: "tekton.dev/v1",
+					Kind:       "PipelineRun",
+					Name:       parent.Name,
+					UID:        parent.UID,
+				},
 			},
 		},
 		Spec: tektonv1.PipelineRunSpec{
