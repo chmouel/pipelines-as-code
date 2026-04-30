@@ -49,6 +49,50 @@ settings:
         prompt: "Quick diagnosis..."
 ```
 
+## Image Selection
+
+By default every role shares the single `image` defined at the top level of `ai_analysis`. When
+different roles require different container images — for example a lightweight image for quick
+failure summaries and a heavier image with additional tools for code rewrites — you can override
+the image per role using the `image` field.
+
+When `image` is set on a role, Pipelines-as-Code uses that image for the child PipelineRun it
+creates for that role. All other roles without an `image` field continue to use the global default.
+
+### Example: Per-Role Image Override
+
+```yaml
+settings:
+  ai_analysis:
+    enabled: true
+    backend: "claude"
+    image: "ghcr.io/openshift-pipelines/ai-agents:latest"   # default for all roles
+    secret_ref:
+      name: "anthropic-api-key"
+      key: "token"
+    roles:
+      # This role uses the shared default image
+      - name: "failure-summary"
+        prompt: "Summarise the failure in one paragraph."
+
+      # This role overrides the image with a custom one
+      - name: "code-rewrite"
+        image: "ghcr.io/chmouel/agents-image:latest"
+        prompt: "Rewrite the failing code to fix the issue."
+        output: "check-run"
+```
+
+The same `image` field is available in repo roles loaded from `.tekton/ai/<name>.md`:
+
+```markdown
+---
+name: code-rewrite
+image: ghcr.io/chmouel/agents-image:latest
+output: check-run
+---
+Rewrite the failing code to fix the issue.
+```
+
 ## CEL Expressions for Triggers
 
 By default, Pipelines-as-Code runs LLM analysis only for failed PipelineRuns. CEL (Common Expression Language) expressions in the `on_cel` field let you refine this behavior -- for example, restricting analysis to a specific branch or enabling it for successful runs too.

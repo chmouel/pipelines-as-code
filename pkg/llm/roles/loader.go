@@ -19,7 +19,9 @@ const basePath = ".tekton/ai"
 var roleNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 type frontmatterRole struct {
-	Name         string `yaml:"name"`
+	Name string `yaml:"name"`
+	// Image optionally overrides the top-level container image for this role.
+	Image        string `yaml:"image,omitempty"`
 	Model        string `yaml:"model,omitempty"`
 	MaxTokens    *int   `yaml:"max_tokens,omitempty"`
 	OnCEL        string `yaml:"on_cel,omitempty"`
@@ -95,6 +97,7 @@ func ParseRole(path, expectedName, content string) (Role, error) {
 		return Role{}, fmt.Errorf("%s: failed to parse YAML frontmatter: %w", path, err)
 	}
 	role.Name = parsed.Name
+	role.Image = parsed.Image
 	role.Model = parsed.Model
 	role.OnCEL = parsed.OnCEL
 	role.Output = parsed.Output

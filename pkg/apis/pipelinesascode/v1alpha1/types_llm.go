@@ -89,6 +89,14 @@ type AnalysisRole struct {
 	// +kubebuilder:validation:Required
 	Prompt string `json:"prompt"`
 
+	// Image overrides the top-level AIAnalysisConfig.Image for this role only.
+	// When set, the child PipelineRun for this role uses this container image
+	// instead of the shared default image, allowing different roles to use
+	// different agent images (e.g. a heavier model image for code review vs.
+	// a lighter one for failure summarisation).
+	// +optional
+	Image string `json:"image,omitempty"`
+
 	// Model specifies which model to use for this role (optional).
 	// +optional
 	Model string `json:"model,omitempty"`
@@ -183,6 +191,12 @@ func (c *AIAnalysisConfig) GetVertexRegion() string {
 		return DefaultVertexRegion
 	}
 	return c.VertexRegion
+}
+
+// GetImage returns the role-level image override, or an empty string if not set
+// (callers should fall back to AIAnalysisConfig.Image in that case).
+func (r *AnalysisRole) GetImage() string {
+	return r.Image
 }
 
 // GetModel returns the configured model or an empty string to use backend defaults.
