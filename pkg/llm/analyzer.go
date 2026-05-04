@@ -92,7 +92,8 @@ func ExecuteAnalysis(
 		}
 
 		result, summary := parsePipelineRunEnvelope(ctx, run, analysisPR)
-		if err := handleAnalysisResult(ctx, logger, repo, pr, event, prov, result); err != nil {
+		analysisDetailsURL := run.Clients.ConsoleUI().DetailURL(analysisPR)
+		if err := handleAnalysisResult(ctx, logger, repo, pr, event, prov, result, analysisDetailsURL); err != nil {
 			return err
 		}
 
@@ -119,7 +120,8 @@ func ExecuteAnalysis(
 		}
 		roleName := fixPR.Annotations[keys.LLMRole]
 		result, _ := parsePipelineRunEnvelope(ctx, run, fixPR)
-		if err := postFixCheckRun(ctx, result, pr, event, prov, logger); err != nil {
+		fixDetailsURL := run.Clients.ConsoleUI().DetailURL(fixPR)
+		if err := postFixCheckRun(ctx, result, pr, event, prov, logger, fixDetailsURL); err != nil {
 			logger.Warnf("Failed to post fix check run for role %s: %v", roleName, err)
 		}
 		logger.Infof("Collected fix PipelineRun result for role %s", roleName)
@@ -146,12 +148,12 @@ func ExecuteAnalysis(
 			continue
 		}
 		analysisPRsByRole[exec.Role.Name] = createdPR
+		consoleURL := run.Clients.ConsoleUI().DetailURL(createdPR)
 		if exec.Role.GetOutput() == "check-run" {
-			if err := postQueuedCheckRun(ctx, exec.Role.Name, pr.Name, event, prov, logger); err != nil {
+			if err := postQueuedCheckRun(ctx, exec.Role.Name, pr.Name, event, prov, logger, consoleURL); err != nil {
 				logger.With("role", exec.Role.Name, "error", err).Warn("Failed to create queued AI analysis check run")
 			}
 		}
-		consoleURL := run.Clients.ConsoleUI().DetailURL(createdPR)
 		logger.Infof("Created LLM analysis PipelineRun %s in namespace %s for role %s: %s",
 			createdPR.Name, createdPR.Namespace, exec.Role.Name, consoleURL)
 	}
@@ -257,6 +259,7 @@ func handleAnalysisResult(
 	event *info.Event,
 	prov provider.Interface,
 	result AnalysisResult,
+	detailsURL string,
 ) error {
 	if result.Error != nil {
 		logger.Warnf("Analysis failed for role %s: %v", result.Role, result.Error)
@@ -289,7 +292,7 @@ func handleAnalysisResult(
 		}
 		return nil
 	case "check-run":
-		if err := postCheckRun(ctx, result, pr, event, prov, logger); err != nil {
+		if err := postCheckRun(ctx, result, pr, event, prov, logger, detailsURL); err != nil {
 			return fmt.Errorf("failed to publish llm result for role %s on PipelineRun %s/%s: %w", result.Role, pr.Namespace, pr.Name, err)
 		}
 		return nil
@@ -326,6 +329,7 @@ func postCheckRun(
 	event *info.Event,
 	prov provider.Interface,
 	logger *zap.SugaredLogger,
+	detailsURL string,
 ) error {
 	if event.InstallationID == 0 {
 		logger.Infof("Skipping check-run output for role %s: not a GitHub App installation (InstallationID is 0)", result.Role)
@@ -346,6 +350,7 @@ func postCheckRun(
 	statusOpts.Status = "completed"
 	statusOpts.Conclusion = status.ConclusionNeutral
 	statusOpts.Text = content
+	statusOpts.DetailsURL = detailsURL
 	if isMachinePatchValid(result.Patch) {
 		statusOpts.Actions = []status.CheckRunAction{
 			{
@@ -372,6 +377,7 @@ func postFixCheckRun(
 	event *info.Event,
 	prov provider.Interface,
 	logger *zap.SugaredLogger,
+	detailsURL string,
 ) error {
 	if event.InstallationID == 0 {
 		return nil
@@ -384,6 +390,7 @@ func postFixCheckRun(
 
 	statusOpts := FixCheckRunStatusOpts(parentName, result.Role, event.SHA)
 	statusOpts.Status = "completed"
+	statusOpts.DetailsURL = detailsURL
 
 	switch {
 	case result.Error != nil:
@@ -428,6 +435,7 @@ func postQueuedCheckRun(
 	event *info.Event,
 	prov provider.Interface,
 	logger *zap.SugaredLogger,
+	detailsURL string,
 ) error {
 	if event.InstallationID == 0 {
 		logger.Infof("Skipping queued check-run output for role %s: not a GitHub App installation (InstallationID is 0)", roleName)
@@ -437,6 +445,7 @@ func postQueuedCheckRun(
 	statusOpts := analysisCheckRunStatusOpts(roleName, parentName, event.SHA)
 	statusOpts.Status = "queued"
 	statusOpts.Conclusion = status.ConclusionPending
+	statusOpts.DetailsURL = detailsURL
 	statusOpts.Summary = "AI analysis is in progress."
 	statusOpts.Text = fmt.Sprintf("The AI is analyzing the pipeline results for the **%s** role. Results will appear here once the analysis completes.", roleName)
 

@@ -344,14 +344,15 @@ func CreateFixPipelineRun(
 		return fmt.Errorf("failed to create fix PipelineRun: %w", err)
 	}
 
+	consoleURL := run.Clients.ConsoleUI().DetailURL(pr)
 	if event.InstallationID > 0 {
 		statusOpts := queuedFixCheckRunStatusOpts(parentName, roleName, event.SHA)
+		statusOpts.DetailsURL = consoleURL
 		if err := prov.CreateStatus(ctx, event, statusOpts); err != nil {
 			logger.Warnf("Failed to create queued fix check run: %v", err)
 		}
 	}
 
-	consoleURL := run.Clients.ConsoleUI().DetailURL(pr)
 	logger.Infof("Created fix PipelineRun %s in namespace %s for role %s: %s",
 		pr.Name, repo.Namespace, roleName, consoleURL)
 	return nil

@@ -1185,13 +1185,14 @@ func TestPostCheckRun(t *testing.T) {
 		},
 	}
 
-	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger)
+	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger, "https://console.example.com/pr/test")
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts != nil)
 
 	opts := prov.LastStatusOpts
 	assert.Equal(t, opts.Status, "completed")
 	assert.Equal(t, opts.Conclusion, providerstatus.ConclusionNeutral)
+	assert.Equal(t, opts.DetailsURL, "https://console.example.com/pr/test")
 	assert.Equal(t, opts.PipelineRunName, BuildExternalID("llm-analysis", "parent-pr", "failure-analysis", event.SHA))
 	assert.Equal(t, opts.OriginalPipelineRunName, analysisCheckRunName("failure-analysis"))
 	assert.Equal(t, opts.Title, "AI Analysis - failure-analysis")
@@ -1221,7 +1222,7 @@ func TestPostCheckRunHasFixItButtonWhenPatchValid(t *testing.T) {
 		},
 	}
 
-	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger)
+	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger, "")
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts != nil)
 	assert.Assert(t, len(prov.LastStatusOpts.Actions) == 1, "should have Apply Suggestions action when patch is valid")
@@ -1243,7 +1244,7 @@ func TestPostCheckRunHasNoFixItButtonWhenPatchNil(t *testing.T) {
 		Patch: nil,
 	}
 
-	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger)
+	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger, "")
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts != nil)
 	assert.Equal(t, len(prov.LastStatusOpts.Actions), 0, "should have no actions when patch is nil")
@@ -1265,7 +1266,7 @@ func TestPostCheckRunHasNoFixItButtonWhenPatchInvalid(t *testing.T) {
 		},
 	}
 
-	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger)
+	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger, "")
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts != nil)
 	assert.Equal(t, len(prov.LastStatusOpts.Actions), 0, "should have no actions when patch is invalid")
@@ -1277,7 +1278,7 @@ func TestPostQueuedCheckRunHasNoActions(t *testing.T) {
 	event := testEvent()
 	event.InstallationID = 12345
 
-	err := postQueuedCheckRun(context.Background(), "review", "parent-pr", event, prov, testLogger)
+	err := postQueuedCheckRun(context.Background(), "review", "parent-pr", event, prov, testLogger, "")
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts != nil)
 	assert.Equal(t, len(prov.LastStatusOpts.Actions), 0, "queued check run must never have Apply Suggestions button")
@@ -1296,7 +1297,7 @@ func TestPostCheckRunSkipsWhenNotGitHubApp(t *testing.T) {
 		},
 	}
 
-	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger)
+	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger, "")
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts == nil, "should not call CreateStatus when InstallationID is 0")
 }
@@ -1315,7 +1316,7 @@ func TestPostCheckRunWithNoPR(t *testing.T) {
 		},
 	}
 
-	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger)
+	err := postCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger, "")
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts != nil, "should create check run even without PR number")
 }
@@ -1336,7 +1337,7 @@ func TestHandleAnalysisResultCheckRun(t *testing.T) {
 		},
 	}
 
-	err := handleAnalysisResult(context.Background(), testLogger, repo, failedPipelineRun(), event, prov, result)
+	err := handleAnalysisResult(context.Background(), testLogger, repo, failedPipelineRun(), event, prov, result, "")
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts != nil, "should call CreateStatus for check-run output")
 	assert.Equal(t, prov.LastStatusOpts.OriginalPipelineRunName, analysisCheckRunName("review"))
@@ -1348,7 +1349,7 @@ func TestPostQueuedCheckRun(t *testing.T) {
 	event := testEvent()
 	event.InstallationID = 12345
 
-	err := postQueuedCheckRun(context.Background(), "review", "parent-pr", event, prov, testLogger)
+	err := postQueuedCheckRun(context.Background(), "review", "parent-pr", event, prov, testLogger, "")
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts != nil)
 	assert.Equal(t, prov.LastStatusOpts.Status, "queued")
@@ -1380,7 +1381,7 @@ func TestPostFixCheckRunPostsPRCommentWithPushedCommit(t *testing.T) {
 		},
 	}
 
-	err := postFixCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger)
+	err := postFixCheckRun(context.Background(), result, failedPipelineRun(), event, prov, testLogger, "")
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts != nil)
 	assert.Equal(t, prov.LastStatusOpts.Status, "completed")
@@ -1396,7 +1397,7 @@ func TestPostQueuedCheckRunSkipsWhenNotGitHubApp(t *testing.T) {
 	prov := &statusCaptureProvider{}
 	event := testEvent()
 
-	err := postQueuedCheckRun(context.Background(), "review", "parent-pr", event, prov, testLogger)
+	err := postQueuedCheckRun(context.Background(), "review", "parent-pr", event, prov, testLogger, "")
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts == nil)
 }
