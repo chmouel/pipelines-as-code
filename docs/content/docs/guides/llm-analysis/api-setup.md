@@ -14,7 +14,7 @@ Create the Secret in the same namespace as the Repository CR.
 Each backend reads its API key from a specific environment variable. Pipelines-as-Code injects the secret value under the right variable name automatically based on the `backend` field.
 
 | Backend | Environment variable | Where to get the key |
-|---------|---------------------|----------------------|
+| ------- | ------------------- | -------------------- |
 | `claude` | `ANTHROPIC_API_KEY` | [Anthropic Console](https://console.anthropic.com/settings/keys) |
 | `codex` | `OPENAI_API_KEY` | [OpenAI Platform](https://platform.openai.com/api-keys) |
 | `gemini` | `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/app/apikey) |
@@ -33,7 +33,7 @@ kubectl create secret generic anthropic-api-key \
   -n <namespace>
 ```
 
-3. Reference it in your Repository CR:
+1. Reference it in your Repository CR:
 
 ```yaml
 settings:
@@ -58,7 +58,7 @@ kubectl create secret generic openai-api-key \
   -n <namespace>
 ```
 
-3. Reference it in your Repository CR:
+1. Reference it in your Repository CR:
 
 ```yaml
 settings:
@@ -83,7 +83,7 @@ kubectl create secret generic gemini-api-key \
   -n <namespace>
 ```
 
-3. Reference it in your Repository CR:
+1. Reference it in your Repository CR:
 
 ```yaml
 settings:

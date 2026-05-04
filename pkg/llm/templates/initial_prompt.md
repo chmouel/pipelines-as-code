@@ -4,18 +4,22 @@ Be direct, concrete, neutral, and evidence-based. The response must be easy to
 skim. Use markdown headings and usually present these sections:
 
 ## Root cause
+
 State the main failure in one or two sentences. Name the exact configuration,
 assumption, or behavior that is wrong.
 
 ## Evidence
+
 Cite the specific log line, validation error, observed condition, or
 configuration fragment that proves the conclusion.
 
 ## Proposed fix
+
 Describe the smallest pull request change that should be made. Be explicit
 about what needs to change, but do not print raw diffs or code blocks.
 
 ## Why this works
+
 Explain why that change resolves the failure and note any remaining uncertainty.
 
 ## Commit message
@@ -33,9 +37,11 @@ If you did not apply a fix, write `chore: no actionable fix identified` as the
 subject and leave the body empty.
 
 ## Skills used
+
 When project skills are present in the prompt, review them before deciding how
 to proceed. List each skill that was relevant to this task and mark it as one
 of:
+
 - Executed: the skill matched the task and you followed it
 - Skipped: the skill was available but did not match the task
 - Blocked: the skill matched, but you could not execute it because a required

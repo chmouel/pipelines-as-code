@@ -25,7 +25,7 @@ LLM-powered analysis lets you:
 Pipelines-as-Code runs the analysis inside a Kubernetes PipelineRun using a container image that has CLI AI tools pre-installed. The `backend` field selects which tool to invoke, and `image` points to the container image that provides it.
 
 | Backend | CLI invoked | API token env var |
-|---------|-------------|-------------------|
+| ------- | ----------- | ----------------- |
 | `claude` | `claude` (Anthropic Claude Code) | `ANTHROPIC_API_KEY` |
 | `codex` | `codex` (OpenAI Codex) | `OPENAI_API_KEY` |
 | `gemini` | `gemini` (Google Gemini CLI) | `GEMINI_API_KEY` |
@@ -198,9 +198,9 @@ The frontmatter fields mirror the CR role fields:
 
 | Field           | Type    | Required | Description                                                                                 |
 | --------------- | ------- | -------- | ------------------------------------------------------------------------------------------- |
-| `name`          | string  | Yes      | Must match the filename (without `.md`). Only letters, digits, `_`, and `-` are allowed.   |
+| `name`          | string  | Yes      | Must match the filename (without `.md`). Only letters, digits, `_`, and `-` are allowed.    |
 | `image`         | string  | No       | Container image for this role. Overrides the global `image` from the Repository CR.         |
-| `output`        | string  | No       | `pr-comment` or `check-run`. Defaults to `pr-comment`.                                     |
+| `output`        | string  | No       | `pr-comment` or `check-run`. Defaults to `pr-comment`.                                      |
 | `model`         | string  | No       | Model override for this role. Falls back to the backend default if omitted.                 |
 | `max_tokens`    | integer | No       | Response length cap for this role (1-4000). Falls back to the CR-level `max_tokens`.        |
 | `on_cel`        | string  | No       | CEL expression controlling when this role runs. Defaults to failed PipelineRuns only.       |

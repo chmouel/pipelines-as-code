@@ -12,7 +12,7 @@ Each analysis role can specify a different model. If you do not set `model`, the
 Backend model names follow each CLI's own convention:
 
 | Backend | Example models |
-|---------|---------------|
+| ------- | ------------- |
 | `claude` | `claude-opus-4-5`, `claude-sonnet-4-5`, `claude-haiku-4-5` |
 | `codex` | `codex-mini-latest`, `gpt-4.1`, `o4-mini` |
 | `gemini` | `gemini-2.5-pro`, `gemini-2.5-flash` |
