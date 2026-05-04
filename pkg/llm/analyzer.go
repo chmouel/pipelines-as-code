@@ -3,12 +3,14 @@ package llm
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/cel"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/customparams"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	llmcontext "github.com/openshift-pipelines/pipelines-as-code/pkg/llm/context"
 	reporoles "github.com/openshift-pipelines/pipelines-as-code/pkg/llm/roles"
@@ -16,6 +18,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/templates"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
@@ -179,6 +182,13 @@ func buildRoleExecutions(
 	}
 
 	changedFiles := []string{}
+	changedFilesMap := map[string]any{
+		"all":      []string{},
+		"added":    []string{},
+		"deleted":  []string{},
+		"modified": []string{},
+		"renamed":  []string{},
+	}
 	changedFilesError := false
 	if prov != nil {
 		files, err := prov.GetFiles(ctx, event)
@@ -193,12 +203,25 @@ func buildRoleExecutions(
 		} else {
 			files.RemoveDuplicates()
 			changedFiles = append(changedFiles, files.All...)
+			changedFilesMap = map[string]any{
+				"all":      append([]string(nil), files.All...),
+				"added":    append([]string(nil), files.Added...),
+				"deleted":  append([]string(nil), files.Deleted...),
+				"modified": append([]string(nil), files.Modified...),
+				"renamed":  append([]string(nil), files.Renamed...),
+			}
 		}
 	}
 
 	celContext, err := assembler.BuildCELContext(pr, event, repo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build CEL context: %w", err)
+	}
+
+	stdParams := customparams.MakeStandardParams(event, repo)
+	headers := http.Header{}
+	if event.Request != nil && event.Request.Header != nil {
+		headers = event.Request.Header
 	}
 
 	contextCache := make(map[string]map[string]any)
@@ -225,8 +248,9 @@ func buildRoleExecutions(
 			contextCache[contextKey] = roleContext
 		}
 
+		expandedPrompt := templates.ReplacePlaceHoldersVariables(role.Prompt, stdParams, event.Event, headers, changedFilesMap)
 		request := &AnalysisRequest{
-			Prompt:         role.Prompt,
+			Prompt:         expandedPrompt,
 			Context:        roleContext,
 			Model:          role.GetModel(),
 			MaxTokens:      maxTokensForRole(config, role),

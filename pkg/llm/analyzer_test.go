@@ -321,7 +321,7 @@ max_tokens: 321
 context_items:
   error_content: true
 ---
-Analyze the failure and suggest a fix.
+Analyze {{ revision }} from {{ repo_url }} and suggest a fix.
 `,
 		},
 		WantAllChangedFiles: []string{".tekton/pipeline.yaml", "README.md"},
@@ -357,6 +357,11 @@ Analyze the failure and suggest a fix.
 	assert.Equal(t, envMap["PAC_REPO_OWNER"], "owner")
 	assert.Equal(t, envMap["PAC_REPO_NAME"], "repo")
 	assert.Equal(t, envMap["PAC_REPO_URL"], "https://github.com/owner/repo")
+	decodedPrompt, err := base64.StdEncoding.DecodeString(envMap["LLM_PROMPT_B64"])
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(string(decodedPrompt), "Analyze abc123def456 from https://github.com/owner/repo and suggest a fix."))
+	assert.Assert(t, !strings.Contains(string(decodedPrompt), "{{ revision }}"))
+	assert.Assert(t, !strings.Contains(string(decodedPrompt), "{{ repo_url }}"))
 	changedFiles, err := base64.StdEncoding.DecodeString(envMap["PAC_CHANGED_FILES_B64"])
 	assert.NilError(t, err)
 	assert.Equal(t, string(changedFiles), ".tekton/pipeline.yaml\nREADME.md")
