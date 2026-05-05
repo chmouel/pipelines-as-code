@@ -74,6 +74,11 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 		return nil
 	}
 
+	if isLLMChildPipelineRun(pr) {
+		logger.Debugf("Skipping reconciliation for LLM child PipelineRun %s/%s", pr.GetNamespace(), pr.GetName())
+		return nil
+	}
+
 	// if pipelineRun is in completed or failed state then return early,
 	// unless LLM analysis is enabled and needs follow-up.
 	state, exist := pr.GetAnnotations()[keys.State]
@@ -204,6 +209,16 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 		return err
 	}
 	return nil
+}
+
+func isLLMChildPipelineRun(pr *tektonv1.PipelineRun) bool {
+	if pr == nil {
+		return false
+	}
+	return pr.Annotations[keys.LLMAnalysis] == "true" ||
+		pr.Annotations[keys.LLMFix] == "true" ||
+		pr.Labels[keys.LLMAnalysis] == "true" ||
+		pr.Labels[keys.LLMFix] == "true"
 }
 
 func (r *Reconciler) loadControllerInfo(pr *tektonv1.PipelineRun) error {

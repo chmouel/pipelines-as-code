@@ -1348,6 +1348,56 @@ func TestHandleAnalysisResultCheckRun(t *testing.T) {
 	assert.Equal(t, prov.LastStatusOpts.OriginalPipelineRunName, analysisCheckRunName("review"))
 }
 
+func TestHandleAnalysisResultFailedCheckRun(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	prov := &statusCaptureProvider{}
+	event := testEvent()
+	event.InstallationID = 12345
+
+	repo := testAIRepository()
+	repo.Spec.Settings.AIAnalysis.Roles[0].Output = "check-run"
+
+	result := AnalysisResult{
+		Role: "review",
+		Error: &AnalysisError{
+			Provider: "codex",
+			Type:     "timeout",
+			Message:  "analysis timed out",
+		},
+	}
+
+	err := handleAnalysisResult(context.Background(), testLogger, repo, failedPipelineRun(), event, prov, result, "")
+	assert.NilError(t, err)
+	assert.Assert(t, prov.LastStatusOpts != nil, "should call CreateStatus for failed check-run output")
+	assert.Equal(t, prov.LastStatusOpts.Status, "completed")
+	assert.Equal(t, prov.LastStatusOpts.Conclusion, providerstatus.ConclusionFailure)
+	assert.Assert(t, strings.Contains(prov.LastStatusOpts.Text, "analysis timed out"))
+	assert.Equal(t, len(prov.LastStatusOpts.Actions), 0)
+}
+
+func TestHandleAnalysisResultFailedPRCommentSkipsPublication(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	prov := &commentCaptureProvider{}
+	event := testEvent()
+	event.PullRequestNumber = 42
+
+	repo := testAIRepository()
+
+	result := AnalysisResult{
+		Role: "review",
+		Error: &AnalysisError{
+			Provider: "codex",
+			Type:     "timeout",
+			Message:  "analysis timed out",
+		},
+	}
+
+	err := handleAnalysisResult(context.Background(), testLogger, repo, failedPipelineRun(), event, prov, result, "")
+	assert.NilError(t, err)
+	assert.Equal(t, prov.comment, "")
+	assert.Equal(t, prov.updateMarker, "")
+}
+
 func TestPostQueuedCheckRun(t *testing.T) {
 	testLogger, _ := logger.GetLogger()
 	prov := &statusCaptureProvider{}
@@ -1475,6 +1525,169 @@ func TestExecuteAnalysisDoesNotRecreateQueuedCheckRunWhenAnalysisPipelineRunExis
 	err := ExecuteAnalysis(context.Background(), run, &kubeinteraction.Interaction{}, testLogger, repo, parent, event, prov)
 	assert.NilError(t, err)
 	assert.Assert(t, prov.LastStatusOpts == nil, "existing analysis child PipelineRun should suppress queued check-run creation")
+}
+
+func TestExecuteAnalysisDoesNotCollectPipelineRunWhenPublishingFails(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	parent := failedPipelineRun()
+	parent.Annotations = map[string]string{keys.State: "completed"}
+
+	envelope, err := json.Marshal(AnalysisEnvelope{
+		Status:     "success",
+		Backend:    "codex",
+		Model:      "gpt-5.4-mini",
+		Content:    "analysis complete",
+		TokensUsed: 42,
+		DurationMS: 1500,
+	})
+	assert.NilError(t, err)
+
+	analysisPR := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      analysisPipelineRunName(parent.Name, "review"),
+			Namespace: parent.Namespace,
+			Annotations: map[string]string{
+				keys.LLMAnalysis:          "true",
+				keys.LLMParentPipelineRun: parent.Name,
+				keys.LLMBackend:           "codex",
+				keys.LLMRole:              "review",
+				keys.LLMOutput:            "check-run",
+			},
+			Labels: map[string]string{
+				keys.LLMAnalysis:          "true",
+				keys.LLMParentPipelineRun: parent.Name,
+				keys.LLMOutput:            "check-run",
+			},
+		},
+		Status: tektonv1.PipelineRunStatus{
+			Status: duckv1.Status{
+				Conditions: duckv1.Conditions{
+					{Type: knativeapi.ConditionSucceeded, Status: corev1.ConditionTrue},
+				},
+			},
+			PipelineRunStatusFields: tektonv1.PipelineRunStatusFields{
+				Results: []tektonv1.PipelineRunResult{
+					{
+						Name: analysisResultName,
+						Value: tektonv1.ParamValue{
+							Type:      tektonv1.ParamTypeString,
+							StringVal: string(envelope),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tekton := fakepipelineclientset.NewSimpleClientset(parent, analysisPR) //nolint:staticcheck
+	run := &params.Run{
+		Clients: paramclients.Clients{
+			Tekton: tekton,
+		},
+		Info: info.Info{
+			Pac: &info.PacOpts{
+				Settings: settings.DefaultSettings(),
+			},
+		},
+	}
+	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+
+	repo := testAIRepository()
+	repo.Spec.Settings.AIAnalysis.Roles[0].Output = "check-run"
+	event := testEvent()
+	event.InstallationID = 12345
+	prov := &statusCaptureProvider{
+		TestProviderImp: tprovider.TestProviderImp{CreateStatusErorring: true},
+	}
+
+	err = ExecuteAnalysis(context.Background(), run, &kubeinteraction.Interaction{}, testLogger, repo, parent, event, prov)
+	assert.ErrorContains(t, err, "failed to publish llm result for role review")
+
+	updatedAnalysisPR, err := tekton.TektonV1().PipelineRuns(parent.Namespace).Get(context.Background(), analysisPR.Name, metav1.GetOptions{})
+	assert.NilError(t, err)
+	_, collected := updatedAnalysisPR.Annotations[keys.LLMCollected]
+	assert.Assert(t, !collected, "analysis PipelineRun should remain uncollected when publication fails")
+
+	updatedParent, err := tekton.TektonV1().PipelineRuns(parent.Namespace).Get(context.Background(), parent.Name, metav1.GetOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, updatedParent.Annotations[keys.LLMResultSummary], "")
+}
+
+func TestExecuteAnalysisDoesNotCollectFixPipelineRunWhenPublishingFails(t *testing.T) {
+	testLogger, _ := logger.GetLogger()
+	parent := failedPipelineRun()
+	parent.Annotations = map[string]string{keys.State: "completed"}
+
+	envelope, err := json.Marshal(AnalysisEnvelope{
+		Status:     "success",
+		Backend:    "codex",
+		Model:      "gpt-5.4-mini",
+		Content:    "fix applied",
+		TokensUsed: 12,
+		DurationMS: 800,
+	})
+	assert.NilError(t, err)
+
+	fixPR := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fixPipelineRunName(parent.Name, "review"),
+			Namespace: parent.Namespace,
+			Annotations: map[string]string{
+				keys.LLMFix:               "true",
+				keys.LLMParentPipelineRun: parent.Name,
+				keys.LLMRole:              "review",
+			},
+			Labels: map[string]string{
+				keys.LLMFix:               "true",
+				keys.LLMParentPipelineRun: parent.Name,
+			},
+		},
+		Status: tektonv1.PipelineRunStatus{
+			Status: duckv1.Status{
+				Conditions: duckv1.Conditions{
+					{Type: knativeapi.ConditionSucceeded, Status: corev1.ConditionTrue},
+				},
+			},
+			PipelineRunStatusFields: tektonv1.PipelineRunStatusFields{
+				Results: []tektonv1.PipelineRunResult{
+					{
+						Name: analysisResultName,
+						Value: tektonv1.ParamValue{
+							Type:      tektonv1.ParamTypeString,
+							StringVal: string(envelope),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tekton := fakepipelineclientset.NewSimpleClientset(parent, fixPR) //nolint:staticcheck
+	run := &params.Run{
+		Clients: paramclients.Clients{
+			Tekton: tekton,
+		},
+		Info: info.Info{
+			Pac: &info.PacOpts{
+				Settings: settings.DefaultSettings(),
+			},
+		},
+	}
+	run.Clients.SetConsoleUI(consoleui.FallBackConsole{})
+
+	event := testEvent()
+	event.InstallationID = 12345
+	prov := &statusCaptureProvider{
+		TestProviderImp: tprovider.TestProviderImp{CreateStatusErorring: true},
+	}
+
+	err = ExecuteAnalysis(context.Background(), run, &kubeinteraction.Interaction{}, testLogger, testAIRepository(), parent, event, prov)
+	assert.ErrorContains(t, err, "failed to publish fix result for role review")
+
+	updatedFixPR, err := tekton.TektonV1().PipelineRuns(parent.Namespace).Get(context.Background(), fixPR.Name, metav1.GetOptions{})
+	assert.NilError(t, err)
+	_, collected := updatedFixPR.Annotations[keys.LLMCollected]
+	assert.Assert(t, !collected, "fix PipelineRun should remain uncollected when publication fails")
 }
 
 func testAIRepository() *v1alpha1.Repository {

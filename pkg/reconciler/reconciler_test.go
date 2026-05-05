@@ -42,6 +42,8 @@ import (
 	knativeapi "knative.dev/pkg/apis"
 	knativeduckv1 "knative.dev/pkg/apis/duck/v1"
 	rtesting "knative.dev/pkg/reconciler/testing"
+
+	fakepipelineclientset "github.com/tektoncd/pipeline/pkg/client/clientset/versioned/fake"
 )
 
 var (
@@ -271,6 +273,32 @@ func TestLoadControllerInfo(t *testing.T) {
 	assert.Equal(t, r.run.Info.Controller.Configmap, "tenant-cm")
 	assert.Equal(t, r.run.Info.Controller.Secret, "tenant-secret")
 	assert.Equal(t, r.run.Info.Controller.GlobalRepository, "tenant-global")
+}
+
+func TestReconcileKindSkipsLLMChildPipelineRun(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	child := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "parent-pr-review-1234",
+			Namespace: "ns",
+			Annotations: map[string]string{
+				keys.LLMAnalysis: "true",
+				keys.State:       kubeinteraction.StateCompleted,
+			},
+		},
+	}
+
+	tekton := fakepipelineclientset.NewSimpleClientset(child) //nolint:staticcheck
+	r := Reconciler{
+		run: &params.Run{
+			Clients: clients.Clients{
+				Tekton: tekton,
+			},
+		},
+	}
+
+	event := r.ReconcileKind(ctx, child)
+	assert.Assert(t, event == nil)
 }
 
 func TestUpdatePipelineRunState(t *testing.T) {

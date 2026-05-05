@@ -90,10 +90,6 @@ func ExecuteAnalysis(
 			continue
 		}
 
-		if err := markPipelineRunCollected(ctx, run, analysisPR); err != nil {
-			return fmt.Errorf("failed to mark llm PipelineRun %s collected: %w", analysisPR.Name, err)
-		}
-
 		result, summary := parsePipelineRunEnvelope(ctx, run, analysisPR)
 		analysisDetailsURL := run.Clients.ConsoleUI().DetailURL(analysisPR)
 		if err := handleAnalysisResult(ctx, logger, repo, pr, event, prov, result, analysisDetailsURL); err != nil {
@@ -105,6 +101,9 @@ func ExecuteAnalysis(
 			return fmt.Errorf("failed to persist llm summary for role %s: %w", role, err)
 		}
 		pr = updatedPR
+		if err := markPipelineRunCollected(ctx, run, analysisPR); err != nil {
+			return fmt.Errorf("failed to mark llm PipelineRun %s collected: %w", analysisPR.Name, err)
+		}
 		logger.Infof("Collected LLM PipelineRun result for role %s", role)
 	}
 
@@ -118,14 +117,14 @@ func ExecuteAnalysis(
 		if !fixPR.IsDone() || isPipelineRunCollected(fixPR) {
 			continue
 		}
-		if err := markPipelineRunCollected(ctx, run, fixPR); err != nil {
-			return fmt.Errorf("failed to mark fix PipelineRun %s collected: %w", fixPR.Name, err)
-		}
 		roleName := fixPR.Annotations[keys.LLMRole]
 		result, _ := parsePipelineRunEnvelope(ctx, run, fixPR)
 		fixDetailsURL := run.Clients.ConsoleUI().DetailURL(fixPR)
 		if err := postFixCheckRun(ctx, result, pr, event, prov, logger, fixDetailsURL); err != nil {
-			logger.Warnf("Failed to post fix check run for role %s: %v", roleName, err)
+			return fmt.Errorf("failed to publish fix result for role %s on PipelineRun %s/%s: %w", roleName, fixPR.Namespace, fixPR.Name, err)
+		}
+		if err := markPipelineRunCollected(ctx, run, fixPR); err != nil {
+			return fmt.Errorf("failed to mark fix PipelineRun %s collected: %w", fixPR.Name, err)
 		}
 		logger.Infof("Collected fix PipelineRun result for role %s", roleName)
 	}
@@ -287,9 +286,8 @@ func handleAnalysisResult(
 ) error {
 	if result.Error != nil {
 		logger.Warnf("Analysis failed for role %s: %v", result.Role, result.Error)
-		return nil //nolint:nilerr
 	}
-	if result.Response == nil {
+	if result.Response == nil && result.Error == nil {
 		logger.Warnf("No response for role %s", result.Role)
 		return nil
 	}
@@ -307,6 +305,9 @@ func handleAnalysisResult(
 	}
 	if output == "" {
 		output = "pr-comment"
+	}
+	if result.Error != nil && output != "check-run" {
+		return nil
 	}
 
 	switch output {
@@ -331,6 +332,9 @@ func postPRComment(ctx context.Context, result AnalysisResult, event *info.Event
 	if event.PullRequestNumber == 0 {
 		logger.Debug("No pull request associated with this event, skipping PR comment")
 		return nil
+	}
+	if result.Response == nil {
+		return fmt.Errorf("analysis response is unavailable")
 	}
 
 	comment := formatAnalysisComment(result.Role, result.Response.Content)
@@ -360,11 +364,6 @@ func postCheckRun(
 		return nil
 	}
 
-	content := truncateForCheckRun(normalizeAnalysisContent(result.Response.Content))
-	if content == "" {
-		content = "_The AI analysis returned no output._"
-	}
-
 	parentName := ""
 	if parentPR != nil {
 		parentName = parentPR.Name
@@ -372,10 +371,29 @@ func postCheckRun(
 
 	statusOpts := analysisCheckRunStatusOpts(result.Role, parentName, event.SHA)
 	statusOpts.Status = "completed"
-	statusOpts.Conclusion = status.ConclusionNeutral
-	statusOpts.Text = content
 	statusOpts.DetailsURL = detailsURL
-	if isMachinePatchValid(result.Patch) {
+
+	switch {
+	case result.Error != nil:
+		statusOpts.Conclusion = status.ConclusionFailure
+		statusOpts.Text = truncateForCheckRun(normalizeAnalysisContent(
+			fmt.Sprintf("The AI analysis failed: %v", result.Error),
+		))
+		if statusOpts.Text == "" {
+			statusOpts.Text = "_The AI analysis failed before producing output._"
+		}
+	case result.Response != nil:
+		statusOpts.Conclusion = status.ConclusionNeutral
+		statusOpts.Text = truncateForCheckRun(normalizeAnalysisContent(result.Response.Content))
+		if statusOpts.Text == "" {
+			statusOpts.Text = "_The AI analysis returned no output._"
+		}
+	default:
+		statusOpts.Conclusion = status.ConclusionNeutral
+		statusOpts.Text = "_The AI analysis result is unavailable._"
+	}
+
+	if result.Error == nil && isMachinePatchValid(result.Patch) {
 		statusOpts.Actions = []status.CheckRunAction{
 			{
 				Label:       "Apply Suggestions",
