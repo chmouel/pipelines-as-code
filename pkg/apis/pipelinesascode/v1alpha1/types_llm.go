@@ -57,6 +57,13 @@ type AIAnalysisConfig struct {
 	// +optional
 	VertexRegion string `json:"vertex_region,omitempty"`
 
+	// Env defines global environment variables injected into every analysis
+	// and fix PipelineRun. Role-level Env entries with the same name take precedence.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Env []EnvVar `json:"env,omitempty"`
+
 	// Roles defines different analysis scenarios and their configurations
 	// +listType=map
 	// +listMapKey=name
@@ -121,6 +128,15 @@ type AnalysisRole struct {
 	// ContextItems defines what context data to include in the analysis
 	// +optional
 	ContextItems *ContextConfig `json:"context_items,omitempty"`
+
+	// Env defines environment variables specific to this role. These are injected
+	// into the child PipelineRun and override global-level entries with the same name.
+	// Only effective for roles defined in the Repository CR; repository-backed roles
+	// loaded from .tekton/ai/*.md do not support per-role env (global env still applies).
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Env []EnvVar `json:"env,omitempty"`
 }
 
 // ContextConfig defines what contextual information to include in LLM analysis.

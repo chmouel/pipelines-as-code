@@ -126,6 +126,11 @@ func buildAnalysisPipelineRun(
 	cloneStep := buildCloneStep(repoURL, event.SHA, gitImage)
 
 	analysisEnv, analysisVolumes, analysisVolumeMounts := buildAnalysisEnv(config)
+
+	// Inject user-defined env vars (global merged with role-level, role wins on name collision).
+	// These go before system env vars so reserved names cannot be overridden.
+	analysisEnv = append(analysisEnv, envVarsToK8s(mergeEnvVars(config.Env, exec.Role.Env))...)
+
 	cliTimeout := timeoutSeconds - 60
 	if cliTimeout < 60 {
 		cliTimeout = 60
@@ -363,6 +368,71 @@ func backendTokenEnv(backend AgentBackend) string {
 	default:
 		return "LLM_API_KEY"
 	}
+}
+
+// envVarsToK8s converts v1alpha1.EnvVar entries to corev1.EnvVar.
+// Literal values produce a plain Value field; secret references produce a
+// ValueFrom with SecretKeyRef so the secret value never appears in the
+// PipelineRun spec.
+func envVarsToK8s(envVars []v1alpha1.EnvVar) []corev1.EnvVar {
+	result := make([]corev1.EnvVar, 0, len(envVars))
+	for _, ev := range envVars {
+		if ev.SecretRef != nil {
+			result = append(result, corev1.EnvVar{
+				Name: ev.Name,
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: ev.SecretRef.Name},
+						Key:                  secretKeyOrDefault(ev.SecretRef),
+					},
+				},
+			})
+		} else {
+			result = append(result, corev1.EnvVar{
+				Name:  ev.Name,
+				Value: ev.Value,
+			})
+		}
+	}
+	return result
+}
+
+// mergeEnvVars combines global and role-level env var definitions.
+// Role-level entries override global entries with the same name.
+func mergeEnvVars(global, role []v1alpha1.EnvVar) []v1alpha1.EnvVar {
+	if len(global) == 0 {
+		return role
+	}
+	if len(role) == 0 {
+		return global
+	}
+	roleNames := make(map[string]struct{}, len(role))
+	for _, ev := range role {
+		roleNames[ev.Name] = struct{}{}
+	}
+	merged := make([]v1alpha1.EnvVar, 0, len(global)+len(role))
+	for _, ev := range global {
+		if _, overridden := roleNames[ev.Name]; !overridden {
+			merged = append(merged, ev)
+		}
+	}
+	merged = append(merged, role...)
+	return merged
+}
+
+// findRoleEnv returns the Env slice for the named role, or nil if the role is
+// not found. Only roles defined in the Repository CR are searched (repo-backed
+// roles do not support env vars for security reasons).
+func findRoleEnv(config *v1alpha1.AIAnalysisConfig, name string) []v1alpha1.EnvVar {
+	if config == nil {
+		return nil
+	}
+	for i := range config.Roles {
+		if config.Roles[i].Name == name {
+			return config.Roles[i].Env
+		}
+	}
+	return nil
 }
 
 func secretKeyOrDefault(secretRef *v1alpha1.Secret) string {

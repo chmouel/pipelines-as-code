@@ -768,6 +768,10 @@ func validateAnalysisConfig(config *v1alpha1.AIAnalysisConfig) error {
 		return fmt.Errorf("secret reference name is required")
 	}
 
+	if err := validateEnvVars("env", config.Env); err != nil {
+		return err
+	}
+
 	for i, role := range config.Roles {
 		if role.Name == "" {
 			return fmt.Errorf("role[%d]: name is required", i)
@@ -778,8 +782,54 @@ func validateAnalysisConfig(config *v1alpha1.AIAnalysisConfig) error {
 		if role.GetOutput() != "pr-comment" && role.GetOutput() != "check-run" {
 			return fmt.Errorf("role[%d]: invalid output destination '%s' (only 'pr-comment' and 'check-run' are currently supported)", i, role.GetOutput())
 		}
+		if err := validateEnvVars(fmt.Sprintf("role[%d].env", i), role.Env); err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+// reservedEnvVarNames contains env var names managed by the system.
+var reservedEnvVarNames = map[string]bool{
+	// analysis system vars
+	"CI": true, "LLM_BACKEND": true, "LLM_MODEL": true,
+	"LLM_MAX_TOKENS": true, "LLM_PROMPT_B64": true,
+	"LLM_TIMEOUT_SECONDS": true, "LLM_ROLE_NAME": true,
+	"LLM_COMMIT_SHA":            true,
+	"PAC_LLM_EXECUTION_CONTEXT": true, "PAC_LLM_PIPELINERUN_KIND": true,
+	"PAC_PR_NUMBER": true, "PAC_PR_TITLE": true,
+	"PAC_BASE_BRANCH": true, "PAC_HEAD_BRANCH": true,
+	"PAC_REPO_OWNER": true, "PAC_REPO_NAME": true,
+	"PAC_REPO_URL": true, "PAC_CHANGED_FILES_B64": true,
+	"PAC_CHANGED_FILES_ERROR": true,
+	// backend auth vars
+	"ANTHROPIC_API_KEY": true, "OPENAI_API_KEY": true,
+	"GEMINI_API_KEY": true, "LLM_API_KEY": true,
+	// Vertex/GCP vars
+	"GOOGLE_APPLICATION_CREDENTIALS": true, "GOOGLE_CLOUD_PROJECT": true,
+	"CLOUD_ML_REGION": true, "VERTEX_LOCATION": true,
+	"CLAUDE_CODE_USE_VERTEX": true, "ANTHROPIC_VERTEX_PROJECT_ID": true,
+	// fix system vars
+	"REPO_URL": true, "PR_NUMBER": true, "REPO_DIR": true,
+	"PR_BRANCH": true, "EXPECTED_SHA": true, "ROLE_NAME": true,
+	"FIX_COMMIT_SUBJECT_B64": true, "FIX_COMMIT_BODY_B64": true,
+	"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true,
+	"GIT_COAUTHOR_NAME": true, "GIT_COAUTHOR_EMAIL": true,
+}
+
+func validateEnvVars(prefix string, envVars []v1alpha1.EnvVar) error {
+	for i, ev := range envVars {
+		if ev.Name == "" {
+			return fmt.Errorf("%s[%d]: name is required", prefix, i)
+		}
+		if ev.SecretRef != nil && ev.SecretRef.Name == "" {
+			return fmt.Errorf("%s[%d]: secret_ref.name is required for %q", prefix, i, ev.Name)
+		}
+		if reservedEnvVarNames[ev.Name] {
+			return fmt.Errorf("%s[%d]: env var name %q is reserved by the system", prefix, i, ev.Name)
+		}
+	}
 	return nil
 }
 

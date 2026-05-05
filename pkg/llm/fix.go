@@ -334,7 +334,8 @@ func CreateFixPipelineRun(
 	}
 
 	gitImage := run.Info.GetPacOpts().AIAnalysisGitImage
-	pr := buildFixPipelineRun(&fixConfig, repo, parentPR, event, roleName, encodedPayload, commitSubject, commitBody, gitImage)
+	customEnv := mergeEnvVars(config.Env, findRoleEnv(config, roleName))
+	pr := buildFixPipelineRun(&fixConfig, repo, parentPR, event, roleName, encodedPayload, commitSubject, commitBody, gitImage, customEnv)
 	_, err = run.Clients.Tekton.TektonV1().PipelineRuns(repo.Namespace).Create(ctx, pr, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		logger.Infof("Fix PipelineRun already exists for role %s, skipping", roleName)
@@ -368,6 +369,7 @@ func buildFixPipelineRun(
 	commitSubject string,
 	commitBody string,
 	gitImage string,
+	customEnv []v1alpha1.EnvVar,
 ) *tektonv1.PipelineRun {
 	timeoutSeconds := config.TimeoutSeconds
 	if timeoutSeconds == 0 {
@@ -382,7 +384,9 @@ func buildFixPipelineRun(
 		repoURL = event.CloneURL
 	}
 
-	fixEnv := []corev1.EnvVar{
+	// User-defined env vars go first; fix system vars appended after so they always win.
+	fixEnv := envVarsToK8s(customEnv)
+	fixEnv = append(fixEnv, []corev1.EnvVar{
 		{Name: "REPO_URL", Value: repoURL},
 		{Name: "PR_NUMBER", Value: fmt.Sprintf("%d", event.PullRequestNumber)},
 		{Name: "REPO_DIR", Value: sourceMountPath},
@@ -391,13 +395,11 @@ func buildFixPipelineRun(
 		{Name: "ROLE_NAME", Value: roleName},
 		{Name: "FIX_COMMIT_SUBJECT_B64", Value: base64.StdEncoding.EncodeToString([]byte(commitSubject))},
 		{Name: "FIX_COMMIT_BODY_B64", Value: base64.StdEncoding.EncodeToString([]byte(commitBody))},
-		// AI co-author (always)
 		{Name: "GIT_COAUTHOR_NAME", Value: coAuthorName},
 		{Name: "GIT_COAUTHOR_EMAIL", Value: coAuthorEmail},
-		// Human author (only when trustworthy)
 		{Name: "GIT_AUTHOR_NAME", Value: event.SHAAuthorName},
 		{Name: "GIT_AUTHOR_EMAIL", Value: event.SHAAuthorEmail},
-	}
+	}...)
 
 	workspaces := buildChildPipelineRunWorkspaces(parent)
 	cloneStep := buildCloneStep(repoURL, event.HeadBranch, gitImage)

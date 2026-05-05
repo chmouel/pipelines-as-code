@@ -227,7 +227,7 @@ func TestBuildFixPipelineRunLabelsAndAnnotations(t *testing.T) {
 		SHA:        "abc123",
 	}
 
-	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault)
+	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault, nil)
 
 	// Labels
 	assert.Equal(t, pr.Labels[keys.LLMFix], "true")
@@ -263,7 +263,7 @@ func TestBuildFixPipelineRunSingleTaskWithInlineClone(t *testing.T) {
 		SHA:        "abc123",
 	}
 
-	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault)
+	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault, nil)
 
 	// Should have exactly one PipelineTask
 	assert.Equal(t, len(pr.Spec.PipelineSpec.Tasks), 1)
@@ -275,7 +275,7 @@ func TestBuildFixPipelineRunSingleTaskWithInlineClone(t *testing.T) {
 	cloneStep := task.TaskSpec.Steps[0]
 	assert.Equal(t, cloneStep.Name, gitCloneStepName)
 	assert.Assert(t, cloneStep.Ref == nil, "clone step should be inline shell, not a remote ref")
-	assert.Equal(t, cloneStep.Image, settings.AIAnalysisGitImageDefault)
+	assert.Equal(t, cloneStep.Image, settings.AIAnalysisGitImageDefault, nil)
 	assert.Equal(t, stepEnvValue(cloneStep, "OUTPUT_PATH"), sourceMountPath)
 	assert.Equal(t, stepEnvValue(cloneStep, "REPO_URL"), "https://github.com/test/repo")
 	assert.Equal(t, stepEnvValue(cloneStep, "REVISION"), "feature-branch")
@@ -319,7 +319,7 @@ func TestBuildFixPipelineRunUsesAnalysisChildImageOverride(t *testing.T) {
 	fixConfig := *config
 	fixConfig.Image = analysisPipelineRunImage(analysisPR)
 
-	pr := buildFixPipelineRun(&fixConfig, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault)
+	pr := buildFixPipelineRun(&fixConfig, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault, nil)
 
 	task := pr.Spec.PipelineSpec.Tasks[0]
 	fixStep := task.TaskSpec.Steps[1]
@@ -340,7 +340,7 @@ func TestBuildFixPipelineRunEnvVars(t *testing.T) {
 		SHA:        "abc123",
 	}
 
-	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault)
+	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault, nil)
 
 	task := pr.Spec.PipelineSpec.Tasks[0]
 	fixStep := task.TaskSpec.Steps[1]
@@ -384,7 +384,7 @@ func TestBuildFixPipelineRunGitAuthWorkspace(t *testing.T) {
 		SHA:        "abc123",
 	}
 
-	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault)
+	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", settings.AIAnalysisGitImageDefault, nil)
 
 	task := pr.Spec.PipelineSpec.Tasks[0]
 
@@ -631,7 +631,7 @@ func TestBuildFixPipelineRunAuthorEnvVars(t *testing.T) {
 			SHAAuthorEmail: "jane@example.com",
 		}
 
-		pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", "ghcr.io/git:latest")
+		pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", "ghcr.io/git:latest", nil)
 
 		// Extract env vars from the fix step
 		task := pr.Spec.PipelineSpec.Tasks[0]
@@ -655,7 +655,7 @@ func TestBuildFixPipelineRunAuthorEnvVars(t *testing.T) {
 			// No SHAAuthorName or SHAAuthorEmail
 		}
 
-		pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", "ghcr.io/git:latest")
+		pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer", "encodedpayload", "fix: update docs", "Apply the documentation fix.", "ghcr.io/git:latest", nil)
 
 		// Extract env vars from the fix step
 		task := pr.Spec.PipelineSpec.Tasks[0]

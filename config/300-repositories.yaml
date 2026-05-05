@@ -351,6 +351,36 @@ spec:
                         enabled:
                           description: Enabled controls whether AI analysis is active for this repository
                           type: boolean
+                        env:
+                          description: Env defines global environment variables injected into every analysis and fix PipelineRun.
+                          items:
+                            description: EnvVar defines an environment variable. Either value or secret_ref must be set, not both.
+                            properties:
+                              name:
+                                description: Name of the environment variable.
+                                type: string
+                              secret_ref:
+                                description: References a Kubernetes secret to source the value from.
+                                properties:
+                                  key:
+                                    description: Key in the secret
+                                    type: string
+                                  name:
+                                    description: Name of the secret
+                                    type: string
+                                required:
+                                  - name
+                                type: object
+                              value:
+                                description: Literal value for the environment variable.
+                                type: string
+                            required:
+                              - name
+                            type: object
+                          type: array
+                          x-kubernetes-list-map-keys:
+                            - name
+                          x-kubernetes-list-type: map
                         execution_mode:
                           default: pipelinerun
                           description: ExecutionMode controls how analysis is executed.
@@ -405,6 +435,36 @@ spec:
                                     description: PRContent includes pull request title, description, and metadata
                                     type: boolean
                                 type: object
+                              env:
+                                description: Env defines environment variables specific to this role. Role-level entries override global-level entries with the same name.
+                                items:
+                                  description: EnvVar defines an environment variable. Either value or secret_ref must be set, not both.
+                                  properties:
+                                    name:
+                                      description: Name of the environment variable.
+                                      type: string
+                                    secret_ref:
+                                      description: References a Kubernetes secret to source the value from.
+                                      properties:
+                                        key:
+                                          description: Key in the secret
+                                          type: string
+                                        name:
+                                          description: Name of the secret
+                                          type: string
+                                      required:
+                                        - name
+                                      type: object
+                                    value:
+                                      description: Literal value for the environment variable.
+                                      type: string
+                                  required:
+                                    - name
+                                  type: object
+                                type: array
+                                x-kubernetes-list-map-keys:
+                                  - name
+                                x-kubernetes-list-type: map
                               image:
                                 description: |-
                                   Image overrides the top-level AIAnalysisConfig.Image for this role only.
