@@ -224,6 +224,122 @@ func TestValidateAnalysisConfig(t *testing.T) {
 				SecretRef:     &v1alpha1.Secret{Name: "llm-token", Key: "token"},
 			},
 		},
+		{
+			name: "valid global env with literal value",
+			config: &v1alpha1.AIAnalysisConfig{
+				ExecutionMode: "pipelinerun",
+				Backend:       "codex",
+				Image:         "quay.io/example/codex:latest",
+				SecretRef:     &v1alpha1.Secret{Name: "llm-token", Key: "token"},
+				Env: []v1alpha1.EnvVar{
+					{Name: "HTTPS_PROXY", Value: "http://proxy:8080"},
+				},
+				Roles: []v1alpha1.AnalysisRole{
+					{Name: "review", Prompt: "review this"},
+				},
+			},
+		},
+		{
+			name: "valid global env with secret ref",
+			config: &v1alpha1.AIAnalysisConfig{
+				ExecutionMode: "pipelinerun",
+				Backend:       "codex",
+				Image:         "quay.io/example/codex:latest",
+				SecretRef:     &v1alpha1.Secret{Name: "llm-token", Key: "token"},
+				Env: []v1alpha1.EnvVar{
+					{Name: "CUSTOM_TOKEN", SecretRef: &v1alpha1.Secret{Name: "my-secret", Key: "token"}},
+				},
+				Roles: []v1alpha1.AnalysisRole{
+					{Name: "review", Prompt: "review this"},
+				},
+			},
+		},
+		{
+			name: "valid role env",
+			config: &v1alpha1.AIAnalysisConfig{
+				ExecutionMode: "pipelinerun",
+				Backend:       "codex",
+				Image:         "quay.io/example/codex:latest",
+				SecretRef:     &v1alpha1.Secret{Name: "llm-token", Key: "token"},
+				Roles: []v1alpha1.AnalysisRole{
+					{
+						Name: "review", Prompt: "review this",
+						Env: []v1alpha1.EnvVar{
+							{Name: "MY_VAR", Value: "hello"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:      "env with empty name",
+			wantError: true,
+			config: &v1alpha1.AIAnalysisConfig{
+				ExecutionMode: "pipelinerun",
+				Backend:       "codex",
+				Image:         "quay.io/example/codex:latest",
+				SecretRef:     &v1alpha1.Secret{Name: "llm-token", Key: "token"},
+				Env: []v1alpha1.EnvVar{
+					{Name: "", Value: "foo"},
+				},
+			},
+		},
+		{
+			name: "env with empty string value is valid",
+			config: &v1alpha1.AIAnalysisConfig{
+				ExecutionMode: "pipelinerun",
+				Backend:       "codex",
+				Image:         "quay.io/example/codex:latest",
+				SecretRef:     &v1alpha1.Secret{Name: "llm-token", Key: "token"},
+				Env: []v1alpha1.EnvVar{
+					{Name: "HTTPS_PROXY", Value: ""},
+				},
+			},
+		},
+		{
+			name:      "env with secret_ref missing name",
+			wantError: true,
+			config: &v1alpha1.AIAnalysisConfig{
+				ExecutionMode: "pipelinerun",
+				Backend:       "codex",
+				Image:         "quay.io/example/codex:latest",
+				SecretRef:     &v1alpha1.Secret{Name: "llm-token", Key: "token"},
+				Env: []v1alpha1.EnvVar{
+					{Name: "THING", SecretRef: &v1alpha1.Secret{Key: "k"}},
+				},
+			},
+		},
+		{
+			name:      "env with reserved name LLM_BACKEND",
+			wantError: true,
+			config: &v1alpha1.AIAnalysisConfig{
+				ExecutionMode: "pipelinerun",
+				Backend:       "codex",
+				Image:         "quay.io/example/codex:latest",
+				SecretRef:     &v1alpha1.Secret{Name: "llm-token", Key: "token"},
+				Env: []v1alpha1.EnvVar{
+					{Name: "LLM_BACKEND", Value: "mine"},
+				},
+			},
+		},
+		{
+			name:      "role env with reserved name ANTHROPIC_API_KEY",
+			wantError: true,
+			config: &v1alpha1.AIAnalysisConfig{
+				ExecutionMode: "pipelinerun",
+				Backend:       "codex",
+				Image:         "quay.io/example/codex:latest",
+				SecretRef:     &v1alpha1.Secret{Name: "llm-token", Key: "token"},
+				Roles: []v1alpha1.AnalysisRole{
+					{
+						Name: "review", Prompt: "review this",
+						Env: []v1alpha1.EnvVar{
+							{Name: "ANTHROPIC_API_KEY", Value: "nope"},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -1688,6 +1804,246 @@ func TestExecuteAnalysisDoesNotCollectFixPipelineRunWhenPublishingFails(t *testi
 	assert.NilError(t, err)
 	_, collected := updatedFixPR.Annotations[keys.LLMCollected]
 	assert.Assert(t, !collected, "fix PipelineRun should remain uncollected when publication fails")
+}
+
+func TestEnvVarsToK8s(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []v1alpha1.EnvVar
+		want []corev1.EnvVar
+	}{
+		{
+			name: "empty",
+			in:   nil,
+			want: []corev1.EnvVar{},
+		},
+		{
+			name: "literal value",
+			in:   []v1alpha1.EnvVar{{Name: "FOO", Value: "bar"}},
+			want: []corev1.EnvVar{{Name: "FOO", Value: "bar"}},
+		},
+		{
+			name: "secret ref with explicit key",
+			in:   []v1alpha1.EnvVar{{Name: "TOKEN", SecretRef: &v1alpha1.Secret{Name: "my-secret", Key: "api-key"}}},
+			want: []corev1.EnvVar{{
+				Name: "TOKEN",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "my-secret"},
+						Key:                  "api-key",
+					},
+				},
+			}},
+		},
+		{
+			name: "secret ref defaults key to token",
+			in:   []v1alpha1.EnvVar{{Name: "TOKEN", SecretRef: &v1alpha1.Secret{Name: "my-secret"}}},
+			want: []corev1.EnvVar{{
+				Name: "TOKEN",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "my-secret"},
+						Key:                  "token",
+					},
+				},
+			}},
+		},
+		{
+			name: "mixed literal and secret",
+			in: []v1alpha1.EnvVar{
+				{Name: "A", Value: "1"},
+				{Name: "B", SecretRef: &v1alpha1.Secret{Name: "s", Key: "k"}},
+			},
+			want: []corev1.EnvVar{
+				{Name: "A", Value: "1"},
+				{Name: "B", ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "s"},
+						Key:                  "k",
+					},
+				}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := envVarsToK8s(tt.in)
+			assert.Equal(t, len(got), len(tt.want))
+			for i := range got {
+				assert.Equal(t, got[i].Name, tt.want[i].Name)
+				assert.Equal(t, got[i].Value, tt.want[i].Value)
+				if tt.want[i].ValueFrom != nil {
+					assert.Assert(t, got[i].ValueFrom != nil, "expected ValueFrom for %s", got[i].Name)
+					assert.Equal(t, got[i].ValueFrom.SecretKeyRef.Name, tt.want[i].ValueFrom.SecretKeyRef.Name)
+					assert.Equal(t, got[i].ValueFrom.SecretKeyRef.Key, tt.want[i].ValueFrom.SecretKeyRef.Key)
+				} else {
+					assert.Assert(t, got[i].ValueFrom == nil, "unexpected ValueFrom for %s", got[i].Name)
+				}
+			}
+		})
+	}
+}
+
+func TestMergeEnvVars(t *testing.T) {
+	tests := []struct {
+		name   string
+		global []v1alpha1.EnvVar
+		role   []v1alpha1.EnvVar
+		want   []string
+	}{
+		{
+			name: "both empty",
+			want: nil,
+		},
+		{
+			name:   "global only",
+			global: []v1alpha1.EnvVar{{Name: "A", Value: "1"}},
+			want:   []string{"A"},
+		},
+		{
+			name: "role only",
+			role: []v1alpha1.EnvVar{{Name: "B", Value: "2"}},
+			want: []string{"B"},
+		},
+		{
+			name:   "role overrides global",
+			global: []v1alpha1.EnvVar{{Name: "X", Value: "global"}},
+			role:   []v1alpha1.EnvVar{{Name: "X", Value: "role"}},
+			want:   []string{"X"},
+		},
+		{
+			name:   "non-conflicting merge",
+			global: []v1alpha1.EnvVar{{Name: "A", Value: "1"}},
+			role:   []v1alpha1.EnvVar{{Name: "B", Value: "2"}},
+			want:   []string{"A", "B"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeEnvVars(tt.global, tt.role)
+			if tt.want == nil {
+				assert.Assert(t, len(got) == 0)
+				return
+			}
+			assert.Equal(t, len(got), len(tt.want))
+			for i, name := range tt.want {
+				assert.Equal(t, got[i].Name, name)
+			}
+			if tt.name == "role overrides global" {
+				assert.Equal(t, got[0].Value, "role")
+			}
+		})
+	}
+}
+
+func TestBuildAnalysisPipelineRunCustomEnv(t *testing.T) {
+	config := &v1alpha1.AIAnalysisConfig{
+		ExecutionMode: "pipelinerun",
+		Backend:       "codex",
+		Image:         "quay.io/example/codex:latest",
+		SecretRef:     &v1alpha1.Secret{Name: "llm-token", Key: "token"},
+		Env: []v1alpha1.EnvVar{
+			{Name: "HTTPS_PROXY", Value: "http://proxy:8080"},
+			{Name: "SHARED_VAR", Value: "global-val"},
+		},
+		Roles: []v1alpha1.AnalysisRole{
+			{
+				Name: "review", Prompt: "review this",
+				Env: []v1alpha1.EnvVar{
+					{Name: "ROLE_SECRET", SecretRef: &v1alpha1.Secret{Name: "role-sec", Key: "key"}},
+					{Name: "SHARED_VAR", Value: "role-val"},
+				},
+			},
+		},
+	}
+	repo := &v1alpha1.Repository{
+		ObjectMeta: metav1.ObjectMeta{Name: "repo", Namespace: "ns"},
+		Spec:       v1alpha1.RepositorySpec{Settings: &v1alpha1.Settings{AIAnalysis: config}},
+	}
+	parent := failedPipelineRun()
+	event := testEvent()
+	exec := roleExecution{
+		Role:     config.Roles[0],
+		Rendered: "analyze this",
+	}
+
+	pr := buildAnalysisPipelineRun(config, repo, parent, event, exec, settings.AIAnalysisGitImageDefault)
+	stepEnv := pr.Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[1].Env
+
+	envMap := map[string]corev1.EnvVar{}
+	for _, ev := range stepEnv {
+		envMap[ev.Name] = ev
+	}
+
+	// Custom literal env var from global config is present
+	assert.Equal(t, envMap["HTTPS_PROXY"].Value, "http://proxy:8080")
+
+	// Role overrides global for SHARED_VAR
+	assert.Equal(t, envMap["SHARED_VAR"].Value, "role-val")
+
+	// Secret ref from role level uses SecretKeyRef
+	roleSecret := envMap["ROLE_SECRET"]
+	assert.Assert(t, roleSecret.ValueFrom != nil)
+	assert.Equal(t, roleSecret.ValueFrom.SecretKeyRef.Name, "role-sec")
+	assert.Equal(t, roleSecret.ValueFrom.SecretKeyRef.Key, "key")
+
+	// System env vars are still present and not overridden
+	assert.Equal(t, envMap["LLM_BACKEND"].Value, "codex")
+	assert.Equal(t, envMap["CI"].Value, "true")
+}
+
+func TestBuildFixPipelineRunCustomEnv(t *testing.T) {
+	config := &v1alpha1.AIAnalysisConfig{
+		ExecutionMode: "pipelinerun",
+		Backend:       "codex",
+		Image:         "quay.io/example/codex:latest",
+		SecretRef:     &v1alpha1.Secret{Name: "llm-token", Key: "token"},
+	}
+	parent := failedPipelineRun()
+	event := &info.Event{
+		PullRequestNumber: 42,
+		HeadBranch:        "feature-branch",
+		URL:               "https://github.com/test/repo",
+		SHA:               "abc123",
+	}
+	customEnv := []v1alpha1.EnvVar{
+		{Name: "HTTPS_PROXY", Value: "http://proxy:8080"},
+		{Name: "CUSTOM_SECRET", SecretRef: &v1alpha1.Secret{Name: "sec", Key: "k"}},
+	}
+
+	pr := buildFixPipelineRun(config, testAIRepository(), parent, event, "reviewer",
+		"encodedpayload", "fix: update docs", "Apply the fix.", settings.AIAnalysisGitImageDefault, customEnv)
+
+	fixStep := pr.Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[1]
+	envMap := map[string]corev1.EnvVar{}
+	for _, ev := range fixStep.Env {
+		envMap[ev.Name] = ev
+	}
+
+	// Custom env present
+	assert.Equal(t, envMap["HTTPS_PROXY"].Value, "http://proxy:8080")
+	assert.Assert(t, envMap["CUSTOM_SECRET"].ValueFrom != nil)
+	assert.Equal(t, envMap["CUSTOM_SECRET"].ValueFrom.SecretKeyRef.Name, "sec")
+
+	// System env still wins (REPO_URL comes after custom env)
+	assert.Equal(t, envMap["REPO_URL"].Value, "https://github.com/test/repo")
+	assert.Equal(t, envMap["ROLE_NAME"].Value, "reviewer")
+}
+
+func TestFindRoleEnv(t *testing.T) {
+	config := &v1alpha1.AIAnalysisConfig{
+		Roles: []v1alpha1.AnalysisRole{
+			{Name: "a", Env: []v1alpha1.EnvVar{{Name: "X", Value: "1"}}},
+			{Name: "b"},
+		},
+	}
+	got := findRoleEnv(config, "a")
+	assert.Equal(t, len(got), 1)
+	assert.Equal(t, got[0].Name, "X")
+
+	assert.Assert(t, findRoleEnv(config, "b") == nil)
+	assert.Assert(t, findRoleEnv(config, "missing") == nil)
+	assert.Assert(t, findRoleEnv(nil, "a") == nil)
 }
 
 func testAIRepository() *v1alpha1.Repository {
