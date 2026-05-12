@@ -49,6 +49,7 @@ func TestSyncConfig(t *testing.T) {
 				CustomConsolePRTaskLog:               "",
 				CustomConsoleNamespaceURL:            "",
 				RememberOKToTest:                     false,
+				AIAnalysisGitImage:                   AIAnalysisGitImageDefault,
 			},
 		},
 		{
@@ -110,6 +111,7 @@ func TestSyncConfig(t *testing.T) {
 				CustomConsoleNamespaceURL:            "https://custom-console-namespace",
 				RememberOKToTest:                     false,
 				RequireOkToTestSHA:                   true,
+				AIAnalysisGitImage:                   AIAnalysisGitImageDefault,
 			},
 		},
 		{

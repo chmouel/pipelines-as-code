@@ -173,11 +173,9 @@ data:
   # Default: true
   skip-push-event-for-pr-commits: "true"
 
-  # PipelineRun label names PaC reads to populate tracing span attributes.
-  # Empty disables emission of the corresponding attribute.
-  tracing-label-action: "delivery.tekton.dev/action"
-  tracing-label-application: "delivery.tekton.dev/application"
-  tracing-label-component: "delivery.tekton.dev/component"
+  # The container image used for cloning repositories in AI analysis PipelineRuns.
+  # Override this if you need to use a private or downstream-specific git image.
+  ai-analysis-git-image: "alpine/git:latest"
 
   # Configure a custom console here, the driver support custom parameters from
   # Repo CR along a few other template variable, see documentation for more

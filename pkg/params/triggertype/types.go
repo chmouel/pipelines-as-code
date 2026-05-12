@@ -34,6 +34,8 @@ func StringToType(s string) Trigger {
 		return CheckSuiteRerequested
 	case CheckRunRerequested.String():
 		return CheckRunRerequested
+	case CheckRunRequestedAction.String():
+		return CheckRunRequestedAction
 	case Incoming.String():
 		return Incoming
 	case Comment.String():
@@ -45,15 +47,16 @@ func StringToType(s string) Trigger {
 }
 
 const (
-	Cancel                Trigger = "cancel"
-	CheckRunRerequested   Trigger = "check-run-rerequested"
-	CheckSuiteRerequested Trigger = "check-suite-rerequested"
-	Comment               Trigger = "comment"
-	Incoming              Trigger = "incoming"
-	PullRequestLabeled    Trigger = "pull_request_labeled"
-	OkToTest              Trigger = "ok-to-test"
-	PullRequestClosed     Trigger = "pull_request_closed"
-	PullRequest           Trigger = "pull_request" // it's should be "pull_request_opened_updated" but let's keep it simple.
-	Push                  Trigger = "push"
-	Retest                Trigger = "retest"
+	Cancel                  Trigger = "cancel"
+	CheckRunRerequested     Trigger = "check-run-rerequested"
+	CheckRunRequestedAction Trigger = "check-run-requested-action"
+	CheckSuiteRerequested   Trigger = "check-suite-rerequested"
+	Comment                 Trigger = "comment"
+	Incoming                Trigger = "incoming"
+	PullRequestLabeled      Trigger = "pull_request_labeled"
+	OkToTest                Trigger = "ok-to-test"
+	PullRequestClosed       Trigger = "pull_request_closed"
+	PullRequest             Trigger = "pull_request" // it's should be "pull_request_opened_updated" but let's keep it simple.
+	Push                    Trigger = "push"
+	Retest                  Trigger = "retest"
 )

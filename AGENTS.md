@@ -104,3 +104,55 @@ For complex workflows, use these repo-local skills:
 
 - **Commit messages**: Conventional commits with Jira integration, line length validation, required footers. Trigger: "create commit", "commit changes", "generate commit message"
 - **Jira tickets**: SRVKP story and bug templates with Jira markdown formatting. Trigger: "create Jira story", "create Jira bug", "SRVKP ticket"
+
+## Current Work in Progress — LLM/AI Pull Request Analysis (`new-ai` branch)
+
+### Investigation
+
+if you need to some invesitgation of a failure we usually use the kind local cluster it's available with this KUBECONFIG=/home/chmouel/.kube/config.civuole and inside the namespace `civuole`.
+
+### What This Feature Does
+
+When a Tekton PipelineRun completes (success or failure) PAC can optionally spawn
+child PipelineRuns that invoke an LLM backend (claude, codex, gemini, opencode) and
+post the analysis result back to the PR as a comment or GitHub check-run annotation.
+
+### Architecture at a Glance
+
+```console
+Parent PipelineRun completes
+  → ReconcileKind() → llm.ExecuteAnalysis()
+    → Evaluate CEL per Role → Build context (logs, diffs, errors, files)
+    → Create child PipelineRun (fetch-repo + run-analysis)
+      → analysis.sh runs CLI tool → outputs AnalysisEnvelope JSON
+    → Next reconcile: parse envelope → post PR comment or check-run
+      → check-run includes "Apply Suggestions" button (GitHub App only)
+
+User clicks "Apply Suggestions" button on analysis check run
+  → GitHub sends check_run.requested_action webhook
+  → sinker intercepts → validates external ID → creates fix PipelineRun
+    → fix.sh runs Claude with tools → commits & pushes changes
+  → Next reconcile: collects fix result → posts AI Fix check run
+```
+
+### Configuration Example
+
+```yaml
+spec:
+  settings:
+    ai_analysis:
+      enabled: true
+      backend: claude          # claude | codex | gemini | opencode | claude-vertex
+      image: ghcr.io/openshift-pipelines/ai-agents:latest
+      secret_ref: { name: llm-api-key, key: token }
+      timeout_seconds: 900
+      roles:
+        - name: failure-analyzer
+          prompt: "Analyze this CI failure and suggest a fix."
+          on_cel: "body.pipelineRun.status.conditions[0].reason == 'Failed'"
+          output: pr-comment    # pr-comment | check-run
+          context_items:
+            error_content: true
+            container_logs: { enabled: true, max_lines: 100 }
+            diff_content: true
+```

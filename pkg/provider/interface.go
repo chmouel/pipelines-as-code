@@ -23,11 +23,13 @@ type Interface interface {
 	CreateStatus(context.Context, *info.Event, status.StatusOpts) error
 	GetTektonDir(context.Context, *info.Event, string, string) (string, error)      // ctx, event, path, provenance
 	GetFileInsideRepo(context.Context, *info.Event, string, string) (string, error) // ctx, event, path, branch
+	ListDirFilesInsideRepo(context.Context, *info.Event, string) ([]string, error)  // ctx, event, path
 	SetClient(context.Context, *params.Run, *info.Event, *v1alpha1.Repository, *events.EventEmitter) error
 	SetPacInfo(*info.PacOpts)
 	GetCommitInfo(context.Context, *info.Event) error
 	GetConfig() *info.ProviderConfig
 	GetFiles(context.Context, *info.Event) (changedfiles.ChangedFiles, error)
+	GetPullRequestDiff(context.Context, *info.Event) (string, error)
 	GetTaskURI(ctx context.Context, event *info.Event, uri string) (bool, string, error)
 	CreateToken(context.Context, []string, *info.Event) (string, error)
 	CheckPolicyAllowing(context.Context, *info.Event, []string) (bool, string)

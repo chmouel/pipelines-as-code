@@ -327,6 +327,9 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 	v.repo = repo
 	v.eventEmitter = eventsEmitter
 	v.triggerEvent = event.EventType
+	if v.Logger == nil && run != nil && run.Clients.Log != nil {
+		v.Logger = run.Clients.Log
+	}
 
 	// check that the Client is not already set, so we don't override our fakeclient
 	// from unittesting.
@@ -355,7 +358,9 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 
 	// Handle GitHub App token scoping for both global and repo-level configuration
 	if event.InstallationID > 0 {
-		v.Logger.Debugf("setupAuthenticatedClient: scoping github app token")
+		if v.Logger != nil {
+			v.Logger.Debugf("setupAuthenticatedClient: scoping github app token")
+		}
 		token, err := ScopeTokenToListOfRepos(ctx, v, v.pacInfo, repo, run, event, v.eventEmitter, v.Logger)
 		if err != nil {
 			return fmt.Errorf("failed to scope token: %w", err)
@@ -365,7 +370,6 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, event *info.E
 			event.Provider.Token = token
 		}
 	}
-
 	return nil
 }
 
@@ -509,6 +513,54 @@ func (v *Provider) GetCommitInfo(ctx context.Context, runevent *info.Event) erro
 	return nil
 }
 
+// ListDirFilesInsideRepo returns the paths of all files directly inside path at the
+// event SHA. Returns an empty slice without error if the directory does not exist.
+func (v *Provider) ListDirFilesInsideRepo(ctx context.Context, runevent *info.Event, path string) ([]string, error) {
+	// Walk each path segment: a non-recursive root tree fetch only returns
+	// immediate children, so ".tekton/ai" won't appear there — only ".tekton" will.
+	segments := strings.Split(path, "/")
+	currentSHA := runevent.SHA
+
+	for i, segment := range segments {
+		objects, _, err := wrapAPI(v, "list_dir_tree", func() (*github.Tree, *github.Response, error) {
+			return v.Client().Git.GetTree(ctx, runevent.Organization, runevent.Repository, currentSHA, false)
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		found := false
+		for _, object := range objects.Entries {
+			if object.GetPath() == segment {
+				if object.GetType() != "tree" {
+					return nil, fmt.Errorf("%s has been found but is not a directory", strings.Join(segments[:i+1], "/"))
+				}
+				currentSHA = object.GetSHA()
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, nil
+		}
+	}
+
+	dirObjects, _, err := wrapAPI(v, "list_dir_subtree", func() (*github.Tree, *github.Response, error) {
+		return v.Client().Git.GetTree(ctx, runevent.Organization, runevent.Repository, currentSHA, true)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var files []string
+	for _, entry := range dirObjects.Entries {
+		if entry.GetType() == "blob" && strings.HasSuffix(entry.GetPath(), ".md") {
+			files = append(files, path+"/"+entry.GetPath())
+		}
+	}
+	return files, nil
+}
+
 // GetFileInsideRepo Get a file via Github API using the runinfo information, we
 // branch is true, the user the branch as ref instead of the SHA
 // TODO: merge GetFileInsideRepo amd GetTektonDir.
@@ -594,7 +646,7 @@ func (v *Provider) concatAllYamlFiles(ctx context.Context, objects []*github.Tre
 // getPullRequest get a pull request details, caching the result for the lifetime of the event.
 func (v *Provider) getPullRequest(ctx context.Context, runevent *info.Event) (*info.Event, error) {
 	if v.cachedPullRequest != nil {
-		return runevent, nil
+		return v.populateRunEventFromPullRequest(runevent, v.cachedPullRequest), nil
 	}
 	pr, _, err := wrapAPI(v, "get_pull_request", func() (*github.PullRequest, *github.Response, error) {
 		return v.Client().PullRequests.Get(ctx, runevent.Organization, runevent.Repository, runevent.PullRequestNumber)
@@ -708,6 +760,33 @@ func (v *Provider) fetchChangedFiles(ctx context.Context, runevent *info.Event) 
 		// No action necessary
 	}
 	return changedFiles, nil
+}
+
+// GetPullRequestDiff returns the unified diff for a pull request.
+func (v *Provider) GetPullRequestDiff(ctx context.Context, runevent *info.Event) (string, error) {
+	if runevent.PullRequestNumber == 0 {
+		return "", nil
+	}
+	opt := &github.ListOptions{PerPage: v.PaginedNumber}
+	var patches []string
+	for {
+		files, resp, err := wrapAPI(v, "list_pull_request_files_for_diff", func() ([]*github.CommitFile, *github.Response, error) {
+			return v.Client().PullRequests.ListFiles(ctx, runevent.Organization, runevent.Repository, runevent.PullRequestNumber, opt)
+		})
+		if err != nil {
+			return "", err
+		}
+		for _, f := range files {
+			if f.Patch != nil && *f.Patch != "" {
+				patches = append(patches, fmt.Sprintf("--- a/%s\n+++ b/%s\n%s", f.GetFilename(), f.GetFilename(), *f.Patch))
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
+	}
+	return strings.Join(patches, "\n"), nil
 }
 
 // getObject Get an object from a repository.

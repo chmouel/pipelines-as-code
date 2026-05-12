@@ -543,6 +543,56 @@ func (v *Provider) getObject(sha string, event *info.Event) ([]byte, error) {
 	return decoded, err
 }
 
+// ListDirFilesInsideRepo returns the paths of all .md files inside path at the event SHA.
+// Returns an empty slice without error if the directory does not exist.
+func (v *Provider) ListDirFilesInsideRepo(_ context.Context, event *info.Event, path string) ([]string, error) {
+	// Walk each path segment: a non-recursive root tree fetch only returns
+	// immediate children, so ".tekton/ai" won't appear there — only ".tekton" will.
+	segments := strings.Split(path, "/")
+	currentSHA := event.SHA
+
+	for i, segment := range segments {
+		objects, _, err := v.Client().GetTrees(event.Organization, event.Repository, currentSHA, forgejo.GetTreesOptions{Recursive: false})
+		if err != nil {
+			return nil, err
+		}
+
+		found := false
+		for _, object := range objects.Entries {
+			if object.Path == segment {
+				if object.Type != "tree" {
+					return nil, fmt.Errorf("%s has been found but is not a directory", strings.Join(segments[:i+1], "/"))
+				}
+				currentSHA = object.SHA
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, nil
+		}
+	}
+
+	var files []string
+	opts := forgejo.GetTreesOptions{Recursive: true, ListOptions: forgejo.ListOptions{PageSize: 100, Page: 1}}
+	for {
+		dirObjects, _, err := v.Client().GetTrees(event.Organization, event.Repository, currentSHA, opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range dirObjects.Entries {
+			if entry.Type == "blob" && strings.HasSuffix(entry.Path, ".md") {
+				files = append(files, path+"/"+entry.Path)
+			}
+		}
+		if !dirObjects.Truncated {
+			break
+		}
+		opts.Page++
+	}
+	return files, nil
+}
+
 func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, path, target string) (string, error) {
 	ref := runevent.SHA
 	if target != "" {
@@ -716,6 +766,18 @@ func (v *Provider) fetchChangedFiles(_ context.Context, runevent *info.Event) (c
 	}
 
 	return changedFiles, nil
+}
+
+// GetPullRequestDiff returns the unified diff for a pull request.
+func (v *Provider) GetPullRequestDiff(_ context.Context, runevent *info.Event) (string, error) {
+	if runevent.PullRequestNumber == 0 {
+		return "", nil
+	}
+	rawDiff, _, err := v.Client().GetPullRequestDiff(runevent.Organization, runevent.Repository, int64(runevent.PullRequestNumber), forgejo.PullRequestDiffOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get pull request diff: %w", err)
+	}
+	return string(rawDiff), nil
 }
 
 func (v *Provider) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {

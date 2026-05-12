@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/changedfiles"
@@ -31,10 +32,13 @@ type TestProviderImp struct {
 	WantDeletedFiles       []string
 	WantModifiedFiles      []string
 	WantRenamedFiles       []string
+	WantPullRequestDiff    string
+	WantGetFilesError      string
 	FailGetCommitInfo      bool
 	CommitInfoErrorMsg     string
 	pacInfo                *info.PacOpts
 	CommitStatuses         []provider.CommitStatusInfo
+	LastStatusOpts         *providerstatus.StatusOpts
 }
 
 func (v *TestProviderImp) SetPacInfo(pacInfo *info.PacOpts) {
@@ -105,7 +109,8 @@ func (v *TestProviderImp) GetTaskURI(_ context.Context, _ *info.Event, _ string)
 	return v.WantProviderRemoteTask, "", nil
 }
 
-func (v *TestProviderImp) CreateStatus(_ context.Context, _ *info.Event, _ providerstatus.StatusOpts) error {
+func (v *TestProviderImp) CreateStatus(_ context.Context, _ *info.Event, opts providerstatus.StatusOpts) error {
+	v.LastStatusOpts = &opts
 	if v.CreateStatusErorring {
 		return fmt.Errorf("some provider error occurred while reporting status")
 	}
@@ -123,9 +128,23 @@ func (v *TestProviderImp) GetFileInsideRepo(_ context.Context, _ *info.Event, fi
 	return "", fmt.Errorf("could not find %s in tests", file)
 }
 
+func (v *TestProviderImp) ListDirFilesInsideRepo(_ context.Context, _ *info.Event, path string) ([]string, error) {
+	prefix := path + "/"
+	var files []string
+	for k := range v.FilesInsideRepo {
+		if strings.HasPrefix(k, prefix) && strings.HasSuffix(k, ".md") {
+			files = append(files, k)
+		}
+	}
+	return files, nil
+}
+
 func (v *TestProviderImp) GetFiles(_ context.Context, _ *info.Event) (changedfiles.ChangedFiles, error) {
 	if v == nil {
 		return changedfiles.ChangedFiles{}, nil
+	}
+	if v.WantGetFilesError != "" {
+		return changedfiles.ChangedFiles{}, fmt.Errorf("%s", v.WantGetFilesError)
 	}
 	return changedfiles.ChangedFiles{
 		All:      v.WantAllChangedFiles,
@@ -134,6 +153,10 @@ func (v *TestProviderImp) GetFiles(_ context.Context, _ *info.Event) (changedfil
 		Modified: v.WantModifiedFiles,
 		Renamed:  v.WantRenamedFiles,
 	}, nil
+}
+
+func (v *TestProviderImp) GetPullRequestDiff(_ context.Context, _ *info.Event) (string, error) {
+	return v.WantPullRequestDiff, nil
 }
 
 func (v *TestProviderImp) CreateToken(_ context.Context, _ []string, _ *info.Event) (string, error) {

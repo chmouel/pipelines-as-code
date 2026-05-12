@@ -90,6 +90,8 @@ If your LLM provider bills are higher than expected, take these steps to reduce 
 2. Lower the `max_tokens` value to shorten responses.
 3. Reduce `container_logs.max_lines` to send less context per request.
 4. Switch to a more economical model for roles that do not require deep analysis.
+5. Be aware that `diff_content` can add up to 10,000 characters of diff text to each request. For repositories with large pull requests, this significantly increases token usage.
+6. Each file listed in `files` adds its full content to the context. Keep file sizes small (prefer concise instruction files like `AGENTS.md` over large documentation files).
 
 ## Limitations
 

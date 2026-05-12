@@ -9,17 +9,47 @@ import (
 
 func TestBuildPrompt(t *testing.T) {
 	tests := []struct {
-		name        string
-		request     *AnalysisRequest
-		wantContain []string
-		wantErr     bool
+		name           string
+		request        *AnalysisRequest
+		wantContain    []string
+		wantNotContain []string
+		wantErr        bool
 	}{
 		{
 			name: "simple prompt without context",
 			request: &AnalysisRequest{
 				Prompt: "Analyze this error",
 			},
-			wantContain: []string{"Analyze this error"},
+			wantContain: []string{
+				"Write for a pull request author scanning a GitHub check-run",
+				"modify the repository files directly",
+				"Do not only\ndescribe",
+				"follow-up automation when\nsupported",
+				"Base every conclusion on the provided evidence",
+				"Use markdown headings and usually present these sections",
+				"## Root cause",
+				"## Evidence",
+				"## Proposed fix",
+				"## Why this works",
+				"## Skills used",
+				"List each skill that was relevant to this task and mark it as one",
+				"Executed: the skill matched the task and you followed it",
+				"Skipped: the skill was available but did not match the task",
+				"Blocked: the skill matched, but you could not execute it",
+				"If no project skills were relevant, say that explicitly",
+				"Prefer specific diagnosis over generic conclusions",
+				"pod is unschedulable because the manifest requires a node label",
+				"Prefer the smallest change that preserves the apparent intent",
+				"Do not remove or weaken constraints such as node selectors",
+				"separate proven blockers from secondary or\nspeculative contributors",
+				"describe it as the proposed fix\nfor the pull request",
+				"Keep the full response under 65,000 characters",
+				"Analyze this error",
+			},
+			wantNotContain: []string{
+				"Click **Apply Suggestions** above to apply the proposed fix",
+				"Apply Suggestions button",
+			},
 		},
 		{
 			name: "prompt with string context",
@@ -108,6 +138,10 @@ func TestBuildPrompt(t *testing.T) {
 				for _, want := range tt.wantContain {
 					assert.Assert(t, strings.Contains(prompt, want),
 						"prompt should contain %q, got: %s", want, prompt)
+				}
+				for _, want := range tt.wantNotContain {
+					assert.Assert(t, !strings.Contains(prompt, want),
+						"prompt should not contain %q, got: %s", want, prompt)
 				}
 			}
 		})

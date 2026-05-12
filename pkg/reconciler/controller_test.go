@@ -50,6 +50,53 @@ func TestCheckStateAndEnqueue(t *testing.T) {
 	assert.Equal(t, catcher.FilterMessageSnippet("Adding to queue namespace/force-me").Len(), 1)
 }
 
+func TestCheckStateAndEnqueueLLMAnalysisPipelineRun(t *testing.T) {
+	observer, catcher := zapobserver.New(zap.DebugLevel)
+	logger := zap.New(observer).Sugar()
+	wh := &fakeReconciler{}
+	impl := controller.NewContext(context.TODO(), wh, controller.ControllerOptions{
+		WorkQueueName: "ValidationWebhook",
+		Logger:        logger.Named("ValidationWebhook"),
+	})
+
+	childPR := &pipelinev1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llm-child",
+			Namespace: "namespace",
+			Annotations: map[string]string{
+				keys.LLMAnalysis:          "true",
+				keys.LLMParentPipelineRun: "parent-pr",
+			},
+		},
+	}
+
+	checkStateAndEnqueue(impl)(childPR)
+	assert.Equal(t, catcher.FilterMessageSnippet("Adding to queue namespace/parent-pr").Len(), 1)
+}
+
+func TestCheckStateAndEnqueueIgnoresNonLLMPipelineRuns(t *testing.T) {
+	observer, catcher := zapobserver.New(zap.DebugLevel)
+	logger := zap.New(observer).Sugar()
+	wh := &fakeReconciler{}
+	impl := controller.NewContext(context.TODO(), wh, controller.ControllerOptions{
+		WorkQueueName: "ValidationWebhook",
+		Logger:        logger.Named("ValidationWebhook"),
+	})
+
+	plainPR := &pipelinev1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "plain-child",
+			Namespace: "repo-ns",
+			Annotations: map[string]string{
+				keys.LLMParentPipelineRun: "parent-pr",
+			},
+		},
+	}
+
+	checkStateAndEnqueue(impl)(plainPR)
+	assert.Equal(t, catcher.FilterMessageSnippet("Adding to queue").Len(), 0)
+}
+
 func TestCtrlOpts(t *testing.T) {
 	observer, _ := zapobserver.New(zap.DebugLevel)
 	logger := zap.New(observer).Sugar()

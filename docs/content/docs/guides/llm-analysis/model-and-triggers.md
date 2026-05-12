@@ -7,45 +7,90 @@ This page explains how to choose the right LLM model for each analysis role and 
 
 ## Model Selection
 
-Each analysis role can specify a different model. Choosing the right model lets you balance cost against analysis depth. If you do not specify a model, Pipelines-as-Code uses provider-specific defaults:
+Each analysis role can specify a different model. If you do not set `model`, the backend CLI uses its own default. Choosing the right model lets you balance cost against analysis depth.
 
-- **OpenAI**: `gpt-5.4-mini`
-- **Gemini**: `gemini-3.1-flash-lite-preview`
+Backend model names follow each CLI's own convention:
 
-### Specifying Models
+| Backend | Example models |
+| ------- | ------------- |
+| `claude` | `claude-opus-4-5`, `claude-sonnet-4-5`, `claude-haiku-4-5` |
+| `codex` | `codex-mini-latest`, `gpt-4.1`, `o4-mini` |
+| `gemini` | `gemini-2.5-pro`, `gemini-2.5-flash` |
 
-You can use any model name that your chosen LLM provider supports. Consult the provider's documentation for available models:
-
-- **OpenAI Models**: <https://platform.openai.com/docs/models>
-- **Gemini Models**: <https://ai.google.dev/gemini-api/docs/models/gemini>
+Consult the documentation for your chosen backend to find current model names.
 
 ### Example: Assigning Different Models per Role
 
-The following example shows how to assign a different model to each analysis role, matching the model's capability to the task's complexity:
+The following example uses the `claude` backend and assigns a different model to each role:
 
 ```yaml
 settings:
   ai:
     enabled: true
-    provider: "openai"
+    backend: "claude"
+    image: "ghcr.io/openshift-pipelines/ai-agents:latest"
     secret_ref:
-      name: "openai-api-key"
+      name: "anthropic-api-key"
       key: "token"
     roles:
-      # Use the most capable model for complex analysis
+      # Use the most capable model for deep security analysis
       - name: "security-analysis"
-        model: "gpt-5"
+        model: "claude-opus-4-5"
         prompt: "Analyze security failures..."
 
-      # Use default model (gpt-5.4-mini) for general analysis
+      # Use default model for general analysis
       - name: "general-failure"
-        # No model specified - uses provider default
+        # No model specified - uses backend default
         prompt: "Analyze this failure..."
 
-      # Use the most economical model for quick checks
+      # Use a fast, economical model for quick checks
       - name: "quick-check"
-        model: "gpt-5-nano"
+        model: "claude-haiku-4-5"
         prompt: "Quick diagnosis..."
+```
+
+## Image Selection
+
+By default every role shares the single `image` defined at the top level of `ai_analysis`. When
+different roles require different container images — for example a lightweight image for quick
+failure summaries and a heavier image with additional tools for code rewrites — you can override
+the image per role using the `image` field.
+
+When `image` is set on a role, Pipelines-as-Code uses that image for the child PipelineRun it
+creates for that role. All other roles without an `image` field continue to use the global default.
+
+### Example: Per-Role Image Override
+
+```yaml
+settings:
+  ai_analysis:
+    enabled: true
+    backend: "claude"
+    image: "ghcr.io/openshift-pipelines/ai-agents:latest"   # default for all roles
+    secret_ref:
+      name: "anthropic-api-key"
+      key: "token"
+    roles:
+      # This role uses the shared default image
+      - name: "failure-summary"
+        prompt: "Summarise the failure in one paragraph."
+
+      # This role overrides the image with a custom one
+      - name: "code-rewrite"
+        image: "ghcr.io/chmouel/agents-image:latest"
+        prompt: "Rewrite the failing code to fix the issue."
+        output: "check-run"
+```
+
+The same `image` field is available in repo roles loaded from `.tekton/ai/<name>.md`:
+
+```markdown
+---
+name: code-rewrite
+image: ghcr.io/chmouel/agents-image:latest
+output: check-run
+---
+Rewrite the failing code to fix the issue.
 ```
 
 ## CEL Expressions for Triggers
@@ -207,6 +252,26 @@ Benefits of PR comments:
 - Pipelines-as-Code can update the comment with new analysis on subsequent runs.
 - Easy to discuss and follow up on directly in the PR conversation.
 
-{{< callout type="info" >}}
-Additional output destinations including `check-run` (GitHub check runs) and `annotation` (PipelineRun annotations) are planned for future releases.
+#### Check Run
+
+Posts analysis as a GitHub check-run on the pull request:
+
+```yaml
+output: "check-run"
+```
+
+{{< callout type="warning" >}}
+Check-run output requires a GitHub App installation. It is not available when using a personal access token.
 {{< /callout >}}
+
+Benefits of check-runs:
+
+- Analysis appears in the **Checks** tab alongside your CI results.
+- The check-run title shows the role name, making it easy to distinguish multiple analysis roles.
+- When the backend produces a concrete fix, an **"Apply Suggestions"** action button appears on the check-run. Clicking it triggers PAC to apply the AI-generated patch and push it to the PR branch. See [Apply Suggestions Action]({{< relref "/docs/guides/llm-analysis#apply-suggestions-action" >}}) for details.
+
+When to choose `check-run` over `pr-comment`:
+
+- You want the analysis result separated from the PR conversation thread.
+- You want to offer the one-click "Apply Suggestions" capability to contributors.
+- You are running multiple analysis roles and want each result to be independently re-runnable.

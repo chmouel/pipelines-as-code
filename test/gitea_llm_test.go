@@ -39,10 +39,10 @@ func TestGiteaLLM(t *testing.T) {
 		},
 		Settings: &v1alpha1.Settings{
 			AIAnalysis: &v1alpha1.AIAnalysisConfig{
-				Enabled:  true,
-				Provider: "openai",
-				APIURL:   "http://nonoai.pipelines-as-code:8765/v1",
-				TokenSecretRef: &v1alpha1.Secret{
+				Enabled: true,
+				Backend: "claude",
+				Image:   "quay.io/example/claude:latest",
+				SecretRef: &v1alpha1.Secret{
 					Name: "llm-secret",
 					Key:  "token",
 				},
@@ -61,6 +61,57 @@ func TestGiteaLLM(t *testing.T) {
 	defer f()
 	topts.Regexp = regexp.MustCompile(fmt.Sprintf(".*%s.*", llmRoleName))
 	tgitea.WaitForPullRequestCommentGoldenMatch(t, topts, "gitea-llm-comment.golden")
+}
+
+// TestGiteaLLMDiffAndFiles tests the LLM analysis feature with diff content and
+// repository file context included. It verifies that the analysis pipeline works
+// correctly when ContextConfig includes DiffContent and Files.
+func TestGiteaLLMDiffAndFiles(t *testing.T) {
+	llmRoleName := "sre agent diff analyzer"
+	topts := &tgitea.TestOpts{
+		ExpectEvents: false,
+		TargetEvent:  triggertype.PullRequest.String(),
+		YAMLFiles: map[string]string{
+			".tekton/pr.yaml": "testdata/failures/pipelinerun-exit-1.yaml",
+			"AGENTS.md":       "testdata/agents-md-test.txt",
+		},
+		CreateSecret: []corev1.Secret{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "llm-secret",
+				},
+				Data: map[string][]byte{
+					"token": []byte("sk-xxxx"),
+				},
+			},
+		},
+		Settings: &v1alpha1.Settings{
+			AIAnalysis: &v1alpha1.AIAnalysisConfig{
+				Enabled: true,
+				Backend: "codex",
+				Image:   "quay.io/example/codex:latest",
+				SecretRef: &v1alpha1.Secret{
+					Name: "llm-secret",
+					Key:  "token",
+				},
+				Roles: []v1alpha1.AnalysisRole{
+					{
+						Name:   llmRoleName,
+						Prompt: "analyze the pipeline failure using the diff and repo files",
+						ContextItems: &v1alpha1.ContextConfig{
+							DiffContent: true,
+							Files:       []string{"AGENTS.md"},
+						},
+						Output: "pr-comment",
+					},
+				},
+			},
+		},
+	}
+	_, f := tgitea.TestPR(t, topts)
+	defer f()
+	topts.Regexp = regexp.MustCompile(fmt.Sprintf(".*%s.*", llmRoleName))
+	tgitea.WaitForPullRequestCommentGoldenMatch(t, topts, "gitea-llm-diff-files-comment.golden")
 }
 
 // Local Variables:

@@ -4,12 +4,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	_ "embed"
 )
+
+//go:embed templates/initial_prompt.md
+var initialPrompt string
 
 // BuildPrompt combines the base prompt with context data.
 // This function is shared across all LLM providers to ensure consistent prompt formatting.
 func BuildPrompt(request *AnalysisRequest) (string, error) {
 	var promptBuilder strings.Builder
+
+	promptBuilder.WriteString("The initial prompt provides instructions for analyzing the provided information. Please follow the instructions carefully to generate accurate and relevant insights.\n\n")
+	promptBuilder.WriteString(initialPrompt)
+	promptBuilder.WriteString("\n\nThe user prompt to analyze:\n")
 
 	promptBuilder.WriteString(request.Prompt)
 	promptBuilder.WriteString("\n\n")

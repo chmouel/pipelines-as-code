@@ -200,7 +200,6 @@ func TestGetExistingFailedCheckRunID(t *testing.T) {
 		SHA:          "sha",
 	}
 
-	chosenOne := "chosenOne"
 	chosenID := int64(55555)
 	mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/commits/%v/check-runs", event.Organization, event.Repository, event.SHA), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprintf(w, `{
@@ -208,21 +207,97 @@ func TestGetExistingFailedCheckRunID(t *testing.T) {
 			"check_runs": [
 				{
 					"id": %v,
-					"external_id": "%s",
+					"external_id": "different-external-id",
 					"output": {
-						"title": "Failed",
-						"summary": "CI is failed to run"
+						"title": "pipelinerun start failure",
+						"summary": "has failed."
 					}
 				}
 			]
-		}`, chosenID, chosenOne)
+		}`, chosenID)
 	})
 
 	id, err := cnx.getExistingCheckRunID(ctx, event, providerstatus.StatusOpts{
-		PipelineRunName: chosenOne,
+		PipelineRunName: "my-pipelinerun",
 	})
 	assert.NilError(t, err)
+	assert.Assert(t, id != nil)
 	assert.Equal(t, *id, chosenID)
+}
+
+func TestGetExistingCheckRunIDSkipReuse(t *testing.T) {
+	tests := []struct {
+		name              string
+		checkRunResponse  string
+		pipelineRunName   string
+		skipCheckRunReuse bool
+		wantID            int64
+	}{
+		{
+			name: "AI skips failed checkrun reuse",
+			checkRunResponse: `{
+				"total_count": 1,
+				"check_runs": [{"id": 55555, "external_id": "some-pac-pipelinerun",
+					"output": {"title": "pipelinerun start failure", "summary": "has failed."}}]}`,
+			pipelineRunName:   "llm-analysis|parent-pr|review|sha",
+			skipCheckRunReuse: true,
+			wantID:            0,
+		},
+		{
+			name: "PAC reuses failed checkrun",
+			checkRunResponse: `{
+				"total_count": 1,
+				"check_runs": [{"id": 55555, "external_id": "some-other-pr",
+					"output": {"title": "pipelinerun start failure", "summary": "has failed."}}]}`,
+			pipelineRunName: "my-new-pipelinerun",
+			wantID:          55555,
+		},
+		{
+			name: "AI finds own checkrun by ExternalID",
+			checkRunResponse: `{
+				"total_count": 2,
+				"check_runs": [
+					{"id": 11111, "external_id": "some-pac-pipelinerun",
+						"output": {"title": "pipelinerun start failure", "summary": "has failed."}},
+					{"id": 77777, "external_id": "llm-analysis|parent-pr|review|sha"}]}`,
+			pipelineRunName:   "llm-analysis|parent-pr|review|sha",
+			skipCheckRunReuse: true,
+			wantID:            77777,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			client, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			cnx := New()
+			cnx.SetGithubClient(client)
+
+			event := &info.Event{
+				Organization: "owner",
+				Repository:   "repository",
+				SHA:          "sha",
+			}
+			mux.HandleFunc(fmt.Sprintf("/repos/%v/%v/commits/%v/check-runs",
+				event.Organization, event.Repository, event.SHA),
+				func(w http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(w, tt.checkRunResponse)
+				})
+
+			id, err := cnx.getExistingCheckRunID(ctx, event, providerstatus.StatusOpts{
+				PipelineRunName:   tt.pipelineRunName,
+				SkipCheckRunReuse: tt.skipCheckRunReuse,
+			})
+			assert.NilError(t, err)
+			if tt.wantID == 0 {
+				assert.Assert(t, id == nil)
+			} else {
+				assert.Assert(t, id != nil)
+				assert.Equal(t, *id, tt.wantID)
+			}
+		})
+	}
 }
 
 func TestGithubProviderCreateStatus(t *testing.T) {
@@ -533,6 +608,76 @@ func TestGithubProviderCreateStatus(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGithubProviderCreateStatusPreservesQueuedAIAnalysisSummary(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+	defer teardown()
+
+	provider := New()
+	provider.SetGithubClient(fakeclient)
+	provider.Run = params.New()
+	provider.SetPacInfo(&info.PacOpts{
+		Settings: settings.Settings{
+			ApplicationName: settings.PACApplicationNameDefaultValue,
+		},
+	})
+
+	event := &info.Event{
+		Organization:   "check",
+		Repository:     "run",
+		SHA:            "queued-analysis-sha",
+		InstallationID: 12345,
+		Provider: &info.Provider{
+			Token: "hello",
+			URL:   "moto",
+		},
+	}
+
+	checkRunID := int64(2026)
+	createCalled := false
+	updateCalled := false
+
+	mux.HandleFunc("/repos/check/run/check-runs", func(rw http.ResponseWriter, r *http.Request) {
+		createCalled = true
+		body, err := io.ReadAll(r.Body)
+		assert.NilError(t, err)
+		checkRun := &github.CreateCheckRunOptions{}
+		err = json.Unmarshal(body, checkRun)
+		assert.NilError(t, err)
+		assert.Equal(t, checkRun.GetStatus(), "queued")
+		assert.Equal(t, checkRun.Output.GetTitle(), "AI Analysis - review")
+		assert.Assert(t, strings.Contains(checkRun.Output.GetSummary(), "AI analysis has been scheduled."))
+		_, err = fmt.Fprintf(rw, `{"id": %d}`, checkRunID)
+		assert.NilError(t, err)
+	})
+
+	mux.HandleFunc(fmt.Sprintf("/repos/check/run/check-runs/%d", checkRunID), func(rw http.ResponseWriter, r *http.Request) {
+		updateCalled = true
+		body, err := io.ReadAll(r.Body)
+		assert.NilError(t, err)
+		checkRun := &github.CheckRun{}
+		err = json.Unmarshal(body, checkRun)
+		assert.NilError(t, err)
+		assert.Equal(t, checkRun.GetStatus(), "queued")
+		assert.Equal(t, checkRun.Output.GetTitle(), "AI Analysis - review")
+		assert.Assert(t, strings.Contains(checkRun.Output.GetSummary(), "AI analysis has been scheduled."))
+		_, err = fmt.Fprintf(rw, `{"id": %d}`, checkRunID)
+		assert.NilError(t, err)
+	})
+
+	err := provider.CreateStatus(ctx, event, providerstatus.StatusOpts{
+		Status:                  "queued",
+		Conclusion:              providerstatus.ConclusionPending,
+		PipelineRunName:         "llm-analysis-review-queued-analysis-sha",
+		OriginalPipelineRunName: "AI Analysis / review",
+		Title:                   "AI Analysis - review",
+		Summary:                 "AI analysis has been scheduled.",
+	})
+	assert.NilError(t, err)
+	assert.Assert(t, createCalled)
+	assert.Assert(t, updateCalled)
 }
 
 func TestGithubProvidercreateStatusCommit(t *testing.T) {

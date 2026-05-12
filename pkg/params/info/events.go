@@ -61,6 +61,12 @@ type Event struct {
 	// maintaining the ability to manually trigger builds when needed.
 	HasSkipCommand bool
 
+	// CheckRun requested_action fields (GitHub App only)
+	CheckRunRequestedActionID string // action identifier from the button click (e.g. "llm-fix")
+	CheckRunExternalID        string // external ID of the check run that was acted on
+	CheckRunParentPipelineRun string // parsed parent PipelineRun name from the external ID
+	CheckRunAnalysisRole      string // parsed analysis role from the external ID
+
 	// TODO: move forge specifics to each driver
 	// Github
 	Organization   string

@@ -1,6 +1,7 @@
 package kubeinteraction
 
 import (
+	"maps"
 	"testing"
 
 	"github.com/jonboulle/clockwork"
@@ -13,7 +14,6 @@ import (
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"go.uber.org/zap"
 	zapobserver "go.uber.org/zap/zaptest/observer"
-	"golang.org/x/exp/maps"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

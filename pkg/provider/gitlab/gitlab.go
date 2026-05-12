@@ -634,6 +634,46 @@ func (v *Provider) getObject(fname, branch string, pid int64) ([]byte, *gitlab.R
 	return file, resp, nil
 }
 
+// ListDirFilesInsideRepo returns the paths of all .md files inside path at the event SHA.
+// Returns an empty slice without error if the directory does not exist.
+func (v *Provider) ListDirFilesInsideRepo(_ context.Context, event *info.Event, path string) ([]string, error) {
+	opt := &gitlab.ListTreeOptions{
+		Path:      gitlab.Ptr(path),
+		Ref:       gitlab.Ptr(event.HeadBranch),
+		Recursive: gitlab.Ptr(true),
+		ListOptions: gitlab.ListOptions{
+			OrderBy:    "id",
+			Pagination: "keyset",
+			PerPage:    defaultGitlabListOptions.PerPage,
+			Sort:       "asc",
+		},
+	}
+
+	var files []string
+	options := []gitlab.RequestOptionFunc{}
+	for {
+		nodes, resp, err := v.Client().Repositories.ListTree(v.sourceProjectID, opt, options...)
+		if err != nil {
+			if resp != nil && resp.StatusCode == http.StatusNotFound {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("failed to list %s dir: %w", path, err)
+		}
+		for _, node := range nodes {
+			if node.Type == "blob" && strings.HasSuffix(node.Path, ".md") {
+				files = append(files, path+"/"+node.Path)
+			}
+		}
+		if resp.NextLink == "" {
+			break
+		}
+		options = []gitlab.RequestOptionFunc{
+			gitlab.WithKeysetPaginationParameters(resp.NextLink),
+		}
+	}
+	return files, nil
+}
+
 func (v *Provider) GetFileInsideRepo(_ context.Context, runevent *info.Event, path, _ string) (string, error) {
 	getobj, _, err := v.getObject(path, runevent.HeadBranch, v.sourceProjectID)
 	if err != nil {
@@ -677,6 +717,12 @@ func (v *Provider) GetCommitInfo(_ context.Context, runevent *info.Event) error 
 }
 
 // GetFiles gets and caches the list of files changed by a given event.
+// GetPullRequestDiff returns the unified diff for a merge request.
+func (v *Provider) GetPullRequestDiff(_ context.Context, _ *info.Event) (string, error) {
+	// TODO: implement using GitLab MergeRequests.GetMergeRequestDiffVersions or similar
+	return "", nil
+}
+
 func (v *Provider) GetFiles(ctx context.Context, runevent *info.Event) (changedfiles.ChangedFiles, error) {
 	if v.cachedChangedFiles == nil {
 		changes, err := v.fetchChangedFiles(ctx, runevent)

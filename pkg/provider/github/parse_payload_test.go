@@ -456,6 +456,8 @@ func TestParsePayLoad(t *testing.T) {
 		wantedBranchName           string
 		wantedTagName              string
 		wantedPullRequestNumber    int
+		wantCheckRunActionID       string
+		wantCheckRunExternalID     string
 		isCancelPipelineRunEnabled bool
 		isMergeCommit              bool
 		skipPushEventForPRCommits  bool
@@ -486,7 +488,7 @@ func TestParsePayLoad(t *testing.T) {
 		},
 		{
 			name:               "bad/check run only issue recheck supported",
-			wantErrString:      "only issue recheck is supported",
+			wantErrString:      "unsupported check_run action: created",
 			eventType:          "check_run",
 			triggerTarget:      "nonopetitrobot",
 			payloadEventStruct: github.CheckRunEvent{Action: github.Ptr("created")},
@@ -569,6 +571,33 @@ func TestParsePayLoad(t *testing.T) {
 			},
 			muxReplies: map[string]any{"/repos/owner/reponame/pulls/54321": samplePR},
 			shaRet:     "samplePRsha",
+		},
+		{
+			name:          "good/requested action check_run on pull request preserves action fields",
+			eventType:     "check_run",
+			githubClient:  true,
+			triggerTarget: string(triggertype.CheckRunRequestedAction),
+			payloadEventStruct: github.CheckRunEvent{
+				Action: github.Ptr("requested_action"),
+				Repo:   sampleRepo,
+				RequestedAction: &github.RequestedAction{
+					Identifier: "llm-fix",
+				},
+				CheckRun: &github.CheckRun{
+					ExternalID: github.Ptr("llm-analysis|parent-pr|review|samplePRsha"),
+					Output: &github.CheckRunOutput{
+						Text: github.Ptr("analysis text"),
+					},
+					CheckSuite: &github.CheckSuite{
+						PullRequests: []*github.PullRequest{&samplePR},
+					},
+				},
+			},
+			muxReplies:              map[string]any{"/repos/owner/reponame/pulls/54321": samplePR},
+			shaRet:                  "samplePRsha",
+			wantedPullRequestNumber: 54321,
+			wantCheckRunActionID:    "llm-fix",
+			wantCheckRunExternalID:  "llm-analysis|parent-pr|review|samplePRsha",
 		},
 		// all checks in a check_suite
 		{
@@ -1544,6 +1573,12 @@ func TestParsePayLoad(t *testing.T) {
 			}
 			if tt.wantedPullRequestNumber != 0 {
 				assert.Equal(t, tt.wantedPullRequestNumber, ret.PullRequestNumber)
+			}
+			if tt.wantCheckRunActionID != "" {
+				assert.Equal(t, tt.wantCheckRunActionID, ret.CheckRunRequestedActionID)
+			}
+			if tt.wantCheckRunExternalID != "" {
+				assert.Equal(t, tt.wantCheckRunExternalID, ret.CheckRunExternalID)
 			}
 			if tt.targetPipelinerun != "" {
 				assert.Equal(t, tt.targetPipelinerun, ret.TargetTestPipelineRun)

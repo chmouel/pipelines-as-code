@@ -84,13 +84,27 @@ func (a *Assembler) BuildContext(
 		}
 	}
 
-	// Always include basic pipeline information
+	if contextConfig.DiffContent {
+		if diffData, err := a.buildDiffContent(ctx, event, provider); err != nil {
+			a.logger.Warnf("Failed to get pull request diff: %v", err)
+		} else if diffData != "" {
+			contextData["code_diff"] = diffData
+		}
+	}
+
+	if len(contextConfig.Files) > 0 {
+		if fileData, err := a.buildFileContext(ctx, event, provider, contextConfig.Files); err != nil {
+			a.logger.Warnf("Failed to fetch repository files: %v", err)
+		} else if len(fileData) > 0 {
+			contextData["repository_files"] = fileData
+		}
+	}
+
 	contextData["pipeline"] = a.buildBasicPipelineContext(pipelineRun, event)
 
 	return contextData, nil
 }
 
-// buildBasicPipelineContext creates basic pipeline context information.
 func (a *Assembler) buildBasicPipelineContext(pipelineRun *tektonv1.PipelineRun, event *info.Event) map[string]any {
 	pipelineData := map[string]any{
 		"name":      pipelineRun.Name,
@@ -122,7 +136,6 @@ func (a *Assembler) buildBasicPipelineContext(pipelineRun *tektonv1.PipelineRun,
 	return pipelineData
 }
 
-// buildCommitContent builds commit-related context information.
 func (a *Assembler) buildCommitContent(ctx context.Context, event *info.Event, provider provider.Interface) (map[string]any, error) {
 	if event == nil {
 		return nil, fmt.Errorf("event is nil")
@@ -133,26 +146,21 @@ func (a *Assembler) buildCommitContent(ctx context.Context, event *info.Event, p
 		"message": event.SHATitle,
 	}
 
-	// Try to get additional commit information from the provider
 	if provider != nil {
 		if err := provider.GetCommitInfo(ctx, event); err != nil {
 			a.logger.Warnf("Failed to get additional commit info: %v", err)
 		}
 	}
 
-	// Add extended commit fields if available (after GetCommitInfo or if already populated)
-	// Add URL if available
 	if event.SHAURL != "" {
 		commitData["url"] = event.SHAURL
 	}
 
-	// Add full commit message if available and different from title
 	if event.SHAMessage != "" && event.SHAMessage != event.SHATitle {
 		commitData["full_message"] = event.SHAMessage
 	}
 
-	// Add author information if available
-	// Note: Email addresses are excluded for privacy/PII reasons
+	// Email addresses excluded for PII reasons
 	if event.SHAAuthorName != "" || !event.SHAAuthorDate.IsZero() {
 		author := map[string]any{}
 		if event.SHAAuthorName != "" {
@@ -164,8 +172,6 @@ func (a *Assembler) buildCommitContent(ctx context.Context, event *info.Event, p
 		commitData["author"] = author
 	}
 
-	// Add committer information if available
-	// Note: Email addresses are excluded for privacy/PII reasons
 	if event.SHACommitterName != "" || !event.SHACommitterDate.IsZero() {
 		committer := map[string]any{}
 		if event.SHACommitterName != "" {
@@ -180,7 +186,6 @@ func (a *Assembler) buildCommitContent(ctx context.Context, event *info.Event, p
 	return commitData, nil
 }
 
-// buildPRContent builds pull request context information.
 func (a *Assembler) buildPRContent(_ context.Context, event *info.Event, _ provider.Interface) (map[string]any, error) {
 	if event == nil || event.PullRequestNumber == 0 {
 		return nil, fmt.Errorf("no pull request information available")
@@ -193,12 +198,9 @@ func (a *Assembler) buildPRContent(_ context.Context, event *info.Event, _ provi
 		"base_branch": event.BaseBranch,
 	}
 
-	// Note: PR body is not available in the Event struct
-
 	return prData, nil
 }
 
-// buildErrorContent builds error and failure context information.
 func (a *Assembler) buildErrorContent(ctx context.Context, pipelineRun *tektonv1.PipelineRun) map[string]any {
 	if len(pipelineRun.Status.Conditions) == 0 {
 		return nil
@@ -214,7 +216,6 @@ func (a *Assembler) buildErrorContent(ctx context.Context, pipelineRun *tektonv1
 		"condition_message": condition.Message,
 	}
 
-	// Get detailed task failure information
 	taskInfos := kstatus.CollectFailedTasksLogSnippet(ctx, a.run, a.kinteract, pipelineRun, 3)
 	if len(taskInfos) > 0 {
 		sortedTaskInfos := sort.TaskInfos(taskInfos)
@@ -245,7 +246,6 @@ func (a *Assembler) buildErrorContent(ctx context.Context, pipelineRun *tektonv1
 	return errorData
 }
 
-// buildContainerLogs builds container logs context information.
 func (a *Assembler) buildContainerLogs(ctx context.Context, pipelineRun *tektonv1.PipelineRun, maxLines int) map[string]any {
 	// Get detailed task information with logs
 	taskInfos := kstatus.CollectFailedTasksLogSnippet(ctx, a.run, a.kinteract, pipelineRun, int64(maxLines))
@@ -273,6 +273,43 @@ func (a *Assembler) buildContainerLogs(ctx context.Context, pipelineRun *tektonv
 	}
 }
 
+const maxDiffSize = 10000
+
+func (a *Assembler) buildDiffContent(ctx context.Context, event *info.Event, prov provider.Interface) (string, error) {
+	if prov == nil || event == nil {
+		return "", fmt.Errorf("provider or event is nil")
+	}
+
+	diff, err := prov.GetPullRequestDiff(ctx, event)
+	if err != nil {
+		return "", err
+	}
+
+	if len(diff) > maxDiffSize {
+		diff = diff[:maxDiffSize] + "\n[diff truncated]"
+	}
+
+	return diff, nil
+}
+
+func (a *Assembler) buildFileContext(ctx context.Context, event *info.Event, prov provider.Interface, files []string) (map[string]string, error) {
+	if prov == nil || event == nil {
+		return nil, fmt.Errorf("provider or event is nil")
+	}
+
+	result := make(map[string]string, len(files))
+	for _, filePath := range files {
+		content, err := prov.GetFileInsideRepo(ctx, event, filePath, "")
+		if err != nil {
+			a.logger.Warnf("Could not fetch file %q: %v", filePath, err)
+			continue
+		}
+		result[filePath] = content
+	}
+
+	return result, nil
+}
+
 // BuildCELContext builds context data for CEL expression evaluation.
 //
 // This function exposes a carefully curated subset of event data to CEL expressions.
@@ -288,14 +325,12 @@ func (a *Assembler) BuildCELContext(
 	event *info.Event,
 	repo *v1alpha1.Repository,
 ) (map[string]any, error) {
-	// Convert PipelineRun to map for CEL access
-	prMap, err := a.pipelineRunToMap(pipelineRun)
+	prMap, err := toMap(pipelineRun)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert PipelineRun to map: %w", err)
 	}
 
-	// Convert Repository to map for CEL access
-	repoMap, err := a.repositoryToMap(repo)
+	repoMap, err := toMap(repo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert Repository to map: %w", err)
 	}
@@ -359,34 +394,14 @@ func (a *Assembler) BuildCELContext(
 	return celData, nil
 }
 
-// pipelineRunToMap converts a PipelineRun to a map for CEL access.
-func (a *Assembler) pipelineRunToMap(pr *tektonv1.PipelineRun) (map[string]any, error) {
-	// Marshal to JSON and back to get a clean map representation
-	jsonData, err := json.Marshal(pr)
+func toMap(v any) (map[string]any, error) {
+	data, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
 	}
-
-	var prMap map[string]any
-	if err := json.Unmarshal(jsonData, &prMap); err != nil {
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, err
 	}
-
-	return prMap, nil
-}
-
-// repositoryToMap converts a Repository to a map for CEL access.
-func (a *Assembler) repositoryToMap(repo *v1alpha1.Repository) (map[string]any, error) {
-	// Marshal to JSON and back to get a clean map representation
-	jsonData, err := json.Marshal(repo)
-	if err != nil {
-		return nil, err
-	}
-
-	var repoMap map[string]any
-	if err := json.Unmarshal(jsonData, &repoMap); err != nil {
-		return nil, err
-	}
-
-	return repoMap, nil
+	return m, nil
 }

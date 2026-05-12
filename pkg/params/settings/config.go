@@ -29,6 +29,10 @@ const (
 	CustomConsoleNamespaceURLKey = "custom-console-url-namespace"
 
 	SecretGhAppTokenRepoScopedKey = "secret-github-app-token-scoped" //nolint: gosec
+
+	// AIAnalysisGitImageDefault is the default container image used for git clone
+	// operations in AI analysis PipelineRuns.
+	AIAnalysisGitImageDefault = "alpine/git:latest"
 )
 
 var (
@@ -87,6 +91,8 @@ type Settings struct {
 	TracingLabelAction      string `json:"tracing-label-action"`
 	TracingLabelApplication string `json:"tracing-label-application"`
 	TracingLabelComponent   string `json:"tracing-label-component"`
+
+	AIAnalysisGitImage string `default:"alpine/git:latest" json:"ai-analysis-git-image"`
 }
 
 func (s *Settings) DeepCopy(out *Settings) {
