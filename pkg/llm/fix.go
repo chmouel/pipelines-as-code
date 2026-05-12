@@ -387,6 +387,8 @@ func buildFixPipelineRun(
 		{Name: "PR_BRANCH", Value: event.HeadBranch},
 		{Name: "EXPECTED_SHA", Value: event.SHA},
 		{Name: "ROLE_NAME", Value: roleName},
+		{Name: "PAC_AI_MODE", Value: aiModeApply},
+		{Name: "PAC_AI_TRIGGER_SOURCE", Value: detectAITriggerSource(event)},
 		{Name: "FIX_COMMIT_SUBJECT_B64", Value: base64.StdEncoding.EncodeToString([]byte(commitSubject))},
 		{Name: "FIX_COMMIT_BODY_B64", Value: base64.StdEncoding.EncodeToString([]byte(commitBody))},
 		{Name: "GIT_COAUTHOR_NAME", Value: coAuthorName},

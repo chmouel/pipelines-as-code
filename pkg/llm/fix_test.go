@@ -353,6 +353,8 @@ func TestBuildFixPipelineRunEnvVars(t *testing.T) {
 	assert.Equal(t, envMap["PR_BRANCH"], "feature-branch")
 	assert.Equal(t, envMap["EXPECTED_SHA"], "abc123")
 	assert.Equal(t, envMap["ROLE_NAME"], "reviewer")
+	assert.Equal(t, envMap["PAC_AI_MODE"], "apply")
+	assert.Equal(t, envMap["PAC_AI_TRIGGER_SOURCE"], "human_pr")
 	subjectBytes, err := base64.StdEncoding.DecodeString(envMap["FIX_COMMIT_SUBJECT_B64"])
 	assert.NilError(t, err)
 	bodyBytes, err := base64.StdEncoding.DecodeString(envMap["FIX_COMMIT_BODY_B64"])

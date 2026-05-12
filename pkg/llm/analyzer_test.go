@@ -466,6 +466,8 @@ Analyze {{ revision }} from {{ repo_url }} and suggest a fix.
 	assert.Equal(t, envMap["CI"], "true")
 	assert.Equal(t, envMap["PAC_LLM_EXECUTION_CONTEXT"], "ci")
 	assert.Equal(t, envMap["PAC_LLM_PIPELINERUN_KIND"], "analysis")
+	assert.Equal(t, envMap["PAC_AI_MODE"], "analysis")
+	assert.Equal(t, envMap["PAC_AI_TRIGGER_SOURCE"], "human_pr")
 	assert.Equal(t, envMap["PAC_PR_NUMBER"], "42")
 	assert.Equal(t, envMap["PAC_PR_TITLE"], "Notify Tekton changes")
 	assert.Equal(t, envMap["PAC_BASE_BRANCH"], "main")
@@ -482,6 +484,39 @@ Analyze {{ revision }} from {{ repo_url }} and suggest a fix.
 	assert.NilError(t, err)
 	assert.Equal(t, string(changedFiles), ".tekton/pipeline.yaml\nREADME.md")
 	assert.Equal(t, envMap["PAC_CHANGED_FILES_ERROR"], "")
+}
+
+func TestBuildAnalysisPipelineRunMarksAIRemediationSource(t *testing.T) {
+	config := &v1alpha1.AIAnalysisConfig{
+		Backend:   "claude",
+		Image:     "test:latest",
+		SecretRef: &v1alpha1.Secret{Name: "test-secret", Key: "token"},
+		Roles: []v1alpha1.AnalysisRole{
+			{Name: "failure-analysis", Prompt: "Analyze {{ revision }} from {{ repo_url }} and suggest a fix.", Output: "check-run"},
+		},
+	}
+	event := &info.Event{
+		SHA:               "abc123def456",
+		URL:               "https://github.com/owner/repo",
+		CloneURL:          "https://github.com/owner/repo.git",
+		PullRequestNumber: 42,
+		PullRequestTitle:  "Notify Tekton changes",
+		BaseBranch:        "main",
+		HeadBranch:        "feature/notify",
+		Organization:      "owner",
+		Repository:        "repo",
+		SHAMessage:        "fix: address failure\n\nPAC-AI-Trigger-Source: ai_remediation\n",
+	}
+
+	pr := buildAnalysisPipelineRun(config, testAIRepository(), failedPipelineRun(), event, roleExecution{
+		Role:         config.Roles[0],
+		Rendered:     "Analyze abc123def456 from https://github.com/owner/repo and suggest a fix.",
+		ChangedFiles: []string{".tekton/pipeline.yaml"},
+	}, settings.AIAnalysisGitImageDefault)
+
+	analysisStep := pr.Spec.PipelineSpec.Tasks[0].TaskSpec.Steps[1]
+	assert.Equal(t, stepEnvValue(analysisStep, "PAC_AI_MODE"), "analysis")
+	assert.Equal(t, stepEnvValue(analysisStep, "PAC_AI_TRIGGER_SOURCE"), "ai_remediation")
 }
 
 func TestExecuteAnalysisMarksChangedFilesErrorInPipelineRunEnv(t *testing.T) {

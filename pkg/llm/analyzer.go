@@ -785,6 +785,7 @@ var reservedEnvVarNames = map[string]bool{
 	"LLM_TIMEOUT_SECONDS": true, "LLM_ROLE_NAME": true,
 	"LLM_COMMIT_SHA":            true,
 	"PAC_LLM_EXECUTION_CONTEXT": true, "PAC_LLM_PIPELINERUN_KIND": true,
+	"PAC_AI_MODE": true, "PAC_AI_TRIGGER_SOURCE": true,
 	"PAC_PR_NUMBER": true, "PAC_PR_TITLE": true,
 	"PAC_BASE_BRANCH": true, "PAC_HEAD_BRANCH": true,
 	"PAC_REPO_OWNER": true, "PAC_REPO_NAME": true,

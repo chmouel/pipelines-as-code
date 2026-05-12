@@ -94,7 +94,7 @@ printf '%s' "${LLM_PROMPT_B64}" | base64 -d >"${prompt_file}"
 	printf 'When you identify a safe concrete fix, edit files in this checkout. Do not only provide a diff snippet.\n'
 	printf 'Do not commit or push changes. The runner captures `git diff` after you finish.\n\n'
 	printf 'This task is running inside Pipelines-as-Code CI in a Kubernetes pod.\n'
-	printf 'Environment variables `CI=true`, `PAC_LLM_EXECUTION_CONTEXT=ci`, and `PAC_LLM_PIPELINERUN_KIND=analysis` are available to project skills and scripts.\n'
+	printf 'Environment variables `CI=true`, `PAC_LLM_EXECUTION_CONTEXT=ci`, `PAC_LLM_PIPELINERUN_KIND=analysis`, `PAC_AI_MODE=analysis`, and `PAC_AI_TRIGGER_SOURCE` are available to project skills and scripts.\n'
 	printf 'If a project skill says it should always run during CI-based review or pipeline failure investigation, and the current task matches, run it.\n'
 	printf 'In the final response, include a "Skills used" section that names each relevant project skill and states whether it was executed, skipped, or blocked, with a short reason.\n\n'
 } >>"${prompt_file}"

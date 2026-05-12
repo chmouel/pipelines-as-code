@@ -13,7 +13,7 @@ role_name="${ROLE_NAME:-AI analysis}"
 commit_subject="$(printf '%s' "${FIX_COMMIT_SUBJECT_B64:-}" | base64 -d 2>/dev/null || true)"
 commit_body="$(printf '%s' "${FIX_COMMIT_BODY_B64:-}" | base64 -d 2>/dev/null || true)"
 git_coauthor_name="${GIT_COAUTHOR_NAME:-Pipelines as Code AI}"
-git_coauthor_email="${GIT_COAUTHOR_EMAIL:-noreply@pipelinesascode.dev}"
+git_coauthor_email="${GIT_COAUTHOR_EMAIL:-paco@pipelinesascode.com}"
 
 if [ -z "${commit_subject}" ]; then
   commit_subject="fix: address ${role_name} findings"
@@ -115,11 +115,8 @@ ${commit_subject}
 
 ${commit_body}
 
+PAC-AI-Trigger-Source: ai_remediation
 Analyzed commit: ${expected_sha:-unknown}
-
-Files changed:
-${changed_files}
-
 Co-authored-by: ${git_coauthor_name} <${git_coauthor_email}>
 EOF
   git commit -F /tmp/fix-commit-message.txt

@@ -36,6 +36,12 @@ const (
 	basicAuthName       = "basic-auth"
 	gcpCredsVolumeName  = "gcp-creds"            //nolint:gosec
 	gcpCredsMountPath   = "/workspace/gcp-creds" //nolint:gosec
+
+	aiModeAnalysis                 = "analysis"
+	aiModeApply                    = "apply"
+	aiTriggerSourceHumanPR         = "human_pr"
+	aiTriggerSourceAIRemediation   = "ai_remediation"
+	aiRemediationCommitTrailerLine = "PAC-AI-Trigger-Source: ai_remediation"
 )
 
 type roleExecution struct {
@@ -51,6 +57,16 @@ type childPipelineRunWorkspaces struct {
 	pipeline     []tektonv1.PipelineWorkspaceDeclaration
 	pipelineRun  []tektonv1.WorkspaceBinding
 	pipelineTask []tektonv1.WorkspacePipelineTaskBinding
+}
+
+func detectAITriggerSource(event *info.Event) string {
+	if event == nil {
+		return aiTriggerSourceHumanPR
+	}
+	if strings.Contains(event.SHAMessage, aiRemediationCommitTrailerLine) {
+		return aiTriggerSourceAIRemediation
+	}
+	return aiTriggerSourceHumanPR
 }
 
 func listAnalysisPipelineRuns(
@@ -139,7 +155,9 @@ func buildAnalysisPipelineRun(
 		corev1.EnvVar{Name: "LLM_ROLE_NAME", Value: roleName},
 		corev1.EnvVar{Name: "LLM_COMMIT_SHA", Value: event.SHA},
 		corev1.EnvVar{Name: "PAC_LLM_EXECUTION_CONTEXT", Value: "ci"},
-		corev1.EnvVar{Name: "PAC_LLM_PIPELINERUN_KIND", Value: "analysis"},
+		corev1.EnvVar{Name: "PAC_LLM_PIPELINERUN_KIND", Value: aiModeAnalysis},
+		corev1.EnvVar{Name: "PAC_AI_MODE", Value: aiModeAnalysis},
+		corev1.EnvVar{Name: "PAC_AI_TRIGGER_SOURCE", Value: detectAITriggerSource(event)},
 		corev1.EnvVar{Name: "PAC_PR_NUMBER", Value: fmt.Sprintf("%d", event.PullRequestNumber)},
 		corev1.EnvVar{Name: "PAC_PR_TITLE", Value: event.PullRequestTitle},
 		corev1.EnvVar{Name: "PAC_BASE_BRANCH", Value: event.BaseBranch},
