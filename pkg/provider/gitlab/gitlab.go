@@ -3,6 +3,7 @@ package gitlab
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -259,6 +260,7 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, runevent *inf
 	v.Token = &runevent.Provider.Token
 
 	run.Clients.Log.Infof("gitlab: initialized for client with token for apiURL=%s, org=%s, repo=%s", apiURL, runevent.Organization, runevent.Repository)
+
 	// In a scenario where the source repository is forked and a merge request (MR) is created on the upstream
 	// repository, runevent.SourceProjectID will not be 0 when SetClient is called from the pac-watcher code.
 	// This is because, in the controller, SourceProjectID is set in the annotation of the pull request,
@@ -266,6 +268,28 @@ func (v *Provider) SetClient(ctx context.Context, run *params.Run, runevent *inf
 	// the ID from runevent.SourceProjectID when v.sourceProject is 0 (nil).
 	if v.sourceProjectID == 0 && runevent.SourceProjectID > 0 {
 		v.sourceProjectID = runevent.SourceProjectID
+	}
+	if v.targetProjectID == 0 && runevent.TargetProjectID > 0 {
+		v.targetProjectID = runevent.TargetProjectID
+	}
+
+	if runevent.Provider.GitProviderSecretFromGlobalRepo {
+		run.Clients.Log.Debugf("gitlab token auto-rotation skipped: git_provider.secret is inherited from global Repository secret namespace=%s", runevent.Provider.GitProviderSecretNamespace)
+	} else if v.isTokenAutoRotationEnabled() {
+		if newToken, rotateErr := v.maybeRotateToken(ctx); rotateErr != nil {
+			if errors.Is(rotateErr, errMissingSelfRotateScope) {
+				run.Clients.Log.Debugf("gitlab token auto-rotation: %v", rotateErr)
+			} else {
+				run.Clients.Log.Warnf("gitlab token auto-rotation check failed: %v", rotateErr)
+			}
+		} else if newToken != "" {
+			v.gitlabClient, err = gitlab.NewClient(newToken, gitlab.WithBaseURL(apiURL))
+			if err != nil {
+				return fmt.Errorf("failed to create client with rotated token: %w", err)
+			}
+			v.Token = &newToken
+			runevent.Provider.Token = newToken
+		}
 	}
 
 	// check that we have access to the source project if it's a private repo, this should only occur on Merge Requests

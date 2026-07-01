@@ -333,3 +333,45 @@ Replace `$NEW_TOKEN` and `$target_namespace` with your values:
 ```shell
 kubectl -n $target_namespace patch secret gitlab-webhook-config -p "{\"data\": {\"provider.token\": \"$(echo -n $NEW_TOKEN|base64 -w0)\"}}"
 ```
+
+## Automatic Token Rotation
+
+Pipelines-as-Code automatically rotates GitLab access tokens before they expire. On each webhook event, it checks the token's expiry date and rotates it when it is within 7 days of expiration. The new token (valid for 30 days) is written back to the Kubernetes Secret configured directly on the Repository CR.
+
+This works for Personal Access Tokens and Project Access Tokens. The token must have the `api` scope (or the `self_rotate` scope available in newer GitLab versions).
+
+Automatic rotation is **enabled by default**. If the token does not have the required scope for self-rotation, the rotation is silently skipped and webhook processing continues normally.
+
+Automatic rotation does not run for `git_provider.secret` values inherited from the global Repository. Global Repository secrets are shared configuration and must be rotated manually, for example by updating the global secret with `kubectl` or the process you use to manage controller-wide credentials.
+
+### Disabling Automatic Rotation
+
+To disable automatic token rotation for a repository, set `token_auto_rotation` to `false`:
+
+```yaml
+spec:
+  settings:
+    gitlab:
+      token_auto_rotation: false
+```
+
+### How It Works
+
+1. On each incoming webhook event, Pipelines-as-Code calls the GitLab [token self-introspection API](https://docs.gitlab.com/api/personal_access_tokens/#self-inform) to check the token's expiry.
+2. If the token expires within 7 days, it calls the [self-rotation API](https://docs.gitlab.com/api/personal_access_tokens/#self-rotate) to rotate it.
+3. The old token is revoked and a new token (valid for 30 days) is returned.
+4. The new token is written back to the Kubernetes Secret referenced directly in the Repository CR.
+5. A Kubernetes event (`GitLabTokenRotated`) is emitted on the Repository CR.
+
+Token rotation is atomic: the old token is revoked the moment the new one is
+created. If the Kubernetes Secret update fails after rotation, the old token is
+already revoked and manual intervention is required. This is logged as a
+CRITICAL error.
+
+### Requirements
+
+- The token must have `api` or `self_rotate` scope.
+- The token secret must be configured directly on the Repository CR. Tokens inherited from the global Repository are not auto-rotated.
+- The repository must receive at least one webhook event within the 7-day rotation window. Dormant repositories that receive no events will not have their tokens rotated.
+- The Pipelines-as-Code controller needs `update` permission on `secrets` resources. This is included in the default RBAC configuration (`pipeline-as-code-controller-clusterrole`). If you use custom RBAC, ensure the controller's ClusterRole includes `update` on secrets.
+- Group Access Token rotation is not yet supported.
