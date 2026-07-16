@@ -1,0 +1,322 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+default_output_dir() {
+  local session_dir=""
+  local candidate
+
+  for candidate in \
+    "${AGENT_SESSION_DIR:-}" \
+    "${COPILOT_AGENT_SESSION_STATE_DIR:-}" \
+    "${CLAUDE_CODE_SESSION_DIR:-}" \
+    "${CLAUDE_SESSION_DIR:-}" \
+    "${CODEX_SESSION_DIR:-}" \
+    "${SESSION_DIR:-}"; do
+    if [[ -n "$candidate" ]]; then
+      session_dir=$candidate
+      break
+    fi
+  done
+
+  if [[ -z "$session_dir" && -n "${COPILOT_AGENT_SESSION_ID:-}" && -n "${HOME:-}" ]]; then
+    candidate="$HOME/.copilot/session-state/$COPILOT_AGENT_SESSION_ID"
+    [[ -d "$candidate" ]] && session_dir=$candidate
+  fi
+
+  if [[ -n "$session_dir" ]]; then
+    if [[ -d "$session_dir/files" ]]; then
+      printf '%s\n' "$session_dir/files/e2e"
+    else
+      printf '%s\n' "$session_dir/e2e"
+    fi
+    return
+  fi
+
+  printf '%s\n' "tmp/e2e"
+}
+
+OUTPUT_DIR="${OUTPUT_DIR:-$(default_output_dir)}"
+REPO="${REPO:-}"
+DOWNLOADS_DIR="${DOWNLOADS_DIR:-$HOME/Downloads}"
+
+usage() {
+  cat <<EOF
+Usage:
+  $(basename "$0") [OPTIONS] JOB_URL
+  $(basename "$0") -f [OPTIONS] RUN_URL
+  $(basename "$0") -u [OPTIONS] [ZIP_FILE]
+
+Retrieve and prepare Pipelines-as-Code E2E logs for investigation.
+Output directory: $OUTPUT_DIR
+
+Options:
+  -u            Extract ZIP_FILE, or the newest logs-e2e-tests*.zip in ~/Downloads
+  -f            Download all failed E2E jobs from RUN_URL
+  -n            Keep existing output directory content
+  -o DIR        Output directory; overrides agent session detection
+  -h            Show this help
+
+Examples:
+  $(basename "$0") https://github.com/OWNER/REPO/actions/runs/123/job/456?pr=42
+  $(basename "$0") -f https://github.com/OWNER/REPO/actions/runs/123?pr=42
+  $(basename "$0") -u
+  $(basename "$0") -u ~/Downloads/logs-e2e-tests-github_public.zip
+EOF
+}
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+git_root_or_pwd() {
+  git rev-parse --show-toplevel 2>/dev/null || pwd
+}
+
+parse_run_url() {
+  local url=$1
+  if [[ "$url" =~ ^https://github\.com/([^/]+/[^/]+)/actions/runs/([0-9]+)(/job/([0-9]+))?(\?.*)?$ ]]; then
+    REPO="${BASH_REMATCH[1]}"
+    RUN_ID="${BASH_REMATCH[2]}"
+    JOB_ID="${BASH_REMATCH[4]:-}"
+    if [[ "$url" =~ [\?\&]pr=([0-9]+) ]]; then
+      PR_TARGET="${BASH_REMATCH[1]}"
+    fi
+    return 0
+  fi
+  return 1
+}
+
+pattern_for_job() {
+  local job_id=$1
+  local job_name pattern
+
+  job_name=$(
+    gh run view --repo "$REPO" "$RUN_ID" --json jobs \
+      --jq ".jobs[] | select(.databaseId == ${job_id}) | .name"
+  )
+  [[ -n "$job_name" ]] || die "job $job_id was not found in run $RUN_ID"
+
+  pattern=$(sed -nE 's/^e2e tests \(([^()]*)\)$/\1/p' <<<"$job_name")
+  [[ -n "$pattern" ]] ||
+    die "job $job_id is not an E2E matrix job: $job_name"
+  printf '%s\n' "$pattern"
+}
+
+prepare_output_dir() {
+  mkdir -p "$OUTPUT_DIR"
+  if [[ -z "${NO_CLEANUP:-}" ]]; then
+    find "$OUTPUT_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  fi
+}
+
+download_pattern() {
+  local pattern=$1
+  local run_id=$2
+  local gh_repo_args=()
+
+  [[ -n "$pattern" ]] || die "missing artifact pattern"
+  [[ -n "$run_id" ]] || die "missing run ID"
+
+  mkdir -p "$OUTPUT_DIR"
+  [[ -n "$REPO" ]] && gh_repo_args=(--repo "$REPO")
+  gh run download "${gh_repo_args[@]}" --dir "$OUTPUT_DIR" --pattern "*${pattern}" "$run_id"
+
+  local destdir
+  destdir=$(find "$OUTPUT_DIR" -type d -name "*${pattern}" | head -1)
+  [[ -n "$destdir" ]] || die "download finished but no artifact directory matched *${pattern}"
+  printf '%s\n' "$destdir"
+}
+
+resolve_zip_file() {
+  local file=${1:-}
+  if [[ -z "$file" ]]; then
+    file=$(
+      find "$DOWNLOADS_DIR" -maxdepth 1 -type f -name "logs-e2e-tests*.zip" \
+        -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-
+    )
+    [[ -n "$file" ]] || die "no logs-e2e-tests*.zip found in $DOWNLOADS_DIR"
+  fi
+  [[ -f "$file" ]] || die "zip file not found: $file"
+  readlink -f "$file"
+}
+
+extract_zip() {
+  local file=$1
+
+  local bfile timestamp destdir base counter
+  bfile=$(basename "$file" .zip)
+  timestamp=$(unzip -l "$file" | awk 'NR == 4 {gsub(/:/, "-", $3); print $2 "-" $3}')
+  [[ -n "$timestamp" ]] || timestamp=$(date +%Y%m%d-%H%M%S)
+  destdir="$OUTPUT_DIR/${bfile}-${timestamp}"
+
+  if [[ -n "${NO_CLEANUP:-}" && -d "$destdir" ]]; then
+    counter=1
+    base="$destdir"
+    while [[ -d "${base}-${counter}" ]]; do
+      counter=$((counter + 1))
+    done
+    destdir="${base}-${counter}"
+  elif [[ -d "$destdir" ]]; then
+    rm -rf "$destdir"
+  fi
+
+  mkdir -p "$destdir"
+  unzip -q "$file" -d "$destdir"
+  printf '%s\n' "$destdir"
+}
+
+normalize_logs() {
+  local destdir=$1
+  local file tmp component output
+
+  if [[ -d "$destdir/kind-control-plane/pods" ]]; then
+    while IFS= read -r -d '' file; do
+      tmp="${file}.tmp"
+      sed 's/.* F //' "$file" >"$tmp" && mv "$tmp" "$file"
+    done < <(find "$destdir/kind-control-plane/pods" -type f -name '*.log' -print0)
+  fi
+
+  if [[ -d "$destdir/kind-control-plane/containers" ]]; then
+    for component in controller watcher webhook; do
+      rm -f "$destdir/pipelines-as-code-${component}.log"
+    done
+    while IFS= read -r -d '' file; do
+      component=$(basename "$file" | sed -nE 's/.*pipelines-as-code-(controller|watcher|webhook).*/\1/p')
+      [[ -n "$component" ]] || continue
+      output="$destdir/pipelines-as-code-${component}.log"
+      sed 's/.* F //' "$file" >>"$output"
+    done < <(find "$destdir/kind-control-plane/containers" -type f -name 'pipelines-as-code-*.log' -print0)
+  fi
+}
+
+summarize_logs() {
+  local destdir=$1
+  local absdir component found
+  absdir=$(readlink -f "$destdir")
+
+  if [[ -n "${PR_TARGET:-}" ]]; then
+    echo "PR context: gh pr view ${PR_TARGET} && gh pr diff ${PR_TARGET}"
+    echo ""
+  fi
+
+  if [[ -f "$destdir/e2e-test-output.json" ]]; then
+    echo "Failed tests:"
+    jq -r 'select(.Action == "fail") | .Test // empty' "$destdir/e2e-test-output.json" |
+      grep -v '^$' | sed 's/^/  - /' || true
+    echo ""
+    echo "Error messages:"
+    jq -r 'select(.Action == "output" and (.Output | test("assertion failed|FAIL:|panic:|Error "))) | "  [\(.Test // "?")] \(.Output)"' \
+      "$destdir/e2e-test-output.json" 2>/dev/null | sed 's/\\n$//' || true
+  elif [[ -f "$destdir/e2e-test-output.log" ]]; then
+    echo "Failed tests:"
+    grep -- "--- FAIL" "$destdir/e2e-test-output.log" | sed 's/^/  /' || true
+  else
+    echo "No e2e-test-output.json or e2e-test-output.log found"
+  fi
+
+  echo ""
+  echo "Log paths to investigate with e2e-investigate:"
+  for found in e2e-test-output.json e2e-test-output.log; do
+    [[ -f "$absdir/$found" ]] && echo "  test output: $absdir/$found"
+  done
+  for component in controller watcher webhook; do
+    if [[ -f "$absdir/pipelines-as-code-${component}.log" ]]; then
+      echo "  ${component}: $absdir/pipelines-as-code-${component}.log"
+    fi
+  done
+  [[ -f "$absdir/events" ]] && echo "  events: $absdir/events"
+  [[ -f "$absdir/pac-pipelineruns.yaml" ]] && echo "  pipelineruns: $absdir/pac-pipelineruns.yaml"
+  return 0
+}
+
+failed_patterns_for_run() {
+  local run_id=$1
+  gh run view --repo "$REPO" "$run_id" --json jobs \
+    --jq '.jobs[] | select(.conclusion == "failure") | .name' |
+    sed -nE 's/^e2e tests \(([^()]*)\)$/\1/p'
+}
+
+download_failed_jobs() {
+  local run_id=$1
+  shift
+  local failed_patterns=("$@")
+  local pattern dir
+
+  echo "Run $run_id failed patterns: ${failed_patterns[*]}"
+  echo ""
+
+  for pattern in "${failed_patterns[@]}"; do
+    echo "Downloading $pattern..."
+    dir=$(download_pattern "$pattern" "$run_id")
+    normalize_logs "$dir"
+    summarize_logs "$dir"
+    echo ""
+  done
+}
+
+RUN_ID=""
+JOB_ID=""
+DO_UNZIP=""
+AUTO_FAILED=""
+NO_CLEANUP=""
+PR_TARGET=""
+
+while getopts "o:ufnh" opt; do
+  case "$opt" in
+    o) OUTPUT_DIR=$OPTARG ;;
+    u) DO_UNZIP=true ;;
+    f) AUTO_FAILED=true ;;
+    n) NO_CLEANUP=true ;;
+    h) usage; exit 0 ;;
+    *) usage; exit 1 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+FIRST_ARG=${1:-}
+[[ $# -le 1 ]] || die "unexpected argument: $2"
+
+if [[ -n "$DO_UNZIP" ]]; then
+  [[ -z "$AUTO_FAILED" ]] || die "-u and -f cannot be used together"
+  ZIP_FILE=$(resolve_zip_file "$FIRST_ARG")
+  cd "$(git_root_or_pwd)"
+  prepare_output_dir
+  destdir=$(extract_zip "$ZIP_FILE")
+  normalize_logs "$destdir"
+  summarize_logs "$destdir"
+  exit 0
+fi
+
+[[ -n "$FIRST_ARG" ]] || {
+  usage >&2
+  die "a GitHub Actions job URL is required"
+}
+parse_run_url "$FIRST_ARG" || die "invalid GitHub Actions run or job URL: $FIRST_ARG"
+
+if [[ -n "$AUTO_FAILED" ]]; then
+  [[ -z "$JOB_ID" ]] || die "-f requires a run URL, not a job URL"
+  FAILED_OUTPUT=$(failed_patterns_for_run "$RUN_ID")
+  [[ -n "$FAILED_OUTPUT" ]] ||
+    die "no failed E2E matrix jobs found in run $RUN_ID"
+  FAILED_PATTERNS=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && FAILED_PATTERNS+=("$line")
+  done <<<"$FAILED_OUTPUT"
+else
+  [[ -n "$JOB_ID" ]] ||
+    die "a run URL cannot select one job; provide a job URL or use -f"
+  PATTERN=$(pattern_for_job "$JOB_ID")
+fi
+
+cd "$(git_root_or_pwd)"
+prepare_output_dir
+
+if [[ -n "$AUTO_FAILED" ]]; then
+  download_failed_jobs "$RUN_ID" "${FAILED_PATTERNS[@]}"
+  exit 0
+fi
+
+destdir=$(download_pattern "$PATTERN" "$RUN_ID")
+normalize_logs "$destdir"
+summarize_logs "$destdir"
