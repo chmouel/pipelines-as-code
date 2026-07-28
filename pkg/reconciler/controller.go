@@ -76,12 +76,15 @@ func NewController() func(context.Context, configmap.Watcher) *controller.Impl {
 			log.Fatalf("Failed to create pipeline as code metrics recorder %v", err)
 		}
 
+		qm := queuepkg.NewManager(run.Clients.Log)
+		queuepkg.RegisterForDebug(qm)
+
 		r := &Reconciler{
 			run:               run,
 			kinteract:         kinteract,
 			pipelineRunLister: pipelineRunInformer.Lister(),
 			repoLister:        repoInformer.Lister(),
-			qm:                queuepkg.NewManager(run.Clients.Log),
+			qm:                qm,
 			metrics:           metrics,
 			eventEmitter:      events.NewEventEmitter(run.Clients.Kube, run.Clients.Log),
 		}

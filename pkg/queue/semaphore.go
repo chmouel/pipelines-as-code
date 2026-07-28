@@ -30,10 +30,16 @@ func newSemaphore(name string, limit int) *prioritySemaphore {
 }
 
 func (s *prioritySemaphore) getLimit() int {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	return s.limit
 }
 
 func (s *prioritySemaphore) getCurrentPending() []string {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	keys := make([]string, 0, len(s.pending.items))
 	for _, item := range s.pending.items {
 		keys = append(keys, item.key)
@@ -42,6 +48,9 @@ func (s *prioritySemaphore) getCurrentPending() []string {
 }
 
 func (s *prioritySemaphore) getCurrentRunning() []string {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	keys := make([]string, 0, len(s.running))
 	for k := range s.running {
 		keys = append(keys, k)
