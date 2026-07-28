@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -28,10 +27,6 @@ func newSemaphore(name string, limit int) *prioritySemaphore {
 		running:   make(map[string]bool),
 		lock:      &sync.Mutex{},
 	}
-}
-
-func (s *prioritySemaphore) getName() string {
-	return s.name
 }
 
 func (s *prioritySemaphore) getLimit() int {
@@ -142,46 +137,4 @@ func (s *prioritySemaphore) addToQueue(key string, creationTime time.Time) bool 
 	}
 	s.pending.add(key, creationTime.UnixNano())
 	return true
-}
-
-func (s *prioritySemaphore) tryAcquire(key string) (bool, string) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if _, ok := s.running[key]; ok {
-		return true, ""
-	}
-
-	waitingMsg := fmt.Sprintf("Waiting for %s lock. Available queue status: %d/%d", s.name, s.limit-len(s.running), s.limit)
-
-	// Check whether requested key is in front of priority queue.
-	// If it is in front position, it will allow to acquire lock.
-	// If it is not a front key, it needs to wait for its turn.
-	var nextKey string
-	if s.pending.Len() > 0 {
-		item := s.pending.peek()
-		nextKey = fmt.Sprintf("%v", item.key)
-		if key != nextKey {
-			return false, waitingMsg
-		}
-	}
-
-	if s.semaphore.TryAcquire(1) {
-		s.running[key] = true
-		s.pending.pop()
-		return true, ""
-	}
-
-	return false, waitingMsg
-}
-
-func (s *prioritySemaphore) acquire(key string) bool {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if s.semaphore.TryAcquire(1) {
-		s.running[key] = true
-		return true
-	}
-	return false
 }
