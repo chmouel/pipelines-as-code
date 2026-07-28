@@ -10,15 +10,22 @@ import (
 	"time"
 
 	"github.com/google/go-github/v85/github"
+	"github.com/tektoncd/pipeline/pkg/names"
 	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	pacapi "github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/kubeinteraction"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/triggertype"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/sort"
 	tgitea "github.com/openshift-pipelines/pipelines-as-code/test/pkg/gitea"
 	tkubestuff "github.com/openshift-pipelines/pipelines-as-code/test/pkg/kubestuff"
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/payload"
+	pacrepo "github.com/openshift-pipelines/pipelines-as-code/test/pkg/repository"
+	secret "github.com/openshift-pipelines/pipelines-as-code/test/pkg/secret"
 	twait "github.com/openshift-pipelines/pipelines-as-code/test/pkg/wait"
+
 	"github.com/openshift-pipelines/pipelines-as-code/test/pkg/scm"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 )

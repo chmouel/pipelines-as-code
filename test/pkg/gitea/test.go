@@ -130,25 +130,22 @@ func AddLabelToIssue(t *testing.T, topt *TestOpts, label string) {
 // spurious "pull request already exists" from a prior attempt.
 func createPullRequestWithRetry(t *testing.T, topts *TestOpts, owner, repo, base string) *forgejo.PullRequest {
 	t.Helper()
-	var pr *forgejo.PullRequest
-	var err error
-	for i := 0; i < 5; i++ {
-		if pr, _, err = topts.GiteaCNX.Client().CreatePullRequest(owner, repo, forgejo.CreatePullRequestOption{
-			Title: "Test Pull Request - " + topts.TargetRefName,
-			Head:  topts.TargetRefName,
-			Base:  base,
-		}); err == nil {
-			return pr
-		}
-		topts.ParamsRun.Clients.Log.Infof("Creating PullRequest has failed, retrying %d/%d, err: %v", i, 5, err)
-		if existing, _, getErr := topts.GiteaCNX.Client().GetPullRequestByBaseAndHead(owner, repo, base, topts.TargetRefName); getErr == nil && existing != nil {
-			topts.ParamsRun.Clients.Log.Infof("PullRequest already exists, using it instead of retrying")
-			return existing
-		}
-		if i == 4 {
-			t.Fatalf("cannot create pull request: %v", err)
-		}
-		time.Sleep(5 * time.Second)
+	pr, err := retryOnAPIError(
+		topts.ParamsRun.Clients.Log, "Creating PullRequest", 5, 5*time.Second,
+		func() (*forgejo.PullRequest, error) {
+			pr, _, err := topts.GiteaCNX.Client().CreatePullRequest(owner, repo, forgejo.CreatePullRequestOption{
+				Title: "Test Pull Request - " + topts.TargetRefName,
+				Head:  topts.TargetRefName,
+				Base:  base,
+			})
+			return pr, err
+		},
+		func() (*forgejo.PullRequest, bool, error) {
+			return lookup(topts.GiteaCNX.Client().GetPullRequestByBaseAndHead(owner, repo, base, topts.TargetRefName))
+		},
+	)
+	if err != nil {
+		t.Fatalf("cannot create pull request: %v", err)
 	}
 	return pr
 }
