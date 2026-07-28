@@ -1,14 +1,74 @@
 package wait
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"testing"
 	"time"
 
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	v1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	"gotest.tools/v3/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// Counts is a breakdown of PipelineRuns by how far along they are.
+type Counts struct {
+	Total   int
+	Pending int
+	Running int
+	Done    int
+}
+
+func (c Counts) String() string {
+	return fmt.Sprintf("total=%d pending=%d running=%d done=%d", c.Total, c.Pending, c.Running, c.Done)
+}
+
+// CountPipelineRuns groups the PipelineRuns of a namespace by state. Pending
+// means the queue is still holding it back; running means it has started and
+// has not finished.
+func CountPipelineRuns(ctx context.Context, clients clients.Clients, ns string) (Counts, []v1.PipelineRun, error) {
+	list, err := clients.Tekton.TektonV1().PipelineRuns(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return Counts{}, nil, err
+	}
+	var counts Counts
+	counts.Total = len(list.Items)
+	for i := range list.Items {
+		pr := &list.Items[i]
+		switch {
+		case pr.IsDone():
+			counts.Done++
+		case pr.Spec.Status == v1.PipelineRunSpecStatusPending:
+			counts.Pending++
+		case pr.Status.StartTime != nil && !pr.Status.StartTime.IsZero():
+			counts.Running++
+		}
+	}
+	return counts, list.Items, nil
+}
+
+// UntilCounts polls a namespace until its PipelineRuns satisfy cond, and fails
+// the test with the last counts seen if they never do. describe is used in that
+// failure message to say what was being waited for.
+func UntilCounts(ctx context.Context, t *testing.T, clients clients.Clients, ns, describe string, timeout time.Duration, cond func(Counts) bool) (Counts, []v1.PipelineRun) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		counts, prs, err := CountPipelineRuns(ctx, clients, ns)
+		assert.NilError(t, err)
+		if cond(counts) {
+			clients.Log.Infof("%s in %s: %s", describe, ns, counts)
+			return counts, prs
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out after %s waiting for %s in %s, last seen %s", timeout, describe, ns, counts)
+		}
+		clients.Log.Infof("waiting for %s in %s, currently %s", describe, ns, counts)
+		time.Sleep(5 * time.Second)
+	}
+}
 
 // Interval is the window a single PipelineRun occupied a concurrency slot for.
 type Interval struct {
