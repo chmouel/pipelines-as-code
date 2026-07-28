@@ -220,8 +220,10 @@ func (qm *Manager) InitQueues(ctx context.Context, tekton versioned2.Interface, 
 		for _, pr := range sortedPRs {
 			order, exist := pr.GetAnnotations()[keys.ExecutionOrder]
 			if !exist {
-				// if the pipelineRun doesn't have order label then wait
-				return nil
+				// if the pipelineRun doesn't have an execution order annotation
+				// then skip it, but keep initializing the remaining pipelineRuns
+				// and repositories.
+				continue
 			}
 			orderedList := FilterPipelineRunByState(ctx, tekton, strings.Split(order, ","), "", kubeinteraction.StateStarted)
 
@@ -246,8 +248,10 @@ func (qm *Manager) InitQueues(ctx context.Context, tekton versioned2.Interface, 
 		for _, pr := range sortedPRs {
 			order, exist := pr.GetAnnotations()[keys.ExecutionOrder]
 			if !exist {
-				// if the pipelineRun doesn't have order label then wait
-				return nil
+				// if the pipelineRun doesn't have an execution order annotation
+				// then skip it, but keep initializing the remaining pipelineRuns
+				// and repositories.
+				continue
 			}
 			orderedList := FilterPipelineRunByState(ctx, tekton, strings.Split(order, ","), tektonv1.PipelineRunSpecStatusPending, kubeinteraction.StateQueued)
 			if err := qm.AddToPendingQueue(&repo, orderedList); err != nil {

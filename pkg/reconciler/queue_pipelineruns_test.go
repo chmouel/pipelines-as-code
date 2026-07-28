@@ -213,3 +213,102 @@ func TestQueuePipelineRun(t *testing.T) {
 		})
 	}
 }
+
+// TestQueuePipelineRunSlotRelease asserts when a queue slot is released and,
+// more importantly, when it must not be. Releasing the slot of a PipelineRun
+// that has already been patched to "started" lets the queue admit past the
+// concurrency limit and leaves the in-memory queue out of sync with the cluster.
+func TestQueuePipelineRunSlotRelease(t *testing.T) {
+	const ns = "test"
+
+	acquiredPR := &tektonv1.PipelineRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "queued",
+			Namespace: ns,
+			Annotations: map[string]string{
+				keys.Repository: "test",
+				keys.State:      "queued",
+			},
+		},
+		Spec: tektonv1.PipelineRunSpec{Status: tektonv1.PipelineRunSpecStatusPending},
+	}
+
+	tests := []struct {
+		name          string
+		seededPR      *tektonv1.PipelineRun
+		wantErrString string
+		wantReleased  bool
+	}{
+		{
+			name:          "start failure keeps the queue slot",
+			seededPR:      acquiredPR,
+			wantErrString: "failed to update pipelineRun test/queued to in_progress",
+			wantReleased:  false,
+		},
+		{
+			name:          "vanished pipelineRun releases the queue slot",
+			seededPR:      nil,
+			wantErrString: "max iterations reached of",
+			wantReleased:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			observer, _ := zapobserver.New(zap.InfoLevel)
+			fakelogger := zap.New(observer).Sugar()
+
+			repo := &pacv1alpha1.Repository{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: ns},
+				Spec:       pacv1alpha1.RepositorySpec{URL: "https://psg.fr"},
+			}
+			testData := testclient.Data{Repositories: []*pacv1alpha1.Repository{repo}}
+			if tt.seededPR != nil {
+				testData.PipelineRuns = []*tektonv1.PipelineRun{tt.seededPR}
+			}
+			stdata, informers := testclient.SeedTestData(t, ctx, testData)
+
+			released := []string{}
+			r := &Reconciler{
+				qm: testconcurrency.TestQMI{
+					RunningQueue: []string{ns + "/queued"},
+					Removed:      &released,
+				},
+				repoLister: informers.Repository.Lister(),
+				run: &params.Run{
+					Info: info.Info{
+						Kube:       &info.KubeOpts{Namespace: "global"},
+						Controller: &info.ControllerInfo{},
+						Pac:        &info.PacOpts{},
+					},
+					Clients: clients.Clients{
+						PipelineAsCode: stdata.PipelineAsCode,
+						Tekton:         stdata.Pipeline,
+						Kube:           stdata.Kube,
+						Log:            fakelogger,
+					},
+				},
+			}
+
+			trigger := &tektonv1.PipelineRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "trigger",
+					Namespace: ns,
+					Annotations: map[string]string{
+						keys.ExecutionOrder: ns + "/queued",
+						keys.Repository:     "test",
+					},
+				},
+			}
+
+			err := r.queuePipelineRun(ctx, fakelogger, trigger)
+			assert.ErrorContains(t, err, tt.wantErrString)
+			if tt.wantReleased {
+				assert.Assert(t, len(released) > 0, "expected the queue slot to be released, got none")
+			} else {
+				assert.Assert(t, len(released) == 0, "queue slot must not be released, got %v", released)
+			}
+		})
+	}
+}

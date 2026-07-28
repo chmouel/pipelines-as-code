@@ -12,6 +12,9 @@ import (
 type TestQMI struct {
 	QueuedPrs    []string
 	RunningQueue []string
+	// Removed records the "repoKey|prKey" pairs passed to RemoveFromQueue, so
+	// tests can assert whether a queue slot was released.
+	Removed *[]string
 }
 
 func (TestQMI) InitQueues(_ context.Context, _ tektonVersionedClient.Interface, _ pacVersionedClient.Interface) error {
@@ -40,7 +43,10 @@ func (TestQMI) AddToPendingQueue(_ *pacv1alpha1.Repository, _ []string) error {
 	panic("implement me")
 }
 
-func (t TestQMI) RemoveFromQueue(_, _ string) bool {
+func (t TestQMI) RemoveFromQueue(repoKey, prKey string) bool {
+	if t.Removed != nil {
+		*t.Removed = append(*t.Removed, repoKey+"|"+prKey)
+	}
 	return false
 }
 

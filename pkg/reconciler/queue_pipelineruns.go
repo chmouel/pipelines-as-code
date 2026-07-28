@@ -81,20 +81,37 @@ func (r *Reconciler) queuePipelineRun(ctx context.Context, logger *zap.SugaredLo
 		}
 
 		for _, prKeys := range acquired {
-			nsName := strings.Split(prKeys, "/")
 			repoKey := queuepkg.RepoKey(repo)
-			pr, err = r.run.Clients.Tekton.TektonV1().PipelineRuns(nsName[0]).Get(ctx, nsName[1], metav1.GetOptions{})
-			if err != nil {
-				logger.Info("failed to get pr with namespace and name: ", nsName[0], nsName[1])
+			nsName := strings.Split(prKeys, "/")
+			if len(nsName) != 2 {
+				logger.Errorf("invalid pipelineRun key %q queued for repository %s, dropping it", prKeys, repo.GetName())
 				_ = r.qm.RemoveFromQueue(repoKey, prKeys)
-			} else {
-				if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
-					logger.Errorf("failed to update pipelineRun to in_progress: %w", err)
-					_ = r.qm.RemoveFromQueue(repoKey, prKeys)
-				} else {
-					processed = true
-				}
+				continue
 			}
+			acquiredPR, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(nsName[0]).Get(ctx, nsName[1], metav1.GetOptions{})
+			if err != nil {
+				if errors.IsNotFound(err) {
+					// the PipelineRun is gone for good, so release the slot it was
+					// holding and let the next queued one take it.
+					logger.Infof("pipelineRun %s does not exist anymore, releasing its queue slot for repository %s", prKeys, repo.GetName())
+					_ = r.qm.RemoveFromQueue(repoKey, prKeys)
+					continue
+				}
+				// transient error: keep holding the slot and let the reconciler retry,
+				// otherwise we would release a slot for a PipelineRun that may well
+				// still be running.
+				return fmt.Errorf("failed to get pipelineRun %s: %w", prKeys, err)
+			}
+			if err := r.updatePipelineRunToInProgress(ctx, logger, repo, acquiredPR); err != nil {
+				// Do not release the slot here. updatePipelineRunToInProgress patches
+				// the state to "started" before doing any provider work, so by the time
+				// it fails the PipelineRun is already running in the cluster. Releasing
+				// the slot would let the queue admit past the concurrency limit and
+				// leave the in-memory queue permanently out of sync with the cluster.
+				// Returning the error requeues with backoff instead.
+				return fmt.Errorf("failed to update pipelineRun %s to in_progress: %w", prKeys, err)
+			}
+			processed = true
 		}
 		if processed {
 			break

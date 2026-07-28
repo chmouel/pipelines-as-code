@@ -326,3 +326,51 @@ func TestFilterPipelineRunByInProgress(t *testing.T) {
 	expected := []string{"test-ns/pr1"}
 	assert.DeepEqual(t, filtered, expected)
 }
+
+// TestQueueManagerInitQueuesSkipsPipelineRunsWithoutOrder asserts that a
+// PipelineRun without an execution-order annotation is skipped rather than
+// aborting the whole initialization. The order-less runs are deliberately the
+// oldest ones so they sort first and would short-circuit everything after them.
+func TestQueueManagerInitQueuesSkipsPipelineRunsWithoutOrder(t *testing.T) {
+	ctx, _ := rtesting.SetupFakeContext(t)
+	observer, _ := zapobserver.New(zap.InfoLevel)
+	logger := zap.New(observer).Sugar()
+	cw := clockwork.NewFakeClock()
+
+	startedLabel := map[string]string{keys.State: kubeinteraction.StateStarted}
+	queuedLabel := map[string]string{keys.State: kubeinteraction.StateQueued}
+
+	repo := newTestRepo(1)
+
+	// oldest started run, no execution-order annotation
+	noOrderStarted := newTestPR("no-order-started", cw.Now(), startedLabel,
+		map[string]string{keys.State: kubeinteraction.StateStarted}, tektonv1.PipelineRunSpec{})
+	started := newTestPR("started", cw.Now().Add(1*time.Second), startedLabel, map[string]string{
+		keys.ExecutionOrder: "test-ns/started",
+		keys.State:          kubeinteraction.StateStarted,
+	}, tektonv1.PipelineRunSpec{})
+
+	// oldest queued run, no execution-order annotation
+	noOrderQueued := newTestPR("no-order-queued", cw.Now().Add(2*time.Second), queuedLabel,
+		map[string]string{keys.State: kubeinteraction.StateQueued},
+		tektonv1.PipelineRunSpec{Status: tektonv1.PipelineRunSpecStatusPending})
+	queued := newTestPR("queued", cw.Now().Add(3*time.Second), queuedLabel, map[string]string{
+		keys.ExecutionOrder: "test-ns/queued",
+		keys.State:          kubeinteraction.StateQueued,
+	}, tektonv1.PipelineRunSpec{Status: tektonv1.PipelineRunSpecStatusPending})
+
+	stdata, _ := testclient.SeedTestData(t, ctx, testclient.Data{
+		Repositories: []*v1alpha1.Repository{repo},
+		PipelineRuns: []*tektonv1.PipelineRun{noOrderStarted, started, noOrderQueued, queued},
+	})
+
+	qm := NewManager(logger)
+	assert.NilError(t, qm.InitQueues(ctx, stdata.Pipeline, stdata.PipelineAsCode))
+
+	sema, found := qm.queueMap[RepoKey(repo)]
+	assert.Assert(t, found, "queue was not built for the repository")
+	assert.Equal(t, len(sema.getCurrentRunning()), 1)
+	assert.Equal(t, sema.getCurrentRunning()[0], PrKey(started))
+	assert.Equal(t, len(sema.getCurrentPending()), 1)
+	assert.Equal(t, sema.getCurrentPending()[0], PrKey(queued))
+}
