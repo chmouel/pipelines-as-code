@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
 	"knative.dev/pkg/system"
@@ -54,12 +55,11 @@ var (
 	_ pipelinerunreconciler.Finalizer = (*Reconciler)(nil)
 )
 
-// ErrPipelineRunNotStarted reports that a PipelineRun could not be moved out of
-// its pending state, so it is definitely not running in the cluster. Callers
-// holding a concurrency slot on its behalf must release it, otherwise the slot
-// is never freed: only a completed PipelineRun releases one, and this one never
-// started.
-var ErrPipelineRunNotStarted = stderrors.New("pipelineRun has not been started")
+// ErrPipelineRunNotStarted means a start has not been confirmed. It is not proof
+// that the write failed: the reservation and its retry owner must be retained.
+var ErrPipelineRunNotStarted = stderrors.New("pipelineRun start is not confirmed")
+
+var errPipelineRunGone = stderrors.New("pipelineRun is no longer startable")
 
 func copyRepositoryForMerge(repo *v1alpha1.Repository) *v1alpha1.Repository {
 	if repo == nil {
@@ -149,6 +149,9 @@ func (r *Reconciler) reconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 	// make sure we have the latest pipelinerun to reconcile, since there is something updating at the same time
 	lpr, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(pr.GetNamespace()).Get(ctx, pr.GetName(), metav1.GetOptions{})
 	if err != nil {
+		if errors.IsNotFound(err) {
+			return r.finalizeKind(ctx, pr)
+		}
 		return fmt.Errorf("cannot get pipelineRun: %w", err)
 	}
 
@@ -157,15 +160,12 @@ func (r *Reconciler) reconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 		return nil
 	}
 
-	// if pipelineRun is in completed or failed state then return
-	state, exist := pr.GetAnnotations()[keys.State]
-	if exist && (state == kubeinteraction.StateCompleted || state == kubeinteraction.StateFailed) {
-		return nil
-	}
-
 	repoName := pr.GetAnnotations()[keys.Repository]
 	repo, err := r.repoLister.Repositories(pr.Namespace).Get(repoName)
 	if err != nil {
+		if errors.IsNotFound(err) {
+			r.qm.RemoveRepository(&v1alpha1.Repository{ObjectMeta: metav1.ObjectMeta{Name: repoName, Namespace: pr.Namespace}})
+		}
 		return fmt.Errorf("failed to get repository CR: %w", err)
 	}
 
@@ -185,6 +185,18 @@ func (r *Reconciler) reconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 		return err
 	}
 	r.run.Info.Controller = controllerInfo
+
+	// An admission owner can already be running/done while another member of
+	// its batch still needs recovery. Resume it before state-based early returns,
+	// using this owner's controller configuration for provider reporting.
+	if err := r.processQueueAdmission(ctx, logger, repo, pr, nil, queuepkg.AdmissionResume); err != nil {
+		return err
+	}
+	state, exist := pr.GetAnnotations()[keys.State]
+	if exist && (state == kubeinteraction.StateCompleted || state == kubeinteraction.StateFailed) {
+		r.qm.ForgetAdmission(queuepkg.RepoKey(repo), pr)
+		return nil
+	}
 
 	if secretCreated, ok := pr.GetAnnotations()[keys.SecretCreated]; ok && secretCreated == "false" && pacInfo.SecretAutoCreation {
 		// if secret creation is true then return anyway from createSecretForPipelineRun function
@@ -214,7 +226,19 @@ func (r *Reconciler) reconcileKind(ctx context.Context, pr *tektonv1.PipelineRun
 
 	if reason == string(tektonv1.PipelineRunReasonRunning) && !startReported {
 		logger.Infof("pipelineRun %s/%s is running but not yet reported to provider, updating status", pr.GetNamespace(), pr.GetName())
-		return r.updatePipelineRunToInProgress(ctx, logger, repo, pr)
+		// A run that is cancelled or gracefully stopped still reports the
+		// Running reason until Tekton catches up, and a graceful stop keeps it
+		// there until the running tasks drain. It can never be started, so
+		// there is nothing to retry: the promotion path treats this as
+		// StartGone for the same reason. Returning the error instead would
+		// requeue over a condition no retry can change.
+		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, pr); err != nil {
+			if stderrors.Is(err, errPipelineRunGone) {
+				return nil
+			}
+			return err
+		}
+		return nil
 	}
 	logger.Debugf("pipelineRun %s/%s condition not met: reason='%s', startReported=%v", pr.GetNamespace(), pr.GetName(), reason, startReported)
 
@@ -414,18 +438,19 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 			fmt.Sprintf("AI/LLM analysis failed for repository %s/%s and pipeline run %s: %v", repo.Namespace, repo.Name, newPr.Name, err))
 	}
 
+	if err := r.startNextPipelineRunInQueue(ctx, logger, repo, pr); err != nil {
+		return repo, err
+	}
 	if _, err := r.updatePipelineRunState(ctx, logger, pr, finalState); err != nil {
 		return repo, fmt.Errorf("cannot update state: %w", err)
 	}
+	r.qm.ForgetAdmission(queuepkg.RepoKey(repo), pr)
 
 	if err := r.emitMetrics(ctx, pr); err != nil {
 		logger.Error("failed to emit metrics: ", err)
 	}
 
 	emitTimingSpans(logger, pr, &pacInfo.Settings, trStatus)
-
-	// remove pipelineRun from Queue and start the next one
-	r.startNextPipelineRunInQueue(ctx, logger, repo, pr)
 
 	if err := r.cleanupPipelineRuns(ctx, logger, pacInfo, repo, pr); err != nil {
 		return repo, fmt.Errorf("error cleaning pipelineruns: %w", err)
@@ -434,93 +459,33 @@ func (r *Reconciler) reportFinalStatus(ctx context.Context, logger *zap.SugaredL
 	return repo, nil
 }
 
-// startNextPipelineRunInQueue frees the slot held by a finished PipelineRun and
-// starts the next one waiting in the repository's queue. Each candidate that
-// turns out not to be startable is definitely not running — either it is gone
-// from the cluster or its state patch never landed — so its freshly-taken slot
-// is handed back and the next candidate is tried. A candidate whose start
-// failed *after* the state patch is already running and keeps its slot.
-//
-// Handing a slot back and asking for another candidate is what makes this a
-// loop, and it only terminates because every candidate is removed from the
-// queue as it is tried, so the queue drains. A queue implementation that keeps
-// returning a key it was asked to remove would spin here forever and take the
-// process down with it, so a key seen twice is treated as a broken queue and
-// ends the loop. The loop is deliberately not capped at some fixed number of
-// candidates: a repository may legitimately have any number of stale entries
-// ahead of a startable one, and stopping early would leave that one queued with
-// no running PipelineRun left to trigger another promotion.
-func (r *Reconciler) startNextPipelineRunInQueue(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) {
-	repoKey := queuepkg.RepoKey(repo)
-	seen := map[string]bool{}
-	for {
-		// This both releases the slot of the finished PipelineRun and takes one
-		// for the next candidate, so it has to run at least once, before any
-		// cancellation check, or the finished PipelineRun's slot is never freed.
-		next := r.qm.RemoveAndTakeItemFromQueue(repo, pr)
-		if next == "" {
-			return
-		}
-		if seen[next] {
-			logger.Errorf("queue for repository %s returned %s twice, it is out of sync with the cluster, giving up on starting the next pipelineRun", repo.GetName(), next)
-			_ = r.qm.RemoveFromQueue(repoKey, next)
-			return
-		}
-		seen[next] = true
-
-		// Starting a PipelineRun means talking to the cluster and to the git
-		// provider, which is pointless once the context is done. Hand the slot
-		// we just took back rather than strand it. The queue is rebuilt from
-		// the cluster by InitQueues on the next start, so nothing is lost.
-		if err := ctx.Err(); err != nil {
-			logger.Warnf("not starting the next pipelineRun %s for repository %s, releasing its queue slot: %v", next, repo.GetName(), err)
-			_ = r.qm.RemoveFromQueue(repoKey, next)
-			return
-		}
-
-		key := strings.Split(next, "/")
-		if len(key) != 2 {
-			logger.Errorf("invalid pipelineRun key %q queued for repository %s, releasing its queue slot", next, repo.GetName())
-			_ = r.qm.RemoveFromQueue(repoKey, next)
-			continue
-		}
-		nextPR, err := r.run.Clients.Tekton.TektonV1().PipelineRuns(key[0]).Get(ctx, key[1], metav1.GetOptions{})
-		if err != nil {
-			// The next PipelineRun already holds the slot we just freed, but
-			// nothing has been written to the cluster for it yet, so it is
-			// still pending. Hand the slot back before moving on: a slot kept
-			// for a run that never starts is never released, since only a
-			// completed run releases one.
-			logger.Errorf("cannot get pipeline for next in queue: %w", err)
-			_ = r.qm.RemoveFromQueue(repoKey, next)
-			continue
-		}
-
-		if err := r.updatePipelineRunToInProgress(ctx, logger, repo, nextPR); err != nil {
-			logger.Errorf("failed to update status: %w", err)
-			if stderrors.Is(err, ErrPipelineRunNotStarted) {
-				// The state patch never landed, so the PipelineRun is still
-				// pending. Release the slot and try the next one in the queue.
-				_ = r.qm.RemoveFromQueue(repoKey, queuepkg.PrKey(nextPR))
-				continue
-			}
-			// The state patch landed before this failed, so the PipelineRun is
-			// already running in the cluster and rightfully owns the slot.
-			// Releasing it here would admit another run past the limit.
-			return
-		}
-		return
+// A promotion owns its retries and records a successful handoff, so retrying a
+// terminal write cannot consume another waiting candidate.
+func (r *Reconciler) startNextPipelineRunInQueue(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) error {
+	if err := r.processQueueAdmission(ctx, logger, repo, pr, nil, queuepkg.AdmissionResume); err != nil {
+		return err
 	}
+	return r.processQueueAdmission(ctx, logger, repo, pr, nil, queuepkg.AdmissionPromotion)
 }
 
 func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) error {
-	pr, err := r.updatePipelineRunState(ctx, logger, pr, kubeinteraction.StateStarted)
-	if err != nil {
-		// the patch is what clears spec.status, so until it lands the PipelineRun
-		// is still Pending and cannot be running. Callers holding a concurrency
-		// slot for it need to know that so they can hand the slot back.
-		return fmt.Errorf("%w: cannot update state: %w", ErrPipelineRunNotStarted, err)
+	if noLongerStartable(pr) {
+		return errPipelineRunGone
 	}
+	patched, patchErr := r.updatePipelineRunState(ctx, logger, pr, kubeinteraction.StateStarted)
+	if patchErr != nil {
+		// Neither the PATCH error nor its input says whether Kubernetes applied
+		// it. A pending read also cannot rule out an in-flight conditional write.
+		var err error
+		patched, err = r.run.Clients.Tekton.TektonV1().PipelineRuns(pr.Namespace).Get(ctx, pr.Name, metav1.GetOptions{})
+		if errors.IsNotFound(err) || (err == nil && (patched.UID != pr.UID || noLongerStartable(patched))) {
+			return errPipelineRunGone
+		}
+		if err != nil || patched.Spec.Status == tektonv1.PipelineRunSpecStatusPending {
+			return fmt.Errorf("%w: cannot update state: %w", ErrPipelineRunNotStarted, stderrors.Join(patchErr, err))
+		}
+	}
+	pr = patched
 
 	detectedProvider, event, err := r.initGitProviderClient(ctx, logger, repo, pr)
 	if err != nil {
@@ -560,6 +525,12 @@ func (r *Reconciler) updatePipelineRunToInProgress(ctx context.Context, logger *
 
 	logger.Info("updated in_progress status on provider platform for pipelineRun ", pr.GetName())
 	return nil
+}
+
+func noLongerStartable(current *tektonv1.PipelineRun) bool {
+	return queuepkg.Finishing(current) ||
+		current.Annotations[keys.State] == kubeinteraction.StateCompleted ||
+		current.Annotations[keys.State] == kubeinteraction.StateFailed
 }
 
 func (r *Reconciler) initGitProviderClient(ctx context.Context, logger *zap.SugaredLogger, repo *v1alpha1.Repository, pr *tektonv1.PipelineRun) (provider.Interface, *info.Event, error) {
@@ -621,14 +592,19 @@ func (r *Reconciler) updatePipelineRunState(ctx context.Context, logger *zap.Sug
 		annotations[keys.SCMReportingPLRStarted] = "true"
 	}
 
-	mergePatch := map[string]any{
-		"metadata": map[string]any{
-			"labels": map[string]string{
-				keys.State: state,
-			},
-			"annotations": annotations,
+	metadata := map[string]any{
+		"labels": map[string]string{
+			keys.State: state,
 		},
+		"annotations": annotations,
 	}
+	if state == kubeinteraction.StateStarted {
+		// Optimistic concurrency fences delayed starts against cancellation,
+		// completion and replacement by a new PipelineRun with the same name.
+		metadata["resourceVersion"] = pr.ResourceVersion
+		metadata["uid"] = pr.UID
+	}
+	mergePatch := map[string]any{"metadata": metadata}
 
 	// if state is started and the pipelineRun is still pending then clear the
 	// pending status so Tekton can pick it up. If it already isn't pending
@@ -642,7 +618,20 @@ func (r *Reconciler) updatePipelineRunState(ctx context.Context, logger *zap.Sug
 		}
 	}
 	actionLog := state + " state"
-	patchedPR, err := action.PatchPipelineRun(ctx, logger, actionLog, r.run.Clients.Tekton, pr, mergePatch)
+	var (
+		patchedPR *tektonv1.PipelineRun
+		err       error
+	)
+	if state == kubeinteraction.StateStarted {
+		patch, marshalErr := json.Marshal(mergePatch)
+		if marshalErr != nil {
+			return pr, fmt.Errorf("error marshaling the pipelinerun patch: %w", marshalErr)
+		}
+		// A conflict needs fresh readback, not retries with the same resourceVersion.
+		patchedPR, err = r.run.Clients.Tekton.TektonV1().PipelineRuns(pr.Namespace).Patch(ctx, pr.Name, types.MergePatchType, patch, metav1.PatchOptions{})
+	} else {
+		patchedPR, err = action.PatchPipelineRun(ctx, logger, actionLog, r.run.Clients.Tekton, pr, mergePatch)
+	}
 	if err != nil {
 		return pr, fmt.Errorf("error patching the pipelinerun: %w", err)
 	}
