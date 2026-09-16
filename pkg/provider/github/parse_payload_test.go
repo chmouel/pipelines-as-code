@@ -605,6 +605,7 @@ func TestParsePayLoad(t *testing.T) {
 		wantedPullRequestNumber    int
 		isCancelPipelineRunEnabled bool
 		isMergeCommit              bool
+		requireOkToTestSHA         bool
 		skipPushEventForPRCommits  bool
 		objectType                 string
 		gitopscommentprefix        string
@@ -1139,6 +1140,58 @@ func TestParsePayLoad(t *testing.T) {
 			muxReplies:     map[string]any{"/repos/owner/reponame/pulls/666": samplePR},
 			shaRet:         "samplePRsha",
 			wantRequestSet: true,
+		},
+		{
+			name:          "bad/issue comment ok-to-test short sha mismatch",
+			eventType:     "issue_comment",
+			triggerTarget: triggertype.PullRequest.String(),
+			githubClient:  true,
+			payloadEventStruct: github.IssueCommentEvent{
+				Action: new("created"),
+				Issue: &github.Issue{
+					PullRequestLinks: &github.PullRequestLinks{
+						HTMLURL: new("/666"),
+					},
+					Number: new(666),
+				},
+				Repo: sampleRepo,
+				Comment: &github.IssueComment{
+					Body: new("/ok-to-test deadbee"),
+				},
+			},
+			muxReplies: map[string]any{
+				"/repos/owner/reponame/pulls/666":                 samplePR,
+				"/repos/owner/reponame/issues/666/comments":       &github.IssueComment{},
+				"/repos/owner/reponame/commits/samplePRsha/pulls": []*github.PullRequest{&samplePR},
+			},
+			requireOkToTestSHA: true,
+			wantErrString:      "is not a prefix of the pull request's HEAD SHA",
+		},
+		{
+			name:          "bad/issue comment ok-to-test full sha mismatch",
+			eventType:     "issue_comment",
+			triggerTarget: triggertype.PullRequest.String(),
+			githubClient:  true,
+			payloadEventStruct: github.IssueCommentEvent{
+				Action: new("created"),
+				Issue: &github.Issue{
+					PullRequestLinks: &github.PullRequestLinks{
+						HTMLURL: new("/666"),
+					},
+					Number: new(666),
+				},
+				Repo: sampleRepo,
+				Comment: &github.IssueComment{
+					Body: new("/ok-to-test 0123456789abcdef0123456789abcdef01234567"),
+				},
+			},
+			muxReplies: map[string]any{
+				"/repos/owner/reponame/pulls/666":                 samplePR,
+				"/repos/owner/reponame/issues/666/comments":       &github.IssueComment{},
+				"/repos/owner/reponame/commits/samplePRsha/pulls": []*github.PullRequest{&samplePR},
+			},
+			requireOkToTestSHA: true,
+			wantErrString:      "does not match the pull request's HEAD SHA",
 		},
 		{
 			name:               "good/pull request",
@@ -1908,7 +1961,10 @@ func TestParsePayLoad(t *testing.T) {
 				ghClient: ghClient,
 				Logger:   logger,
 				pacInfo: &info.PacOpts{
-					Settings: settings.Settings{SkipPushEventForPRCommits: tt.skipPushEventForPRCommits},
+					Settings: settings.Settings{
+						RequireOkToTestSHA:        tt.requireOkToTestSHA,
+						SkipPushEventForPRCommits: tt.skipPushEventForPRCommits,
+					},
 				},
 			}
 			request := &http.Request{Header: map[string][]string{}}

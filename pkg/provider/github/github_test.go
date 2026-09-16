@@ -2169,6 +2169,244 @@ func TestExpandGlobAndAddRepoIDsInvalidPattern(t *testing.T) {
 	assert.ErrorContains(t, err, "invalid repo glob pattern")
 }
 
+func TestExpandGlobAndAddRepoIDs(t *testing.T) {
+	tests := []struct {
+		name        string
+		pattern     string
+		cachedRepos []*github.Repository
+		setup       func(t *testing.T, mux *http.ServeMux, calls *atomic.Int32)
+		wantIDs     []int64
+		wantCalls   int32
+		wantErr     string
+	}{
+		{
+			name:    "paginates app repositories",
+			pattern: "owner/*",
+			setup: func(t *testing.T, mux *http.ServeMux, calls *atomic.Int32) {
+				t.Helper()
+				mux.HandleFunc("/installation/repositories", func(rw http.ResponseWriter, r *http.Request) {
+					calls.Add(1)
+					switch r.URL.Query().Get("page") {
+					case "", "1":
+						rw.Header().Add("Link", `<https://api.github.com/installation/repositories?page=2&per_page=1>; rel="next"`)
+						fmt.Fprint(rw, `{"total_count":2,"repositories":[{"id":1,"full_name":"owner/one"}]}`)
+					case "2":
+						fmt.Fprint(rw, `{"total_count":2,"repositories":[{"id":2,"full_name":"owner/two"},{"id":3,"full_name":"other/three"}]}`)
+					default:
+						t.Fatalf("unexpected page %q", r.URL.Query().Get("page"))
+					}
+				})
+			},
+			wantIDs:   []int64{1, 2},
+			wantCalls: 2,
+		},
+		{
+			name:    "returns list app repos error",
+			pattern: "owner/*",
+			setup: func(t *testing.T, mux *http.ServeMux, calls *atomic.Int32) {
+				t.Helper()
+				mux.HandleFunc("/installation/repositories", func(rw http.ResponseWriter, _ *http.Request) {
+					calls.Add(1)
+					rw.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(rw, `{"message":"boom"}`)
+				})
+			},
+			wantCalls: 1,
+			wantErr:   "failed to list app repos",
+		},
+		{
+			name:    "uses populated cache without api call",
+			pattern: "cached/*",
+			cachedRepos: []*github.Repository{
+				testGitHubRepository("cached/one", 10),
+				testGitHubRepository("cached/two", 11),
+				testGitHubRepository("other/three", 12),
+			},
+			wantIDs: []int64{10, 11},
+		},
+		{
+			name:    "invalid glob pattern",
+			pattern: "[",
+			wantErr: "invalid repo glob pattern",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+
+			var calls atomic.Int32
+			if tt.setup != nil {
+				tt.setup(t, mux, &calls)
+			}
+
+			log, _ := logger.GetLogger()
+			provider := &Provider{
+				ghClient:      fakeclient,
+				PaginedNumber: 1,
+				Logger:        log,
+			}
+			cache := tt.cachedRepos
+			err := provider.expandGlobAndAddRepoIDs(ctx, tt.pattern, &cache)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				assert.Equal(t, tt.wantCalls, calls.Load())
+				return
+			}
+
+			assert.NilError(t, err)
+			assert.DeepEqual(t, tt.wantIDs, provider.RepositoryIDs)
+			assert.Equal(t, tt.wantCalls, calls.Load())
+		})
+	}
+}
+
+func testGitHubRepository(fullName string, id int64) *github.Repository {
+	return &github.Repository{
+		ID:       &id,
+		FullName: &fullName,
+	}
+}
+
+func TestGetUserLogin(t *testing.T) {
+	tests := []struct {
+		name      string
+		event     *info.Event
+		cached    string
+		setup     func(t *testing.T, mux *http.ServeMux)
+		run       *params.Run
+		wantLogin string
+		wantErr   string
+	}{
+		{
+			name:      "cached login skips api calls",
+			event:     info.NewEvent(),
+			cached:    "already-known",
+			wantLogin: "already-known",
+		},
+		{
+			name:  "pat user endpoint error",
+			event: info.NewEvent(),
+			setup: func(t *testing.T, mux *http.ServeMux) {
+				t.Helper()
+				mux.HandleFunc("/user", func(rw http.ResponseWriter, _ *http.Request) {
+					rw.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprint(rw, `{"message":"boom"}`)
+				})
+			},
+			wantErr: "unable to fetch user info",
+		},
+		{
+			name: "app slug error",
+			event: &info.Event{
+				InstallationID: 123,
+				Provider:       &info.Provider{URL: keys.PublicGithubAPIURL},
+			},
+			run:     newTestRun(t, "github.com"),
+			wantErr: "failed to fetch app slug",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := rtesting.SetupFakeContext(t)
+			fakeclient, mux, _, teardown := ghtesthelper.SetupGH()
+			defer teardown()
+			if tt.setup != nil {
+				tt.setup(t, mux)
+			}
+
+			log, _ := logger.GetLogger()
+			provider := &Provider{
+				ghClient:     fakeclient,
+				Logger:       log,
+				Run:          tt.run,
+				pacUserLogin: tt.cached,
+			}
+			err := provider.getUserLogin(ctx, tt.event)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+
+			assert.NilError(t, err)
+			assert.Equal(t, tt.wantLogin, provider.pacUserLogin)
+		})
+	}
+}
+
+func TestResponseStatusCodeAndGithubRequestID(t *testing.T) {
+	tests := []struct {
+		name          string
+		resp          *github.Response
+		wantStatus    int
+		wantRequestID string
+		skipStatus    bool
+	}{
+		{
+			name: "nil response",
+		},
+		{
+			name:       "nil embedded response",
+			resp:       &github.Response{},
+			skipStatus: true,
+		},
+		{
+			name: "response has status and request id",
+			resp: &github.Response{
+				Response: &http.Response{
+					StatusCode: http.StatusAccepted,
+					Header: http.Header{
+						"X-Github-Request-Id": []string{"rid-123"},
+					},
+				},
+			},
+			wantStatus:    http.StatusAccepted,
+			wantRequestID: "rid-123",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !tt.skipStatus {
+				assert.Equal(t, tt.wantStatus, responseStatusCode(tt.resp))
+			}
+			assert.Equal(t, tt.wantRequestID, githubRequestID(tt.resp))
+		})
+	}
+}
+
+func TestGetTemplate(t *testing.T) {
+	tests := []struct {
+		name        string
+		commentType provider.CommentType
+		wantEmpty   bool
+	}{
+		{
+			name:        "starting pipeline template",
+			commentType: provider.StartingPipelineType,
+		},
+		{
+			name:        "pipeline run status template",
+			commentType: provider.PipelineRunStatusType,
+		},
+		{
+			name:        "queueing pipeline template",
+			commentType: provider.QueueingPipelineType,
+		},
+		{
+			name:        "unknown template",
+			commentType: provider.CommentType(99),
+			wantEmpty:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := (&Provider{}).GetTemplate(tt.commentType)
+			assert.Equal(t, tt.wantEmpty, got == "")
+		})
+	}
+}
+
 func TestGetPullRequest(t *testing.T) {
 	const (
 		org   = "owner"
