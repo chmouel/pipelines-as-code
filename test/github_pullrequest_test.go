@@ -995,6 +995,60 @@ func TestGithubGHEWebhookPRSkippedStatusReported(t *testing.T) {
 	assert.Equal(t, foundStatus, true, "should have found a commit status with success state and Skipped description for the non-matching pipeline run")
 }
 
+// TestGithubGHEPullRequestErrorDetectionStripsANSI checks that terminal color
+// codes printed by a failing step are removed from the check run output and
+// from the error detection annotations.
+func TestGithubGHEPullRequestErrorDetectionStripsANSI(t *testing.T) {
+	ctx := context.Background()
+	g := &tgithub.PRTest{
+		Label:         "Github error detection strips ANSI",
+		YamlFiles:     []string{"testdata/pipelinerun-error-snippet-ansi.yaml"},
+		GHE:           true,
+		NoStatusCheck: true,
+	}
+	g.RunPullRequest(ctx, t)
+	defer g.TearDown(ctx, t)
+
+	_, err := twait.UntilPipelineRunsFinished(ctx, g.Cnx.Clients, twait.Opts{
+		Namespace:       g.TargetNamespace,
+		MinNumberStatus: 1,
+		PollTimeout:     twait.DefaultTimeout,
+		TargetSHA:       []string{g.SHA},
+	})
+	assert.NilError(t, err)
+
+	var checkRun *github.CheckRun
+	for counter := 0; counter <= 10; counter++ {
+		res, resp, err := g.Provider.Client().Checks.ListCheckRunsForRef(ctx, g.Options.Organization, g.Options.Repo, g.SHA, &github.ListCheckRunsOptions{
+			AppID:  g.Provider.ApplicationID,
+			Status: new("completed"),
+		})
+		assert.NilError(t, err)
+		assert.Equal(t, resp.StatusCode, 200)
+		if len(res.CheckRuns) > 0 {
+			checkRun = res.CheckRuns[0]
+			break
+		}
+		g.Cnx.Clients.Log.Infof("Waiting for the check run to be completed")
+		time.Sleep(5 * time.Second)
+	}
+	assert.Assert(t, checkRun != nil, "check run was not completed")
+	assert.Equal(t, checkRun.GetConclusion(), "failure")
+
+	text := checkRun.GetOutput().GetText()
+	assert.Assert(t, strings.Contains(text, "error: colored failure for ansi stripping"), "failure snippet not found in check run text: %s", text)
+	assert.Assert(t, !strings.Contains(text, "\x1b"), "check run text contains terminal escape codes: %q", text)
+
+	annotations, _, err := g.Provider.Client().Checks.ListCheckRunAnnotations(ctx, g.Options.Organization, g.Options.Repo, checkRun.GetID(), &github.ListOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, len(annotations), 1, "expected one error detection annotation")
+	assert.Equal(t, annotations[0].GetPath(), ".tekton/pipelinerun-error-snippet-ansi.yaml")
+	assert.Equal(t, annotations[0].GetStartLine(), 1)
+	message := annotations[0].GetMessage()
+	assert.Assert(t, strings.Contains(message, "error: colored failure for ansi stripping"), "unexpected annotation message: %q", message)
+	assert.Assert(t, !strings.Contains(message, "\x1b"), "annotation message contains terminal escape codes: %q", message)
+}
+
 // Local Variables:
 // compile-command: "go test -tags=e2e -v -info TestGithubPullRequest$ ."
 // End:

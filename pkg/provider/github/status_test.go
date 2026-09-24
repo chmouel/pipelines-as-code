@@ -1666,6 +1666,14 @@ func TestGetFailuresMessageAsAnnotations(t *testing.T) {
 			wantLine:    42,
 			wantMessage: "broken",
 		},
+		{
+			name:        "annotation message has ansi color codes stripped",
+			regexp:      `^(?P<filename>[^:]*):(?P<line>[0-9]+):(?P<column>[0-9]+)?([ ]*)?(?P<error>.*)`,
+			logSnippet:  "pkg/params/run.go:58:16: \x1b[31merror: \x1b[0mliteral \x1b[95m`nil`\x1b[0m returned",
+			wantPath:    "pkg/params/run.go",
+			wantLine:    58,
+			wantMessage: ": error: literal `nil` returned",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

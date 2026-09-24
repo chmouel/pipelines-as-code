@@ -325,6 +325,22 @@ func TestCollectFailedTasksLogSnippetPodLogBranches(t *testing.T) {
 			condMessage: "task failed",
 			wantSnippet: "task failed",
 		},
+		{
+			name: "strips ansi color codes from pod logs",
+			kinteract: &kubernetestint.KinterfaceTest{
+				GetPodLogsOutput: map[string]string{
+					"task1": "pkg/params/run.go:58:16: \x1b[31merror: \x1b[0mliteral \x1b[95m`nil`\x1b[0m returned\n",
+				},
+			},
+			condMessage: "task failed",
+			wantSnippet: "pkg/params/run.go:58:16: error: literal `nil` returned",
+		},
+		{
+			name:        "strips ansi color codes from condition message",
+			kinteract:   errorPodLogsInterface{KinterfaceTest: &kubernetestint.KinterfaceTest{}},
+			condMessage: "\x1b[31mtask failed\x1b[0m",
+			wantSnippet: "task failed",
+		},
 	}
 
 	for _, tt := range tests {
