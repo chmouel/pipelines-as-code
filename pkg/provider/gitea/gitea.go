@@ -29,6 +29,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/versiondata"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider"
 	providerMetrics "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/providermetrics"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/provider/retryhttp"
 	providerstatus "github.com/openshift-pipelines/pipelines-as-code/pkg/provider/status"
 	"go.uber.org/zap"
 )
@@ -274,14 +275,33 @@ func (v *Provider) SetClient(_ context.Context, run *params.Run, runevent *info.
 	if repo != nil && repo.Spec.Settings != nil && repo.Spec.Settings.Forgejo != nil && repo.Spec.Settings.Forgejo.UserAgent != "" {
 		userAgent = repo.Spec.Settings.Forgejo.UserAgent
 	}
+
+	clientOpts := []forgejo.ClientOption{forgejo.SetUserAgent(userAgent)}
+
+	// Configure retry transport before creating the client so the initial version
+	// check is also protected against transient failures
+	if v.pacInfo != nil && v.pacInfo.EnableAPIRetry {
+		retryOpts := retryhttp.Options{
+			MaxAttempts: v.pacInfo.APIRetryMaxAttempts,
+			MaxWait:     time.Duration(v.pacInfo.APIRetryMaxWaitSeconds) * time.Second,
+			Logger:      v.Logger,
+		}
+		httpClient := &http.Client{
+			Transport: retryhttp.Wrap(http.DefaultTransport, retryOpts),
+		}
+		clientOpts = append(clientOpts, forgejo.SetHTTPClient(httpClient))
+	}
+
 	// password is not exposed to CRD, it's only used from the e2e tests
 	if v.Password != "" && runevent.Provider.User != "" {
-		v.giteaClient, err = forgejo.NewClient(apiURL, forgejo.SetBasicAuth(runevent.Provider.User, v.Password), forgejo.SetUserAgent(userAgent))
+		clientOpts = append(clientOpts, forgejo.SetBasicAuth(runevent.Provider.User, v.Password))
+		v.giteaClient, err = forgejo.NewClient(apiURL, clientOpts...)
 	} else {
 		if runevent.Provider.Token == "" {
 			return fmt.Errorf("no git_provider.secret has been set in the repo crd")
 		}
-		v.giteaClient, err = forgejo.NewClient(apiURL, forgejo.SetToken(runevent.Provider.Token), forgejo.SetUserAgent(userAgent))
+		clientOpts = append(clientOpts, forgejo.SetToken(runevent.Provider.Token))
+		v.giteaClient, err = forgejo.NewClient(apiURL, clientOpts...)
 	}
 	if err != nil {
 		return err
@@ -319,7 +339,10 @@ func (v *Provider) CreateStatus(ctx context.Context, event *info.Event, statusOp
 	case providerstatus.ConclusionNeutral:
 		statusOpts.Title = "Unknown"
 		statusOpts.Summary = "doesn't know what happened with this commit."
-	case providerstatus.ConclusionCancelled, providerstatus.ConclusionCompleted, providerstatus.ConclusionSkipped:
+	case providerstatus.ConclusionSkipped:
+		statusOpts.Title = "Skipped"
+		statusOpts.Summary = "has <b>skipped</b>."
+	case providerstatus.ConclusionCancelled, providerstatus.ConclusionCompleted:
 	}
 
 	if statusOpts.Status == "in_progress" {
@@ -341,7 +364,9 @@ func (v *Provider) createStatusCommit(ctx context.Context, event *info.Event, pa
 	state := forgejo.StatusState(status.Conclusion)
 	switch status.Conclusion {
 	case providerstatus.ConclusionNeutral:
-		state = forgejo.StatusSuccess // We don't have a choice than setting as success, no pending here.c
+		state = forgejo.StatusSuccess // We don't have a choice than setting as success, no pending here.
+	case providerstatus.ConclusionSkipped:
+		state = forgejo.StatusSuccess // We don't have a choice than setting as success, skipped is neither pending nor failure.
 	case providerstatus.ConclusionPending:
 		if status.Title != "" {
 			state = forgejo.StatusPending
@@ -394,7 +419,7 @@ func (v *Provider) createStatusCommit(ctx context.Context, event *info.Event, pa
 		v.Logger.Warn("Comments related to PipelineRuns status have been disabled for Gitea/Forgejo pull requests")
 		return nil
 	case provider.UpdateCommentStrategy:
-		if eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest {
+		if !status.IsUnmatchedReport && (eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
 			status.Text = strings.ReplaceAll(strings.TrimSpace(status.Text), "<br>", "\n")
 			statusComment := v.formatPipelineComment(event.SHA, status)
 			// Creating the prefix that is added to the status comment for a pipeline run.
@@ -413,7 +438,7 @@ func (v *Provider) createStatusCommit(ctx context.Context, event *info.Event, pa
 			}
 		}
 	default:
-		if status.Text != "" && (eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
+		if !status.IsUnmatchedReport && status.Text != "" && (eventType == triggertype.PullRequest || event.TriggerTarget == triggertype.PullRequest) {
 			status.Text = strings.ReplaceAll(strings.TrimSpace(status.Text), "<br>", "\n")
 			_, _, err := v.Client().CreateIssueComment(
 				event.Organization, event.Repository,
