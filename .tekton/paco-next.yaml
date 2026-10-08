@@ -43,7 +43,7 @@ spec:
       value: "itpc-gcp-pnd-pe-eng-claude"
 
     - name: model
-      value: "claude-sonnet-4-6@default"
+      value: "claude-opus-4-6@default"
 
     - name: reasoning_effort
       value: "high"
