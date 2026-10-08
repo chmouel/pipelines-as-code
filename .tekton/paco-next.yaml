@@ -32,7 +32,7 @@ spec:
         {{ trigger_comment }}
     # Lets paco add an "eyes" reaction to the triggering comment.
     - name: comment_id
-      value: "{{ cel: has(body.comment) && has(body.comment.id) ? string(body.comment.id) : '' }}"
+      value: "{{ cel: has(body.comment) && has(body.comment.id) ? string(int(body.comment.id)) : '' }}"
     - name: git_auth_secret
       value: "{{git_auth_secret}}"
 
@@ -43,7 +43,7 @@ spec:
       value: "itpc-gcp-pnd-pe-eng-claude"
 
     - name: model
-      value: "google-vertex-anthropic/claude-sonnet-4-6@default"
+      value: "claude-sonnet-4-6@default"
 
     - name: reasoning_effort
       value: "high"
