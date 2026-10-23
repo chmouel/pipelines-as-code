@@ -15,10 +15,6 @@ metadata:
 spec:
   pipelineRef:
     name: paco
-  taskRunTemplate:
-    podTemplate:
-      securityContext:
-        fsGroup: 65532
   params:
     - name: repo_owner
       value: "{{repo_owner}}"
