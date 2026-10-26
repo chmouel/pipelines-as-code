@@ -6,7 +6,7 @@ metadata:
   annotations:
     # Shared Pipeline. "main" follows the latest version; replace it with a
     # release tag or commit SHA to pin the review steps.
-    pipelinesascode.tekton.dev/pipeline: "https://raw.githubusercontent.com/pipelines-as-code/paco-cli/paco-next/tekton/paco.pipeline.yaml"
+    pipelinesascode.tekton.dev/pipeline: "https://raw.githubusercontent.com/pipelines-as-code/paco-cli/main/tekton/paco.pipeline.yaml"
     pipelinesascode.tekton.dev/on-cel-expression: |
       event == "pull_request" && target_branch == "main" && (body.action == "opened" || body.action == "reopened")
     pipelinesascode.tekton.dev/on-comment: "^/paco[[:space:]]+(review|summary)[[:space:]]*$"
@@ -37,7 +37,7 @@ spec:
       value: "{{git_auth_secret}}"
 
     - name: image
-      value: "ghcr.io/pipelines-as-code/paco-cli:paco-next"
+      value: "ghcr.io/pipelines-as-code/paco-cli:latest"
 
     - name: vertex_project
       value: "itpc-gcp-pnd-pe-eng-claude"
