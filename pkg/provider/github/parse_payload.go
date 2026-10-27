@@ -361,6 +361,7 @@ func (v *Provider) ParsePayload(ctx context.Context, run *params.Run, request *h
 
 	if repoIDFromPayload > 0 {
 		v.RepositoryIDs = []int64{repoIDFromPayload}
+		v.triggerRepositoryID = repoIDFromPayload
 	}
 
 	eventInt, err := github.ParseWebHook(event.EventType, []byte(payload))

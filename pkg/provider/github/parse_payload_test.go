@@ -2147,6 +2147,7 @@ func TestAppTokenGeneration(t *testing.T) {
 	ghePayloadEvent.Installation = &github.Installation{ID: &testInstallationID}
 	gheRepository := *sampleRepo
 	gheRepository.HTMLURL = new("https://github.example.com/owner/repo")
+	gheRepository.ID = new(int64(4242))
 	ghePayloadEvent.Repo = &gheRepository
 	ghePayload, err := json.Marshal(ghePayloadEvent)
 	assert.NilError(t, err)
@@ -2168,6 +2169,7 @@ func TestAppTokenGeneration(t *testing.T) {
 		wantGHEURL      string
 		wantNilEvent    bool
 		eventType       string
+		wantTriggerRepo int64
 	}{
 		{
 			name:           "secret not found",
@@ -2253,6 +2255,7 @@ func TestAppTokenGeneration(t *testing.T) {
 			wantTokenCalls:  1,
 			wantProviderURL: "https://github.example.com",
 			wantGHEURL:      "https://github.example.com",
+			wantTriggerRepo: 4242,
 		},
 		{
 			ctx:          ctxInvalidAppID,
@@ -2363,6 +2366,7 @@ func TestAppTokenGeneration(t *testing.T) {
 
 			// Verify client was created successfully for GitHub App
 			assert.Assert(t, gprovider.Client() != nil)
+			assert.Equal(t, gprovider.GetTriggerRepositoryID(), tt.wantTriggerRepo)
 			if tt.wantLearnedHost != "" {
 				configMap, err := tt.seedData.Kube.CoreV1().ConfigMaps(tt.ctxNS).Get(tt.ctx, configMapName, metav1.GetOptions{})
 				assert.NilError(t, err)

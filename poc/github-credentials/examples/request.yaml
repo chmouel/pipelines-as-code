@@ -1,0 +1,15 @@
+# Render with:
+#   envsubst '${GITHUB_REPOSITORY_ID}' < request.yaml | kubectl create -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: private-clone-request
+  namespace: pipelines-as-code
+  labels:
+    pipelinesascode.tekton.dev/github-credential-request: "true"
+immutable: true
+data:
+  repository-id: "${GITHUB_REPOSITORY_ID}"
+  target-namespace: pac-credentials-poc
+  secret-name: private-clone-auth
+  pipelinerun-name: private-clone

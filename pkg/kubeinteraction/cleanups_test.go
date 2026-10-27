@@ -6,6 +6,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/credentials"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/clients"
 	testclient "github.com/openshift-pipelines/pipelines-as-code/pkg/test/clients"
@@ -190,6 +191,28 @@ func TestCleanupPipelines(t *testing.T) {
 							"password": []byte("test"),
 						},
 					},
+				},
+				sList: 1,
+			},
+		},
+		{
+			name: "cleanup leaves credential service secrets to the service",
+			args: args{
+				namespace:      ns,
+				repositoryName: cleanupRepoName,
+				prunCurrent:    &tektonv1.PipelineRun{ObjectMeta: metav1.ObjectMeta{Labels: cleanupLabels, Annotations: cleanupAnnotations}},
+				maxKeep:        0,
+				kept:           0,
+				pruns: []*tektonv1.PipelineRun{
+					tektontest.MakePRCompletion(clock, "pipeline-toclean", ns, tektonv1.PipelineRunReasonSuccessful.String(), map[string]string{
+						keys.OriginalPRName:               cleanupPRName,
+						keys.Repository:                   cleanupRepoName,
+						keys.GitAuthSecret:                "service-secret",
+						credentials.AnnotationSecretOwner: credentials.SecretOwnerService,
+					}, cleanupLabels, 30),
+				},
+				secrets: []*corev1.Secret{
+					{ObjectMeta: metav1.ObjectMeta{Name: "service-secret", Namespace: ns}},
 				},
 				sList: 1,
 			},

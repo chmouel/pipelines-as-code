@@ -1,0 +1,68 @@
+# Proof of concept only, not part of the standard installation.
+# Control namespace: pipelines-as-code. Output namespace: pac-credentials-poc.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipelines-as-code-credentials
+  namespace: pipelines-as-code
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pipelines-as-code-credentials-control
+  namespace: pipelines-as-code
+rules:
+  # Credential requests and their status annotations.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "update", "delete"]
+  # The GitHub App key. Keep only the Secret you use.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["pipelines-as-code-secret", "pipelines-as-code-credentials-key"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipelines-as-code-credentials-control
+  namespace: pipelines-as-code
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pipelines-as-code-credentials-control
+subjects:
+  - kind: ServiceAccount
+    name: pipelines-as-code-credentials
+    namespace: pipelines-as-code
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pipelines-as-code-credentials-output
+  namespace: pac-credentials-poc
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelineruns", "taskruns", "customruns"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipelines-as-code-credentials-output
+  namespace: pac-credentials-poc
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pipelines-as-code-credentials-output
+subjects:
+  - kind: ServiceAccount
+    name: pipelines-as-code-credentials
+    namespace: pipelines-as-code

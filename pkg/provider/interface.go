@@ -36,6 +36,12 @@ type Interface interface {
 	GetCommitStatuses(ctx context.Context, event *info.Event) ([]CommitStatusInfo, error)
 }
 
+// TriggerRepositoryIDGetter is implemented by providers that know the ID of
+// the repository whose webhook delivery produced the event.
+type TriggerRepositoryIDGetter interface {
+	GetTriggerRepositoryID() int64
+}
+
 // CommitStatusInfo represents a commit status from a git provider.
 type CommitStatusInfo struct {
 	Name   string // e.g. "Pipelines as Code CI / always-good-pipelinerun"

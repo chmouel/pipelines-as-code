@@ -1,0 +1,59 @@
+# Copy into the test repository as .tekton/private-clone.yaml.
+# The name is a generateName base on purpose: PaC fixes the build name
+# before it submits the credential request.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: private-clone
+  annotations:
+    pipelinesascode.tekton.dev/on-event: "[push]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/on-path-change-ignore: "[hold/**]"
+    pipelinesascode.tekton.dev/max-keep-runs: "2"
+    # Tekton catalog git-clone 0.10, pinned. Its clone step copies
+    # .git-credentials from the basic-auth workspace when it starts.
+    pipelinesascode.tekton.dev/task: "https://raw.githubusercontent.com/tektoncd/catalog/112374ce1262b133a77300bd8133445722605e04/task/git-clone/0.10/git-clone.yaml"
+spec:
+  timeouts:
+    pipeline: 1h
+  params:
+    - name: url
+      value: "{{ repo_url }}"
+    - name: revision
+      value: "{{ revision }}"
+  workspaces:
+    - name: source
+      emptyDir: {}
+    - name: basic-auth
+      secret:
+        secretName: "{{ git_auth_secret }}"
+  pipelineSpec:
+    params:
+      - name: url
+      - name: revision
+    workspaces:
+      - name: source
+      - name: basic-auth
+    tasks:
+      - name: clone
+        taskRef:
+          name: git-clone
+        params:
+          - name: url
+            value: $(params.url)
+          - name: revision
+            value: $(params.revision)
+        workspaces:
+          - name: output
+            workspace: source
+          - name: basic-auth
+            workspace: basic-auth
+    finally:
+      - name: cleanup
+        taskSpec:
+          steps:
+            - name: wait
+              image: registry.access.redhat.com/ubi9/ubi-minimal
+              script: |
+                #!/bin/sh
+                sleep 60

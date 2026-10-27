@@ -9,6 +9,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/consoleui"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/credentials"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/customparams"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/events"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
@@ -45,6 +46,9 @@ type PacRun struct {
 	manager      *ConcurrencyManager
 	pacInfo      *info.PacOpts
 	globalRepo   *v1alpha1.Repository
+	// credentialsHandoff is the opt-in configuration for delegating git auth
+	// secrets to the standalone credential service (proof of concept).
+	credentialsHandoff credentials.HandoffSettings
 	// console is scoped to this event once the custom params are resolved, so
 	// concurrent events never render their URLs with each other's parameters.
 	console consoleui.Interface
@@ -64,6 +68,8 @@ func NewPacs(event *info.Event, vcx provider.Interface, run *params.Run, pacInfo
 		event: event, run: run, vcx: vcx, k8int: k8int, pacInfo: pacInfo, logger: logger, globalRepo: globalRepo,
 		eventEmitter: events.NewEventEmitter(run.Clients.Kube, logger),
 		manager:      NewConcurrencyManager(),
+
+		credentialsHandoff: credentials.HandoffSettingsFromEnv(),
 	}
 }
 
@@ -289,6 +295,14 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 		p.event.BaseBranch,
 	)
 
+	serviceOwned := p.usesCredentialService(match)
+	if !serviceOwned {
+		// Only PaC may mark a secret as service owned, never the PipelineRun author.
+		delete(match.PipelineRun.Annotations, credentials.AnnotationSecretOwner)
+	}
+	var credPreparer *credentials.Preparer
+	var credRequest credentials.Request
+
 	// Automatically create a secret with the token to be reused by git-clone task
 	if p.pacInfo.SecretAutoCreation {
 		if annotation, ok := match.PipelineRun.GetAnnotations()[keys.GitAuthSecret]; ok {
@@ -297,7 +311,14 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 		} else {
 			return nil, fmt.Errorf("cannot get annotation %s as set on PR", keys.GitAuthSecret)
 		}
+	}
 
+	if serviceOwned {
+		var err error
+		if credPreparer, credRequest, err = p.prepareServiceCredentials(ctx, match, gitAuthSecretName); err != nil {
+			return nil, fmt.Errorf("preparing build credentials with the credential service has failed: %w", err)
+		}
+	} else if p.pacInfo.SecretAutoCreation {
 		authSecret, err := secrets.MakeBasicAuthSecret(p.event, gitAuthSecretName)
 		if err != nil {
 			return nil, fmt.Errorf("making basic auth secret: %s has failed: %w ", gitAuthSecretName, err)
@@ -331,13 +352,19 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 		p.debugf("startPR: marking pipelinerun=%s as pending due to concurrency limit", prName)
 	}
 
+	if serviceOwned {
+		if err := credPreparer.Check(ctx, credRequest); err != nil {
+			return nil, fmt.Errorf("build credentials are no longer fresh: %w", err)
+		}
+	}
+
 	// Create the actual pipelineRun
 	p.debugf("startPR: creating pipelinerun=%s in namespace=%s", prName, match.Repo.GetNamespace())
 	pr, err := p.run.Clients.Tekton.TektonV1().PipelineRuns(match.Repo.GetNamespace()).Create(ctx,
 		match.PipelineRun, metav1.CreateOptions{})
 	if err != nil {
 		// cleanup the gitauth secret because ownerRef isn't set when the pipelineRun creation failed
-		if p.pacInfo.SecretAutoCreation {
+		if p.pacInfo.SecretAutoCreation && !serviceOwned {
 			if errDelSec := p.k8int.DeleteSecret(ctx, p.logger, match.Repo.GetNamespace(), gitAuthSecretName); errDelSec != nil {
 				// don't overshadow the pipelineRun creation error, just log
 				p.logger.Errorf("removing auto created secret: %s in namespace %s has failed: %v", gitAuthSecretName, match.Repo.GetNamespace(), errDelSec)
@@ -349,7 +376,7 @@ func (p *PacRun) startPR(ctx context.Context, match matcher.Match) (*tektonv1.Pi
 	}
 
 	// update ownerRef of secret with pipelineRun, so that it gets cleanedUp with pipelineRun
-	if p.pacInfo.SecretAutoCreation {
+	if p.pacInfo.SecretAutoCreation && !serviceOwned {
 		err := p.k8int.UpdateSecretWithOwnerRef(ctx, p.logger, pr.Namespace, gitAuthSecretName, pr)
 		if err != nil {
 			// we still return the created PR with error, and allow caller to decide what to do with the PR, and avoid

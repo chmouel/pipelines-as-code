@@ -1,0 +1,65 @@
+# One template for both builds so they differ only in name and secret.
+# Created pending; release with:
+#   kubectl -n pac-credentials-poc patch pipelinerun NAME --type=json \
+#     -p '[{"op":"remove","path":"/spec/status"}]'
+# Render with:
+#   NAME=private-clone SECRET=private-clone-auth \
+#     envsubst '${NAME} ${SECRET} ${GITHUB_REPOSITORY_URL} ${REVISION}' \
+#     < private-clone.yaml | kubectl create -f -
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: ${NAME}
+  namespace: pac-credentials-poc
+spec:
+  status: PipelineRunPending
+  timeouts:
+    pipeline: 1h
+  params:
+    - name: url
+      value: "${GITHUB_REPOSITORY_URL}"
+    - name: revision
+      value: "${REVISION}"
+  workspaces:
+    - name: source
+      emptyDir: {}
+    - name: basic-auth
+      secret:
+        secretName: "${SECRET}"
+  pipelineSpec:
+    params:
+      - name: url
+      - name: revision
+    workspaces:
+      - name: source
+      - name: basic-auth
+    tasks:
+      - name: clone
+        # Tekton catalog git-clone 0.10, pinned. Its clone step copies
+        # .git-credentials from the basic-auth workspace when it starts.
+        taskRef:
+          resolver: http
+          params:
+            - name: url
+              value: https://raw.githubusercontent.com/tektoncd/catalog/112374ce1262b133a77300bd8133445722605e04/task/git-clone/0.10/git-clone.yaml
+        params:
+          - name: url
+            value: $(params.url)
+          - name: revision
+            value: $(params.revision)
+        workspaces:
+          - name: output
+            workspace: source
+          - name: basic-auth
+            workspace: basic-auth
+    finally:
+      # Keeps the run executing after the clone so the test can confirm
+      # renewal continues until cleanup tasks finish.
+      - name: cleanup
+        taskSpec:
+          steps:
+            - name: wait
+              image: registry.access.redhat.com/ubi9/ubi-minimal
+              script: |
+                #!/bin/sh
+                sleep 60

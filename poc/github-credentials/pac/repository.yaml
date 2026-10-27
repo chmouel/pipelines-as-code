@@ -1,0 +1,11 @@
+# Render with:
+#   envsubst '${GITHUB_REPOSITORY_URL}' < repository.yaml | kubectl apply -f -
+# concurrency_limit 1 lets the blocker run hold private-clone in PaC's queue.
+apiVersion: pipelinesascode.tekton.dev/v1alpha1
+kind: Repository
+metadata:
+  name: private-clone
+  namespace: pac-credentials-poc
+spec:
+  url: "${GITHUB_REPOSITORY_URL}"
+  concurrency_limit: 1

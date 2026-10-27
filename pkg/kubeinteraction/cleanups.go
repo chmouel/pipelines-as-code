@@ -6,6 +6,7 @@ import (
 
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/keys"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/apis/pipelinesascode/v1alpha1"
+	"github.com/openshift-pipelines/pipelines-as-code/pkg/credentials"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/formatting"
 	psort "github.com/openshift-pipelines/pipelines-as-code/pkg/sort"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
@@ -50,7 +51,8 @@ func (k Interaction) CleanupPipelines(ctx context.Context, logger *zap.SugaredLo
 
 			// Try to Delete the secret created for git-clone basic-auth, it should have been created with a ownerRef on the pipelinerun and due being deleted when the pipelinerun is deleted
 			// but in some cases of conflicts and the ownerRef not being set, the secret is not deleted, and we need to delete it manually.
-			if secretName, ok := prun.GetAnnotations()[keys.GitAuthSecret]; ok {
+			// Service-owned secrets are removed by the credential service.
+			if secretName, ok := prun.GetAnnotations()[keys.GitAuthSecret]; ok && prun.GetAnnotations()[credentials.AnnotationSecretOwner] != credentials.SecretOwnerService {
 				err = k.Run.Clients.Kube.CoreV1().Secrets(repo.GetNamespace()).Delete(ctx, secretName, metav1.DeleteOptions{})
 				if err == nil {
 					logger.Infof("secret %s attached to pipelinerun %s has been deleted", secretName, prun.GetName())

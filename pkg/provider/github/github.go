@@ -62,10 +62,13 @@ type Provider struct {
 	provenance      string
 	RepositoryIDs   []int64
 	RepositoryNames []string
-	repo            *v1alpha1.Repository
-	eventEmitter    *events.EventEmitter
-	PaginedNumber   int
-	userType        string // The type of user i.e bot or not
+	// triggerRepositoryID is the repository of the signed webhook delivery,
+	// unaffected by extra repositories added for token scoping.
+	triggerRepositoryID int64
+	repo                *v1alpha1.Repository
+	eventEmitter        *events.EventEmitter
+	PaginedNumber       int
+	userType            string // The type of user i.e bot or not
 	skippedRun
 	triggerEvent       string
 	cachedChangedFiles *changedfiles.ChangedFiles
@@ -267,6 +270,10 @@ func (v *Provider) GetConfig() *info.ProviderConfig {
 		APIURL:         apiPublicURL,
 		Name:           v.providerName,
 	}
+}
+
+func (v *Provider) GetTriggerRepositoryID() int64 {
+	return v.triggerRepositoryID
 }
 
 func MakeClient(ctx context.Context, apiURL, token string, retryOpts ...*retryhttp.Options) (*github.Client, string, *string, error) {

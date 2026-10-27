@@ -1,0 +1,28 @@
+# Copy into the test repository as .tekton/blocker.yaml.
+# Runs only for pushes touching hold/ and occupies the single concurrency
+# slot so the next private-clone run waits in PaC's queue. Release the
+# queue by cancelling it:
+#   kubectl -n pac-credentials-poc patch pipelinerun NAME --type=merge \
+#     -p '{"spec":{"status":"Cancelled"}}'
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: blocker
+  annotations:
+    pipelinesascode.tekton.dev/on-event: "[push]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/on-path-change: "[hold/**]"
+    pipelinesascode.tekton.dev/max-keep-runs: "2"
+spec:
+  timeouts:
+    pipeline: 1h
+  pipelineSpec:
+    tasks:
+      - name: hold
+        taskSpec:
+          steps:
+            - name: sleep
+              image: registry.access.redhat.com/ubi9/ubi-minimal
+              script: |
+                #!/bin/sh
+                sleep 2700

@@ -1,0 +1,63 @@
+# Proof of concept only, not part of the standard installation.
+# Configuration comes from the pipelines-as-code-credentials-config ConfigMap,
+# created by the commands in poc/github-credentials/README.md.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipelines-as-code-credentials
+  namespace: pipelines-as-code
+  labels:
+    app.kubernetes.io/name: pipelines-as-code-credentials
+    app.kubernetes.io/part-of: pipelines-as-code
+spec:
+  # A single replica without leader election. Recreate avoids two
+  # instances renewing the same credentials during a rollout.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pipelines-as-code-credentials
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pipelines-as-code-credentials
+        app.kubernetes.io/part-of: pipelines-as-code
+    spec:
+      serviceAccountName: pipelines-as-code-credentials
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: credentials
+          image: "ko://github.com/openshift-pipelines/pipelines-as-code/cmd/pipelines-as-code-credentials"
+          envFrom:
+            - configMapRef:
+                name: pipelines-as-code-credentials-config
+          ports:
+            - name: health
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL

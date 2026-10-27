@@ -1,0 +1,5 @@
+# Proof of concept only. Builds and their credential Secrets live here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pac-credentials-poc
