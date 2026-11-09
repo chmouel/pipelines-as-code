@@ -34,10 +34,8 @@ github:
   # private_task_url: "https://github.com/org/private-repo/blob/main/task.yaml"
   # GitHub App used by the controller that CI installs (tests do not read these)
   application_id: ""
-  private_key: |
-    -----BEGIN RSA PRIVATE KEY-----
-    ...
-    -----END RSA PRIVATE KEY-----
+  # PEM private key, written as a YAML block scalar (private_key: |)
+  private_key: ""
   smee_url: ""  # Relay URL the GitHub App delivers webhooks to
 
 # GitHub Enterprise (second controller)
