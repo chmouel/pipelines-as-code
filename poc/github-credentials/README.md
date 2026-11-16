@@ -98,7 +98,11 @@ The manual steps:
    set `KO_DEFAULTPLATFORMS` to the Kind node's platform, for example
    `linux/arm64` (ko builds `linux/amd64` by default).
 
-2. Create the namespace and the service account and roles:
+2. Create the namespaces and the service account and roles. Builds and
+   their Secrets live in `pac-credentials-poc`. Credential requests live in
+   `pac-credentials-requests`, which only the service and the PaC controller
+   can access. The service runs in `pipelines-as-code`, where it can only
+   read the App key Secret:
 
    ```shell
    kubectl apply -f poc/github-credentials/namespace.yaml
@@ -114,6 +118,8 @@ The manual steps:
      --from-literal=GITHUB_REPOSITORY_ID="$GITHUB_REPOSITORY_ID" \
      --from-literal=GITHUB_REPOSITORY_URL="$GITHUB_REPOSITORY_URL" \
      --from-literal=OUTPUT_NAMESPACE=pac-credentials-poc \
+     --from-literal=CONTROL_NAMESPACE=pac-credentials-requests \
+     --from-literal=KEY_SECRET_NAMESPACE=pipelines-as-code \
      --from-literal=RENEW_BEFORE=57m
    ```
 
@@ -129,6 +135,8 @@ The manual steps:
      --from-literal=GITHUB_REPOSITORY_ID="$GITHUB_REPOSITORY_ID" \
      --from-literal=GITHUB_REPOSITORY_URL="$GITHUB_REPOSITORY_URL" \
      --from-literal=OUTPUT_NAMESPACE=pac-credentials-poc \
+     --from-literal=CONTROL_NAMESPACE=pac-credentials-requests \
+     --from-literal=KEY_SECRET_NAMESPACE=pipelines-as-code \
      --from-literal=RENEW_BEFORE=57m
    ```
 
@@ -183,17 +191,18 @@ The script:
    kubectl apply -f poc/github-credentials/pac/controller-rbac.yaml
    kubectl -n pipelines-as-code set env deploy/pipelines-as-code-controller \
      PAC_GITHUB_CREDENTIALS_SERVICE=true \
-     PAC_GITHUB_CREDENTIALS_SERVICE_REPOSITORIES="$GITHUB_REPOSITORY_URL"
+     PAC_GITHUB_CREDENTIALS_SERVICE_REPOSITORIES="$GITHUB_REPOSITORY_URL" \
+     PAC_GITHUB_CREDENTIALS_SERVICE_NAMESPACE=pac-credentials-requests
    envsubst '${GITHUB_REPOSITORY_URL}' < poc/github-credentials/pac/repository.yaml \
      | kubectl apply -f -
    ```
 
    `PAC_GITHUB_CREDENTIALS_SERVICE_REPOSITORIES` also accepts `*` or a
    comma-separated list. `PAC_GITHUB_CREDENTIALS_SERVICE_WAIT` (default
-   `30s`) and `PAC_GITHUB_CREDENTIALS_SERVICE_NAMESPACE` (default the PaC
-   namespace) are optional. Running `startpaac -p` again drops these
-   variables. The App must be installed on the repository with no extra
-   repository token scoping.
+   `30s`) is optional. `PAC_GITHUB_CREDENTIALS_SERVICE_NAMESPACE` defaults
+   to the PaC namespace, so it must point at the requests namespace.
+   Running `startpaac -p` again drops these variables. The App must be
+   installed on the repository with no extra repository token scoping.
 
 2. Copy `pac/tekton/blocker.yaml` and `pac/tekton/private-clone.yaml` to
    `.tekton/` on the test repository's `main` branch.
@@ -236,7 +245,7 @@ The script:
 These print state, expiry, resource versions and owners, never token data.
 
 ```shell
-req() { kubectl -n pipelines-as-code get cm "$1" -o json | jq '.metadata.annotations
+req() { kubectl -n pac-credentials-requests get cm "$1" -o json | jq '.metadata.annotations
   | with_entries(select(.key | startswith("pipelinesascode.tekton.dev/credential")))'; }
 sec() { kubectl -n pac-credentials-poc get secret "$1" -o json | jq '{
   resourceVersion: .metadata.resourceVersion,
@@ -260,12 +269,13 @@ removed credentials and request`, `rejecting credential request`.
 
 ```shell
 kubectl delete -f poc/github-credentials/service/deployment.yaml --ignore-not-found
-kubectl -n pipelines-as-code delete cm -l pipelinesascode.tekton.dev/github-credential-request=true
+kubectl -n pac-credentials-requests delete cm -l pipelinesascode.tekton.dev/github-credential-request=true
 kubectl -n pipelines-as-code delete cm pipelines-as-code-credentials-config --ignore-not-found
 kubectl -n pipelines-as-code delete secret pipelines-as-code-credentials-key --ignore-not-found
 kubectl delete -f poc/github-credentials/pac/controller-rbac.yaml --ignore-not-found
 kubectl -n pipelines-as-code set env deploy/pipelines-as-code-controller \
-  PAC_GITHUB_CREDENTIALS_SERVICE- PAC_GITHUB_CREDENTIALS_SERVICE_REPOSITORIES-
+  PAC_GITHUB_CREDENTIALS_SERVICE- PAC_GITHUB_CREDENTIALS_SERVICE_REPOSITORIES- \
+  PAC_GITHUB_CREDENTIALS_SERVICE_NAMESPACE-
 kubectl delete -f poc/github-credentials/service/rbac.yaml --ignore-not-found
 kubectl delete -f poc/github-credentials/namespace.yaml
 ```

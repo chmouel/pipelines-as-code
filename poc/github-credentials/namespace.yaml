@@ -1,5 +1,13 @@
-# Proof of concept only. Builds and their credential Secrets live here.
+# Proof of concept only. Builds and their credential Secrets live in
+# pac-credentials-poc. Credential requests live in pac-credentials-requests,
+# where only the credential service and the PaC controller have access, so
+# the service never needs write access to the pipelines-as-code namespace.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: pac-credentials-poc
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pac-credentials-requests

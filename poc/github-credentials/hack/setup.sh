@@ -20,6 +20,7 @@ POC=$(dirname "$HERE")
 ROOT=$(cd "$POC/../.." && pwd)
 PASS_KEY=${PASS_KEY:-pac/vars/scratchtest}
 CTRL_NS=pipelines-as-code
+REQ_NS=pac-credentials-requests
 NS=pac-credentials-poc
 DEPLOY=pipelines-as-code-credentials
 RENEW_BEFORE=${RENEW_BEFORE:-57m}
@@ -79,6 +80,10 @@ do_service() {
 
   log "namespace and service RBAC"
   kubectl apply -f "$POC/namespace.yaml" -f "$POC/service/rbac.yaml"
+  # Earlier versions kept requests in $CTRL_NS and gave the service write
+  # access to every ConfigMap there.
+  kubectl -n "$CTRL_NS" delete role,rolebinding pipelines-as-code-credentials-control --ignore-not-found
+  kubectl -n "$CTRL_NS" delete cm -l pipelinesascode.tekton.dev/github-credential-request=true
 
   log "service config (RENEW_BEFORE=$RENEW_BEFORE)"
   local args=(
@@ -86,6 +91,8 @@ do_service() {
     --from-literal=GITHUB_REPOSITORY_ID="$GITHUB_REPOSITORY_ID"
     --from-literal=GITHUB_REPOSITORY_URL="$GITHUB_REPOSITORY_URL"
     --from-literal=OUTPUT_NAMESPACE="$NS"
+    --from-literal=CONTROL_NAMESPACE="$REQ_NS"
+    --from-literal=KEY_SECRET_NAMESPACE="$CTRL_NS"
     --from-literal=RENEW_BEFORE="$RENEW_BEFORE"
   )
   [[ -z $GITHUB_API_URL ]] || args+=(--from-literal=GITHUB_API_URL="$GITHUB_API_URL")
@@ -105,7 +112,8 @@ do_pac() {
   kubectl apply -f "$POC/pac/controller-rbac.yaml"
   kubectl -n "$CTRL_NS" set env deploy/pipelines-as-code-controller \
     PAC_GITHUB_CREDENTIALS_SERVICE=true \
-    PAC_GITHUB_CREDENTIALS_SERVICE_REPOSITORIES="$GITHUB_REPOSITORY_URL"
+    PAC_GITHUB_CREDENTIALS_SERVICE_REPOSITORIES="$GITHUB_REPOSITORY_URL" \
+    PAC_GITHUB_CREDENTIALS_SERVICE_NAMESPACE="$REQ_NS"
   # shellcheck disable=SC2016
   envsubst '${GITHUB_REPOSITORY_URL}' <"$POC/pac/repository.yaml" | kubectl apply -f -
   kubectl -n "$CTRL_NS" rollout status deploy/pipelines-as-code-controller --timeout=180s
@@ -147,12 +155,13 @@ do_env() {
 do_cleanup() {
   log "removing the credential service POC"
   kubectl delete -f "$POC/service/deployment.yaml" --ignore-not-found
-  kubectl -n "$CTRL_NS" delete cm -l pipelinesascode.tekton.dev/github-credential-request=true
+  kubectl -n "$REQ_NS" delete cm -l pipelinesascode.tekton.dev/github-credential-request=true --ignore-not-found
   kubectl -n "$CTRL_NS" delete cm pipelines-as-code-credentials-config --ignore-not-found
   kubectl -n "$CTRL_NS" delete secret pipelines-as-code-credentials-key --ignore-not-found
   kubectl delete -f "$POC/pac/controller-rbac.yaml" --ignore-not-found
   kubectl -n "$CTRL_NS" set env deploy/pipelines-as-code-controller \
-    PAC_GITHUB_CREDENTIALS_SERVICE- PAC_GITHUB_CREDENTIALS_SERVICE_REPOSITORIES-
+    PAC_GITHUB_CREDENTIALS_SERVICE- PAC_GITHUB_CREDENTIALS_SERVICE_REPOSITORIES- \
+    PAC_GITHUB_CREDENTIALS_SERVICE_NAMESPACE-
   kubectl delete -f "$POC/service/rbac.yaml" --ignore-not-found
   kubectl delete -f "$POC/namespace.yaml" --ignore-not-found
 }

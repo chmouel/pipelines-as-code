@@ -4,7 +4,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: private-clone-request
-  namespace: pipelines-as-code
+  namespace: pac-credentials-requests
   labels:
     pipelinesascode.tekton.dev/github-credential-request: "true"
 immutable: true

@@ -15,7 +15,8 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 POC=$(dirname "$HERE")
-CTRL_NS=${CONTROL_NAMESPACE:-pipelines-as-code}
+SVC_NS=${SERVICE_NAMESPACE:-pipelines-as-code}
+REQ_NS=${REQUEST_NAMESPACE:-pac-credentials-requests}
 NS=${OUTPUT_NAMESPACE:-pac-credentials-poc}
 DEPLOY=pipelines-as-code-credentials
 REVISION=${REVISION:-main}
@@ -59,7 +60,7 @@ wait_until() {
 }
 
 esc() { echo "${1//./\\.}"; }
-reqann() { kubectl -n "$CTRL_NS" get cm "$1" -o jsonpath="{.metadata.annotations.$(esc "$P/$2")}" 2>/dev/null || true; }
+reqann() { kubectl -n "$REQ_NS" get cm "$1" -o jsonpath="{.metadata.annotations.$(esc "$P/$2")}" 2>/dev/null || true; }
 secann() { kubectl -n "$NS" get secret "$1" -o jsonpath="{.metadata.annotations.$(esc "$P/$2")}" 2>/dev/null || true; }
 state_is() { [[ $(reqann "$1" credential-state) == "$2" ]]; }
 thash() { "$HERE/token.sh" hash "$NS" "$1" 2>/dev/null || true; }
@@ -139,19 +140,21 @@ preflight() {
     die "set GITHUB_REPOSITORY_ID and GITHUB_REPOSITORY_URL"
   export GITHUB_REPOSITORY_ID GITHUB_REPOSITORY_URL REVISION
   for c in kubectl jq curl envsubst; do command -v "$c" >/dev/null || die "$c is required"; done
-  kubectl -n "$CTRL_NS" rollout status "deploy/$DEPLOY" --timeout=60s >/dev/null ||
-    die "deploy/$DEPLOY is not ready in $CTRL_NS"
+  kubectl -n "$SVC_NS" rollout status "deploy/$DEPLOY" --timeout=60s >/dev/null ||
+    die "deploy/$DEPLOY is not ready in $SVC_NS"
   local cfg rb cfg_changed pod_started
-  cfg=$(kubectl -n "$CTRL_NS" get cm pipelines-as-code-credentials-config -o json) ||
-    die "pipelines-as-code-credentials-config is missing in $CTRL_NS"
+  cfg=$(kubectl -n "$SVC_NS" get cm pipelines-as-code-credentials-config -o json) ||
+    die "pipelines-as-code-credentials-config is missing in $SVC_NS"
   [[ $(jq -r '.data.GITHUB_REPOSITORY_ID' <<<"$cfg") == "$GITHUB_REPOSITORY_ID" &&
     $(jq -r '.data.GITHUB_REPOSITORY_URL' <<<"$cfg") == "$GITHUB_REPOSITORY_URL" ]] ||
     die "pipelines-as-code-credentials-config does not match GITHUB_REPOSITORY_ID/URL; update it and restart deploy/$DEPLOY"
+  [[ $(jq -r '.data.CONTROL_NAMESPACE' <<<"$cfg") == "$REQ_NS" ]] ||
+    die "pipelines-as-code-credentials-config needs CONTROL_NAMESPACE=$REQ_NS and KEY_SECRET_NAMESPACE=$SVC_NS"
   cfg_changed=$(jq -r '[.metadata.managedFields[]?.time // empty] + [.metadata.creationTimestamp] | max' <<<"$cfg")
-  pod_started=$(kubectl -n "$CTRL_NS" get pod -l "app.kubernetes.io/name=$DEPLOY" -o json |
+  pod_started=$(kubectl -n "$SVC_NS" get pod -l "app.kubernetes.io/name=$DEPLOY" -o json |
     jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | .metadata.creationTimestamp] | min // empty')
   [[ -n $pod_started && $(epoch "$pod_started") -ge $(epoch "$cfg_changed") ]] ||
-    die "deploy/$DEPLOY started before its config last changed; run: kubectl -n $CTRL_NS rollout restart deploy/$DEPLOY"
+    die "deploy/$DEPLOY started before its config last changed; run: kubectl -n $SVC_NS rollout restart deploy/$DEPLOY"
   rb=$(jq -r '.data.RENEW_BEFORE // empty' <<<"$cfg")
   RENEW_BEFORE_S=$(duration_seconds "${rb:-15m}") || die "cannot parse RENEW_BEFORE=$rb"
   if [[ $RENEW_BEFORE_S -lt 3000 ]]; then
@@ -185,8 +188,8 @@ check_restart() {
   h0=$(thash "$secret")
   due=$(seconds_until_due "$secret")
   log "restarting the service"
-  kubectl -n "$CTRL_NS" rollout restart "deploy/$DEPLOY" >/dev/null
-  kubectl -n "$CTRL_NS" rollout status "deploy/$DEPLOY" --timeout=120s >/dev/null
+  kubectl -n "$SVC_NS" rollout restart "deploy/$DEPLOY" >/dev/null
+  kubectl -n "$SVC_NS" rollout status "deploy/$DEPLOY" --timeout=120s >/dev/null
   sleep 20
   if [[ $due -gt 60 ]]; then
     expect "restart before the renewal point does not mint a new token" test "$(thash "$secret")" == "$h0"
@@ -195,8 +198,8 @@ check_restart() {
   fi
 
   log "stopping the service across the next renewal point"
-  kubectl -n "$CTRL_NS" scale "deploy/$DEPLOY" --replicas=0 >/dev/null
-  kubectl -n "$CTRL_NS" wait --for=delete pod -l "app.kubernetes.io/name=$DEPLOY" --timeout=120s >/dev/null 2>&1 || true
+  kubectl -n "$SVC_NS" scale "deploy/$DEPLOY" --replicas=0 >/dev/null
+  kubectl -n "$SVC_NS" wait --for=delete pod -l "app.kubernetes.io/name=$DEPLOY" --timeout=120s >/dev/null 2>&1 || true
   h0=$(thash "$secret")
   due=$(seconds_until_due "$secret")
   if [[ $due -gt -15 ]]; then
@@ -204,8 +207,8 @@ check_restart() {
     sleep $((due + 15))
   fi
   expect "no renewal while the service is down" test "$(thash "$secret")" == "$h0"
-  kubectl -n "$CTRL_NS" scale "deploy/$DEPLOY" --replicas=1 >/dev/null
-  kubectl -n "$CTRL_NS" rollout status "deploy/$DEPLOY" --timeout=120s >/dev/null
+  kubectl -n "$SVC_NS" scale "deploy/$DEPLOY" --replicas=1 >/dev/null
+  kubectl -n "$SVC_NS" rollout status "deploy/$DEPLOY" --timeout=120s >/dev/null
   if wait_until 90 hash_differs "$secret" "$h0"; then
     pass "overdue credentials renewed right after the service restarted"
   else
@@ -247,7 +250,7 @@ check_clone() {
   else
     auth_error() {
       kubectl -n "$NS" logs "$pod" --all-containers 2>/dev/null |
-        grep -qiE 'authentication failed|could not read username|invalid username or password|terminal prompts disabled|returned error: 40[13]'
+        grep -iE 'authentication failed|could not read username|invalid username or password|terminal prompts disabled|returned error: 40[13]' >/dev/null
     }
     expect "$desc: failure is an authentication error" auth_error
   fi
@@ -273,19 +276,19 @@ check_completion() {
 check_cleanup() {
   local req=$1 secret=$2 pr=$3
   kubectl -n "$NS" delete pipelinerun "$pr" --wait >/dev/null
-  cleaned() { gone "$CTRL_NS" cm "$req" && gone "$NS" secret "$secret"; }
+  cleaned() { gone "$REQ_NS" cm "$req" && gone "$NS" secret "$secret"; }
   expect "deleting the build removed its Secret and request" wait_until 120 cleaned
 }
 
 check_rejection() {
   local other=${OTHER_REPOSITORY_ID:-$((GITHUB_REPOSITORY_ID + 1))} req=other-repo-request
-  kubectl -n "$CTRL_NS" delete cm "$req" --ignore-not-found >/dev/null
+  kubectl -n "$REQ_NS" delete cm "$req" --ignore-not-found >/dev/null
   sed -e "s/\${GITHUB_REPOSITORY_ID}/$other/" -e "s/private-clone-request/$req/" \
     -e "s/private-clone-auth/other-repo-auth/" -e "s/pipelinerun-name: private-clone/pipelinerun-name: other-repo/" \
     "$POC/examples/request.yaml" | kubectl create -f - >/dev/null
   expect "request for another repository rejected" wait_until 60 state_is "$req" rejected
   expect "no Secret created for the rejected request" gone "$NS" secret other-repo-auth
-  kubectl -n "$CTRL_NS" delete cm "$req" >/dev/null
+  kubectl -n "$REQ_NS" delete cm "$req" >/dev/null
 }
 
 standalone() {
@@ -293,7 +296,7 @@ standalone() {
   local pr=private-clone bpr=private-clone-baseline h0
 
   log "removing leftovers from a previous run"
-  kubectl -n "$CTRL_NS" delete cm "$req" --ignore-not-found --wait >/dev/null
+  kubectl -n "$REQ_NS" delete cm "$req" --ignore-not-found --wait >/dev/null
   kubectl -n "$NS" delete pipelinerun "$pr" "$bpr" --ignore-not-found --wait >/dev/null
   kubectl -n "$NS" delete secret "$sec" "$bsec" --ignore-not-found --wait >/dev/null
 
@@ -368,9 +371,13 @@ check_run() {
 }
 
 pac_preflight() {
-  kubectl -n "$CTRL_NS" get deploy pipelines-as-code-controller -o json |
-    jq -e '[.spec.template.spec.containers[].env[]? | select(.name == "PAC_GITHUB_CREDENTIALS_SERVICE" and .value == "true")] | length > 0' >/dev/null ||
+  local env
+  env=$(kubectl -n "$SVC_NS" get deploy pipelines-as-code-controller -o json |
+    jq '[.spec.template.spec.containers[].env[]? | {(.name): .value}] | add // {}')
+  [[ $(jq -r '.PAC_GITHUB_CREDENTIALS_SERVICE' <<<"$env") == true ]] ||
     die "PAC_GITHUB_CREDENTIALS_SERVICE=true is not set on the PaC controller"
+  [[ $(jq -r '.PAC_GITHUB_CREDENTIALS_SERVICE_NAMESPACE' <<<"$env") == "$REQ_NS" ]] ||
+    die "PAC_GITHUB_CREDENTIALS_SERVICE_NAMESPACE=$REQ_NS is not set on the PaC controller"
   [[ $(kubectl -n "$NS" get repository private-clone -o jsonpath='{.spec.concurrency_limit}') == 1 ]] ||
     die "Repository private-clone with concurrency_limit 1 not found in $NS"
 }
@@ -393,14 +400,14 @@ pac() {
   sec=$(kubectl -n "$NS" get pipelinerun "$pr" -o jsonpath="{.metadata.annotations.$(esc "$P/git-auth-secret")}")
   bsec=$sec-baseline
   copy_secret "$sec" "$bsec" >/dev/null
-  req=$(kubectl -n "$CTRL_NS" get cm -l "$P/github-credential-request=true" -o json |
+  req=$(kubectl -n "$REQ_NS" get cm -l "$P/github-credential-request=true" -o json |
     jq -r --arg pr "$pr" '.items[] | select(.data["pipelinerun-name"] == $pr) | .metadata.name')
   sha=$(kubectl -n "$NS" get pipelinerun "$pr" -o jsonpath="{.metadata.annotations.$(esc "$P/sha")}")
   log "build $pr, secret $sec, request $req"
 
   expect "PaC submitted a request for the build" test -n "$req"
   expect "request submitted before the build was created (name fixed up front)" test \
-    "$(epoch "$(kubectl -n "$CTRL_NS" get cm "$req" -o jsonpath='{.metadata.creationTimestamp}')")" \
+    "$(epoch "$(kubectl -n "$REQ_NS" get cm "$req" -o jsonpath='{.metadata.creationTimestamp}')")" \
     -le "$(epoch "$(kubectl -n "$NS" get pipelinerun "$pr" -o jsonpath='{.metadata.creationTimestamp}')")"
   expect "build marked as using service credentials" test \
     "$(kubectl -n "$NS" get pipelinerun "$pr" -o jsonpath="{.metadata.annotations.$(esc "$P/git-auth-secret-owner")}")" == credentials-service
@@ -441,26 +448,26 @@ pac() {
 pac_unavailable() {
   pac_preflight
   local start req
-  kubectl -n "$CTRL_NS" scale "deploy/$DEPLOY" --replicas=0 >/dev/null
+  kubectl -n "$SVC_NS" scale "deploy/$DEPLOY" --replicas=0 >/dev/null
   start=$(date +%s)
   new_request() {
-    req=$(kubectl -n "$CTRL_NS" get cm -l "$P/github-credential-request=true" -o json |
+    req=$(kubectl -n "$REQ_NS" get cm -l "$P/github-credential-request=true" -o json |
       jq -r --argjson t "$start" '[.items[] | select((.metadata.creationTimestamp | fromdateiso8601) >= $t)] | last | .metadata.name // empty')
     [[ -n $req ]]
   }
   log "service stopped; push a commit to main outside hold/"
   wait_until 900 new_request || die "PaC submitted no request"
   local pr
-  pr=$(kubectl -n "$CTRL_NS" get cm "$req" -o jsonpath='{.data.pipelinerun-name}')
+  pr=$(kubectl -n "$REQ_NS" get cm "$req" -o jsonpath='{.data.pipelinerun-name}')
   log "request $req for build $pr; waiting for PaC to give up"
   sleep 60
   expect "PaC did not create the build without credentials" gone "$NS" pipelinerun "$pr"
-  kubectl -n "$CTRL_NS" scale "deploy/$DEPLOY" --replicas=1 >/dev/null
-  kubectl -n "$CTRL_NS" rollout status "deploy/$DEPLOY" --timeout=120s >/dev/null
+  kubectl -n "$SVC_NS" scale "deploy/$DEPLOY" --replicas=1 >/dev/null
+  kubectl -n "$SVC_NS" rollout status "deploy/$DEPLOY" --timeout=120s >/dev/null
   log "deleting the abandoned request and its Secret by hand"
   local sec
-  sec=$(kubectl -n "$CTRL_NS" get cm "$req" -o jsonpath='{.data.secret-name}')
-  kubectl -n "$CTRL_NS" delete cm "$req" >/dev/null
+  sec=$(kubectl -n "$REQ_NS" get cm "$req" -o jsonpath='{.data.secret-name}')
+  kubectl -n "$REQ_NS" delete cm "$req" >/dev/null
   kubectl -n "$NS" delete secret "$sec" --ignore-not-found >/dev/null
 }
 

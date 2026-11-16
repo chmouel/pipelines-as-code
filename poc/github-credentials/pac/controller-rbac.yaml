@@ -5,7 +5,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: pipelines-as-code-credential-requests
-  namespace: pipelines-as-code
+  namespace: pac-credentials-requests
 rules:
   - apiGroups: [""]
     resources: ["configmaps"]
@@ -15,7 +15,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: pipelines-as-code-credential-requests
-  namespace: pipelines-as-code
+  namespace: pac-credentials-requests
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
